@@ -234,7 +234,7 @@ async function handleImportTextFiles(files) {
 }
 
 async function copyCodexPrompt() {
-  const prompt = `请先阅读这个页面中的需求与上下文，再继续开发：${publicUrl.value}\n\n给模型读取的纯文本版本：${rawUrl.value}`
+  const prompt = `请先阅读这个需求文档，再继续开发：\n${rawUrl.value}`
   await navigator.clipboard.writeText(prompt)
   flashToast('已复制给 Codex')
 }
