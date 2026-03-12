@@ -22,7 +22,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['update:modelValue', 'upload-files', 'import-text-files', 'clear-request'])
+const emit = defineEmits(['update:modelValue', 'upload-files', 'import-text-files', 'import-pdf-files', 'clear-request'])
 
 const blocks = computed(() => props.modelValue)
 const activeIndex = ref(0)
@@ -350,6 +350,10 @@ function insertUploadedBlocks(imageBlocks) {
   insertBlocksAtSelection(imageBlocks, { focusAfterInserted: true })
 }
 
+function insertBlocks(blocksToInsert) {
+  insertBlocksAtSelection(blocksToInsert, { focusAfterInserted: true })
+}
+
 function insertImportedBlocks(importedBlocks) {
   insertBlocksAtSelection(importedBlocks, { focusAfterInserted: true })
 }
@@ -415,11 +419,21 @@ function isTextImportFile(file) {
   return name.endsWith('.md') || name.endsWith('.markdown') || name.endsWith('.txt') || type.startsWith('text/')
 }
 
+function isPdfImportFile(file) {
+  if (!file) {
+    return false
+  }
+  const name = String(file.name || '').toLowerCase()
+  const type = String(file.type || '').toLowerCase()
+  return name.endsWith('.pdf') || type === 'application/pdf'
+}
+
 function splitIncomingFiles(fileList) {
   const files = [...fileList].filter(Boolean)
   return {
     imageFiles: files.filter((file) => file.type.startsWith('image/')),
     textFiles: files.filter((file) => isTextImportFile(file)),
+    pdfFiles: files.filter((file) => isPdfImportFile(file)),
   }
 }
 
@@ -439,9 +453,12 @@ function handleSurfacePaste(event) {
 
 function handleSurfaceDrop(event) {
   event.preventDefault()
-  const { imageFiles, textFiles } = splitIncomingFiles(event.dataTransfer.files)
+  const { imageFiles, textFiles, pdfFiles } = splitIncomingFiles(event.dataTransfer.files)
   if (textFiles.length) {
     emit('import-text-files', textFiles)
+  }
+  if (pdfFiles.length) {
+    emit('import-pdf-files', pdfFiles)
   }
   if (imageFiles.length) {
     insertImages(imageFiles)
@@ -449,9 +466,12 @@ function handleSurfaceDrop(event) {
 }
 
 function handleFileInput(event) {
-  const { imageFiles, textFiles } = splitIncomingFiles(event.target.files)
+  const { imageFiles, textFiles, pdfFiles } = splitIncomingFiles(event.target.files)
   if (textFiles.length) {
     emit('import-text-files', textFiles)
+  }
+  if (pdfFiles.length) {
+    emit('import-pdf-files', pdfFiles)
   }
   if (imageFiles.length) {
     insertImages(imageFiles)
@@ -566,6 +586,7 @@ watch(
 
 defineExpose({
   clearDocument,
+  insertBlocks,
   insertImportedBlocks,
   insertTextAtSelection,
   insertUploadedBlocks,
@@ -595,17 +616,17 @@ defineExpose({
         <span class="text-stone-300 dark:text-stone-700">/</span>
         <span class="inline-flex items-center gap-1.5">
           <FileText class="h-3.5 w-3.5" />
-          <span>支持拖入 `.md` / `.txt` 文件</span>
+          <span>支持拖入 `.md` / `.txt` / `.pdf` 文件</span>
         </span>
         <span class="text-stone-300 dark:text-stone-700">/</span>
         <label class="inline-flex cursor-pointer items-center gap-1.5 text-stone-700 underline decoration-stone-300 underline-offset-4 dark:text-stone-200 dark:decoration-stone-700">
           <Upload class="h-3.5 w-3.5" />
           <span>选择文件</span>
-          <input class="hidden" type="file" accept="image/*,.md,.markdown,.txt,text/plain,text/markdown" multiple @change="handleFileInput" />
+          <input class="hidden" type="file" accept="image/*,.md,.markdown,.txt,.pdf,text/plain,text/markdown,application/pdf" multiple @change="handleFileInput" />
         </label>
         <span v-if="uploading" class="inline-flex items-center gap-1.5 rounded-sm border border-dashed border-stone-400 px-2 py-1 dark:border-stone-700">
           <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-          <span>正在上传图片...</span>
+          <span>正在处理文件...</span>
         </span>
       </div>
     </div>

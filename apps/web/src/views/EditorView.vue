@@ -21,6 +21,7 @@ import {
   deleteDocument,
   getApiBase,
   getDocument,
+  importPdf,
   resolveAssetUrl,
   updateDocument,
   uploadImage,
@@ -56,7 +57,7 @@ const rawUrl = computed(() => `${apiBase}/p/${slug.value}/raw`)
 const displayTitle = computed(() => draft.value.title || deriveTitleFromBlocks(draft.value.blocks) || '未命名文档')
 const syncMessage = computed(() => {
   if (uploading.value) {
-    return '图片处理中...'
+    return '文件处理中...'
   }
   if (saving.value) {
     return '保存中...'
@@ -226,6 +227,43 @@ async function handleImportTextFiles(files) {
       : `已插入 ${importedBlocks.length} 个文件块，稍后会自动保存`)
   } catch (err) {
     error.value = '文件读取失败，请确认使用 UTF-8 编码的 .md 或 .txt 文件。'
+  }
+}
+
+async function handleImportPdfFiles(files) {
+  uploading.value = true
+  error.value = ''
+
+  try {
+    let insertedBlockCount = 0
+    let insertedPageCount = 0
+
+    for (const file of files) {
+      const payload = await importPdf(file)
+      const blocks = (payload.blocks || []).map((block) => ({
+        ...block,
+        content: block.type === 'image' ? resolveAssetUrl(block.content) : block.content,
+      }))
+
+      if (!blocks.length) {
+        continue
+      }
+
+      editorRef.value?.insertBlocks(blocks)
+      insertedBlockCount += blocks.length
+      insertedPageCount += Number(payload.pageCount || 0)
+    }
+
+    if (!insertedBlockCount) {
+      flashToast('没有从 PDF 中解析出可插入内容')
+      return
+    }
+
+    flashToast(`已插入 ${insertedBlockCount} 个图文块${insertedPageCount ? `，共 ${insertedPageCount} 页` : ''}，稍后会自动保存`)
+  } catch (err) {
+    error.value = err.message || 'PDF 解析失败，请确认文件不是扫描件，并且内容为单栏图文。'
+  } finally {
+    uploading.value = false
   }
 }
 
@@ -473,6 +511,7 @@ onBeforeUnmount(() => {
         :uploading="uploading"
         @upload-files="handleUpload"
         @import-text-files="handleImportTextFiles"
+        @import-pdf-files="handleImportPdfFiles"
         @clear-request="openClearDialog"
       />
     </template>

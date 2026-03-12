@@ -18,6 +18,7 @@ import {
   purgeExpiredDocuments,
   updateDocument,
 } from './repository.js'
+import { importPdfDocument } from './pdf.js'
 
 const app = Fastify({ logger: true })
 const port = Number(process.env.PORT || 3000)
@@ -71,7 +72,7 @@ await app.register(cors, {
 
 await app.register(multipart, {
   limits: {
-    fileSize: 15 * 1024 * 1024,
+    fileSize: 30 * 1024 * 1024,
     files: 1,
   },
 })
@@ -174,6 +175,47 @@ app.post('/api/uploads', async (request, reply) => {
     if (outputPath && !completed) {
       fs.rmSync(outputPath, { force: true })
     }
+  }
+})
+
+app.post('/api/imports/pdf', async (request, reply) => {
+  const part = await request.file()
+  if (!part) {
+    return reply.code(400).send({ message: '没有收到 PDF 文件。' })
+  }
+
+  const fileName = path.basename(String(part.filename || 'document.pdf'))
+  const mimetype = String(part.mimetype || '').toLowerCase()
+  if (mimetype !== 'application/pdf' && !fileName.toLowerCase().endsWith('.pdf')) {
+    return reply.code(400).send({ message: '只支持导入 PDF 文件。' })
+  }
+
+  const tempPath = path.join(tmpDir, `${nanoid(12)}-${fileName}`)
+  let createdAssets = []
+
+  try {
+    await pipeline(part.file, fs.createWriteStream(tempPath))
+    const buffer = fs.readFileSync(tempPath)
+    const imported = await importPdfDocument(buffer, {
+      uploadsDir,
+    })
+    createdAssets = imported.createdAssets || []
+
+    if (!imported.blocks.length) {
+      removeAssetFiles(createdAssets)
+      return reply.code(422).send({ message: '没有从 PDF 中提取到可导入的文本或图片。' })
+    }
+
+    return reply.code(201).send({
+      fileName,
+      pageCount: imported.pageCount,
+      blocks: imported.blocks,
+    })
+  } catch (error) {
+    removeAssetFiles(error.createdAssets || createdAssets)
+    throw error
+  } finally {
+    fs.rmSync(tempPath, { force: true })
   }
 })
 

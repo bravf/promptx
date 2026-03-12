@@ -82,6 +82,23 @@ export async function uploadImage(file) {
   return response.json()
 }
 
+export async function importPdf(file) {
+  const body = new FormData()
+  body.append('file', file)
+
+  const response = await fetch(`${API_BASE}/api/imports/pdf`, {
+    method: 'POST',
+    body,
+  })
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new Error(payload.message || 'PDF import failed.')
+  }
+
+  return response.json()
+}
+
 export function fetchRawDocument(slug) {
   return request(`/p/${slug}/raw`)
 }
