@@ -2,6 +2,47 @@
 
 一个轻量匿名工具：把需求描述、上下文文本和截图整理成临时页面，再把公开链接或 Raw 文本交给 Codex 等模型继续使用。
 
+## 快速使用说明
+
+如果你第一次接触这个项目，可以先按下面步骤跑起来。
+
+### 1. 下载代码
+
+```bash
+git clone https://github.com/bravf/tmpprompt.git
+cd tmpprompt
+```
+
+### 2. 安装依赖
+
+```bash
+pnpm install
+```
+
+### 3. 启动前后端
+
+```bash
+pnpm dev
+```
+
+默认会启动：
+
+- 前端：`http://localhost:5173`
+- 后端：`http://localhost:3000`
+
+### 4. 安装禅道扩展
+
+1. 打开 Chrome 扩展管理页：`chrome://extensions`
+2. 打开右上角“开发者模式”
+3. 点击“加载已解压的扩展程序”
+4. 选择目录：`apps/zentao-extension`
+
+### 5. 开始使用
+
+- 打开首页创建临时文档
+- 或打开禅道 Bug 详情页，点击右下角 `AI提示词`
+- 生成完成后，可继续编辑文档，或复制 Raw 链接给 Codex
+
 ## 项目定位
 
 - 面向“先把需求和上下文整理好，再交给模型继续开发”的轻量场景。
