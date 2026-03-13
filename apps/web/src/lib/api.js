@@ -1,4 +1,14 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000').replace(/\/$/, '')
+function resolveDefaultApiBase() {
+  if (typeof window === 'undefined') {
+    return 'http://localhost:3000'
+  }
+
+  const url = new URL(window.location.origin)
+  url.port = import.meta.env.VITE_API_PORT || '3000'
+  return url.toString().replace(/\/$/, '')
+}
+
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || resolveDefaultApiBase()).replace(/\/$/, '')
 
 async function request(path, options = {}) {
   const hasJsonBody = typeof options.body !== 'undefined' && !(options.body instanceof FormData)

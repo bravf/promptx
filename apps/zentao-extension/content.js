@@ -1,5 +1,4 @@
 const ROOT_ID = 'promptx-zentao-bridge-root'
-const DEFAULT_MESSAGE = '把当前禅道 Bug 一键整理成 PromptX 文档。'
 const FIELD_ALIASES = {
   status: ['状态'],
   priority: ['优先级'],
@@ -880,34 +879,6 @@ function extractBugDraft() {
   }
 }
 
-function copyText(text) {
-  if (!text) {
-    return Promise.resolve(false)
-  }
-
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text).then(
-      () => true,
-      () => fallbackCopy(text)
-    )
-  }
-
-  return Promise.resolve(fallbackCopy(text))
-}
-
-function fallbackCopy(text) {
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', 'readonly')
-  textarea.style.position = 'fixed'
-  textarea.style.top = '-9999px'
-  document.body.appendChild(textarea)
-  textarea.select()
-  const copied = document.execCommand('copy')
-  textarea.remove()
-  return copied
-}
-
 function sendRuntimeMessage(message) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (response) => {
@@ -922,14 +893,6 @@ function sendRuntimeMessage(message) {
       resolve(response)
     })
   })
-}
-
-function hidePanel(refs) {
-  refs.state.status = 'idle'
-  refs.state.message = DEFAULT_MESSAGE
-  refs.state.links = null
-  refs.state.promptText = ''
-  render(refs)
 }
 
 function createRoot() {
@@ -969,138 +932,36 @@ function createRoot() {
         opacity: 0.75;
         cursor: default;
       }
-      .panel {
-        width: 320px;
-        border: 1px solid #d6d3d1;
-        background: rgba(250, 250, 249, 0.98);
-        color: #1c1917;
-        border-radius: 4px;
-        box-shadow: 0 18px 50px rgba(28, 25, 23, 0.18);
-        overflow: hidden;
-      }
-      .hidden {
-        display: none;
-      }
-      .panel-head {
-        padding: 12px 14px;
-        border-bottom: 1px dashed #d6d3d1;
-        font-size: 13px;
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      .panel-body {
-        padding: 12px 14px;
-        font-size: 12px;
-        line-height: 1.6;
-        color: #44403c;
-      }
-      .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 12px;
-      }
-      .secondary {
-        border: 1px solid #d6d3d1;
-        background: #fafaf9;
-        color: #1c1917;
-        border-radius: 4px;
-        padding: 8px 10px;
-        font-size: 12px;
-        cursor: pointer;
-      }
-      .status-error {
-        color: #b91c1c;
-      }
-      .status-success {
-        color: #166534;
-      }
-      .icon-button {
-        border: 0;
-        background: transparent;
-        color: #78716c;
-        font-size: 16px;
-        line-height: 1;
-        cursor: pointer;
-        padding: 0;
-      }
     </style>
     <div class="wrap">
-      <div class="panel hidden">
-        <div class="panel-head">
-          <span>PromptX</span>
-          <button class="icon-button close-button" type="button" aria-label="关闭">×</button>
-        </div>
-        <div class="panel-body">
-          <div class="message"></div>
-          <div class="actions">
-            <button class="secondary copy-button" type="button">复制给 Codex</button>
-            <button class="secondary edit-button" type="button">编辑</button>
-          </div>
-        </div>
-      </div>
-      <button class="button" type="button">AI提示词</button>
+      <button class="button" type="button">AI修复</button>
     </div>
   `
 
   const refs = {
     host,
     button: shadow.querySelector('.button'),
-    panel: shadow.querySelector('.panel'),
-    message: shadow.querySelector('.message'),
-    copyButton: shadow.querySelector('.copy-button'),
-    editButton: shadow.querySelector('.edit-button'),
-    closeButton: shadow.querySelector('.close-button'),
     state: {
       busy: false,
-      message: DEFAULT_MESSAGE,
-      status: 'idle',
-      links: null,
-      promptText: '',
+      error: false,
     },
   }
 
   refs.button.addEventListener('click', () => handleCreate(refs))
-  refs.copyButton.addEventListener('click', () => {
-    copyText(refs.state.promptText || '').then((copied) => {
-      refs.state.message = copied ? '已复制给 Codex。' : '复制失败，请手动复制 Raw 链接。'
-      refs.state.status = copied ? 'success' : 'error'
-      render(refs)
-      hidePanel(refs)
-    })
-  })
-  refs.editButton.addEventListener('click', () => {
-    if (refs.state.links?.editUrl) {
-      window.open(refs.state.links.editUrl, '_blank', 'noopener,noreferrer')
-    }
-    hidePanel(refs)
-  })
-  refs.closeButton.addEventListener('click', () => hidePanel(refs))
 
   render(refs)
   return refs
 }
 
 function render(refs) {
-  refs.button.textContent = refs.state.busy ? '生成中...' : 'AI提示词'
+  refs.button.textContent = refs.state.busy ? '生成中...' : refs.state.error ? '重试 AI修复' : 'AI修复'
   refs.button.disabled = refs.state.busy
-
-  const hasLinks = Boolean(refs.state.links)
-  refs.panel.classList.toggle('hidden', !hasLinks && refs.state.status === 'idle')
-  refs.message.textContent = refs.state.message
-  refs.message.className = `message ${refs.state.status === 'error' ? 'status-error' : ''} ${refs.state.status === 'success' ? 'status-success' : ''}`.trim()
-  refs.copyButton.disabled = !hasLinks
-  refs.editButton.disabled = !hasLinks
+  refs.button.title = refs.state.error ? '生成失败，请重试' : '创建 PromptX 编辑页'
 }
 
 async function handleCreate(refs) {
   refs.state.busy = true
-  refs.state.status = 'idle'
-  refs.state.message = '正在提取禅道内容并生成 PromptX 文档...'
-  refs.state.links = null
-  refs.state.promptText = ''
+  refs.state.error = false
   render(refs)
 
   try {
@@ -1113,17 +974,10 @@ async function handleCreate(refs) {
       type: 'CREATE_TMPPROMPT_FROM_ZENTAO',
       payload,
     })
-    const copied = await copyText(result.promptText)
-    refs.state.links = result
-    refs.state.promptText = result.promptText
-    refs.state.status = 'success'
-    refs.state.message = copied
-      ? '已生成 PromptX 文档，并复制了 Raw 链接。'
-      : '已生成 PromptX 文档，请手动复制 Raw 链接。'
+    window.open(result.editUrl, '_blank', 'noopener,noreferrer')
   } catch (error) {
-    refs.state.status = 'error'
-    refs.state.message = error.message || '生成 PromptX 文档失败。'
-    refs.state.links = null
+    refs.state.error = true
+    console.error('[promptx] 生成 PromptX 文档失败', error)
   } finally {
     refs.state.busy = false
     render(refs)

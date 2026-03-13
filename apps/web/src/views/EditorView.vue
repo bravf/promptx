@@ -4,11 +4,11 @@ import {
   ArrowLeft,
   CircleAlert,
   Copy,
-  LoaderCircle,
   SendHorizontal,
   Square,
   SquarePen,
   WandSparkles,
+  Upload,
 } from 'lucide-vue-next'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { deriveTitleFromBlocks } from '@promptx/shared'
@@ -77,18 +77,6 @@ const leaveDescription = computed(() => {
     return 'Codex 仍在处理当前内容，现在离开后这轮进度将不会继续显示。'
   }
   return '确认离开当前编辑页？你之后仍可以从首页最近文档重新进入。'
-})
-const syncMessage = computed(() => {
-  if (uploading.value) {
-    return '文件处理中...'
-  }
-  if (saving.value) {
-    return '保存中...'
-  }
-  if (hasUnsavedChanges.value) {
-    return '未保存'
-  }
-  return '已同步'
 })
 
 function normalizeImageContent(content = '') {
@@ -521,32 +509,27 @@ onBeforeUnmount(() => {
     <section v-if="loading" class="panel p-5 text-sm text-stone-600 dark:text-stone-400">正在加载文档...</section>
 
     <template v-else>
-      <section class="panel flex flex-col gap-2.5 p-2.5">
-        <div class="flex flex-col gap-2">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <RouterLink to="/" class="inline-flex items-center gap-2 text-sm text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100">
-              <ArrowLeft class="h-4 w-4" />
-              <span>返回首页</span>
-            </RouterLink>
-          </div>
+      <section class="panel p-2.5">
+        <div class="flex flex-wrap items-center gap-2.5">
+          <RouterLink to="/" class="inline-flex shrink-0 items-center gap-2 text-sm text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100">
+            <ArrowLeft class="h-4 w-4" />
+            <span>返回首页</span>
+          </RouterLink>
 
-          <div class="flex min-w-0 flex-1 items-center gap-2.5">
+          <div class="flex min-w-0 flex-1 items-center gap-2">
             <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-dashed border-stone-300 bg-stone-50 text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200">
               <SquarePen class="h-3.5 w-3.5" />
             </span>
-            <input v-model="draft.title" class="min-w-0 flex-1 border-0 bg-transparent p-0 text-xl font-semibold text-stone-900 outline-none placeholder:text-stone-400 dark:text-stone-100 dark:placeholder:text-stone-600" :placeholder="displayTitle" />
+            <input
+              v-model="draft.title"
+              class="min-w-0 flex-1 border-0 bg-transparent p-0 text-lg font-semibold text-stone-900 outline-none placeholder:text-stone-400 dark:text-stone-100 dark:placeholder:text-stone-600 sm:text-xl"
+              :placeholder="displayTitle"
+            />
           </div>
 
-          <div class="flex flex-wrap items-center gap-2.5 text-sm text-stone-500 dark:text-stone-400">
-            <span class="inline-flex items-center gap-2">
-              <LoaderCircle v-if="saving || uploading" class="h-4 w-4 animate-spin" />
-              <WandSparkles v-else class="h-4 w-4" />
-              <span>{{ syncMessage }}</span>
-            </span>
-            <span v-if="error" class="inline-flex items-center gap-2 text-red-700 dark:text-red-300">
-              <CircleAlert class="h-4 w-4" />
-              <span>{{ error }}</span>
-            </span>
+          <div v-if="error" class="inline-flex min-w-0 items-center gap-2 text-sm text-red-700 dark:text-red-300">
+            <CircleAlert class="h-4 w-4 shrink-0" />
+            <span class="truncate">{{ error }}</span>
           </div>
         </div>
       </section>
@@ -572,15 +555,17 @@ onBeforeUnmount(() => {
             @clear-request="openClearDialog"
           >
             <template #header-actions>
+              <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3" @click="editorRef?.openFilePicker?.()">
+                <Upload class="h-4 w-4" />
+                <span>选文件</span>
+              </button>
               <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3" @click="openClearDialog">
                 <WandSparkles class="h-4 w-4" />
-                <span class="sm:hidden">清空</span>
-                <span class="hidden sm:inline">清空正文</span>
+                <span>清空</span>
               </button>
-              <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3" @click="copyCodexPrompt">
+              <button type="button" class="tool-button hidden items-center justify-center gap-1.5 px-2 py-2 text-xs sm:inline-flex sm:w-auto sm:gap-2 sm:px-3" @click="copyCodexPrompt">
                 <Copy class="h-4 w-4" />
-                <span class="sm:hidden">复制</span>
-                <span class="hidden sm:inline">复制给 Codex</span>
+                <span>复制</span>
               </button>
               <button
                 v-if="!codexSending"
@@ -589,8 +574,7 @@ onBeforeUnmount(() => {
                 @click="sendToCodex"
               >
                 <SendHorizontal class="h-4 w-4" />
-                <span class="sm:hidden">发送</span>
-                <span class="hidden sm:inline">发送给 Codex</span>
+                <span>发送</span>
               </button>
               <button
                 v-else
@@ -599,8 +583,7 @@ onBeforeUnmount(() => {
                 @click="stopCodex"
               >
                 <Square class="h-4 w-4" />
-                <span class="sm:hidden">停止</span>
-                <span class="hidden sm:inline">停止 Codex</span>
+                <span>停止</span>
               </button>
             </template>
           </BlockEditor>

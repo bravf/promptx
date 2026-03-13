@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import Fastify from 'fastify'
@@ -37,6 +38,50 @@ fs.mkdirSync(uploadsDir, { recursive: true })
 fs.mkdirSync(tmpDir, { recursive: true })
 
 let lastExpiredPurgeAt = 0
+
+function listLanIpv4Addresses() {
+  const interfaces = os.networkInterfaces()
+  const addresses = []
+
+  Object.values(interfaces).forEach((entries) => {
+    ;(entries || []).forEach((entry) => {
+      if (!entry || entry.internal) {
+        return
+      }
+
+      const family = typeof entry.family === 'string'
+        ? entry.family
+        : entry.family === 4
+          ? 'IPv4'
+          : ''
+
+      if (family !== 'IPv4') {
+        return
+      }
+
+      addresses.push(entry.address)
+    })
+  })
+
+  return [...new Set(addresses)]
+}
+
+function buildServerAccessUrls(hostname, currentPort) {
+  const normalizedHost = String(hostname || '').trim()
+
+  if (!normalizedHost || normalizedHost === '0.0.0.0' || normalizedHost === '::') {
+    return [
+      `本机: http://127.0.0.1:${currentPort}`,
+      ...listLanIpv4Addresses().map((address) => `局域网: http://${address}:${currentPort}`),
+    ]
+  }
+
+  if (normalizedHost === 'localhost') {
+    return [`本机: http://localhost:${currentPort}`]
+  }
+
+  return [`访问地址: http://${normalizedHost}:${currentPort}`]
+}
 
 function resolveUploadPath(assetPath = '') {
   const normalized = String(assetPath || '').replace(/^\/+/, '')
@@ -332,4 +377,7 @@ purgeExpiredContent(true)
 
 app.listen({ port, host }).then(() => {
   app.log.info(`server running at http://${host}:${port}`)
+  buildServerAccessUrls(host, port).forEach((message) => {
+    app.log.info(message)
+  })
 })

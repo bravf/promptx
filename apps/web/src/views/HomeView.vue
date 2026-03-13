@@ -60,6 +60,13 @@ function openDeleteDialog(item) {
   deleteTarget.value = item
 }
 
+function openEditor(item) {
+  if (!item?.slug) {
+    return
+  }
+  router.push(`/edit/${item.slug}`)
+}
+
 function closeDeleteDialog() {
   if (deletingSlug.value) {
     return
@@ -147,12 +154,20 @@ onMounted(loadDocuments)
       </div>
 
       <div v-else class="divide-y divide-stone-200 dark:divide-stone-800">
-        <article v-for="item in recentItems" :key="item.slug" class="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <article
+          v-for="item in recentItems"
+          :key="item.slug"
+          class="flex cursor-pointer flex-col gap-3 px-4 py-4 transition hover:bg-stone-100/70 sm:flex-row sm:items-center sm:justify-between sm:px-5 dark:hover:bg-stone-900/70"
+          tabindex="0"
+          @click="openEditor(item)"
+          @keydown.enter.prevent="openEditor(item)"
+          @keydown.space.prevent="openEditor(item)"
+        >
           <div class="min-w-0 flex-1">
-            <RouterLink :to="`/p/${item.slug}`" class="flex max-w-full items-center gap-2 text-sm font-medium text-stone-900 hover:underline dark:text-stone-100">
+            <div class="flex max-w-full items-center gap-2 text-sm font-medium text-stone-900 dark:text-stone-100">
               <ArrowUpRight class="h-4 w-4 shrink-0 text-stone-500 dark:text-stone-400" />
               <span class="truncate">{{ item.title || '未命名文档' }}</span>
-            </RouterLink>
+            </div>
             <p class="mt-1 break-all text-xs leading-5 text-stone-500 sm:truncate dark:text-stone-400">{{ item.preview || `/${item.slug}` }}</p>
           </div>
 
@@ -162,11 +177,11 @@ onMounted(loadDocuments)
               <span>{{ new Date(item.updatedAt).toLocaleString('zh-CN') }}</span>
             </span>
             <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
-              <RouterLink :to="`/edit/${item.slug}`" class="tool-button inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-xs sm:w-auto">
+              <RouterLink :to="`/p/${item.slug}`" class="tool-button inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-xs sm:w-auto" @click.stop>
                 <SquarePen class="h-4 w-4" />
-                <span>编辑</span>
+                <span>详情</span>
               </RouterLink>
-              <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-xs text-red-700 hover:text-red-900 sm:w-auto dark:text-red-300 dark:hover:text-red-200" :disabled="deletingSlug === item.slug" @click="openDeleteDialog(item)">
+              <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-xs text-red-700 hover:text-red-900 sm:w-auto dark:text-red-300 dark:hover:text-red-200" :disabled="deletingSlug === item.slug" @click.stop="openDeleteDialog(item)">
                 <Trash2 class="h-4 w-4" />
                 <span>{{ deletingSlug === item.slug ? '删除中...' : '删除' }}</span>
               </button>

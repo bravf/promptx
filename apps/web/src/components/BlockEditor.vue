@@ -2,12 +2,9 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import {
   ChevronDown,
-  FileText,
-  Image as ImageIcon,
   LoaderCircle,
   ScanText,
   Trash2,
-  Upload,
 } from 'lucide-vue-next'
 import { BLOCK_TYPES } from '@promptx/shared'
 
@@ -29,6 +26,7 @@ const activeIndex = ref(0)
 const textareas = ref([])
 const surfaceRef = ref(null)
 const contentRef = ref(null)
+const fileInputRef = ref(null)
 const selectionMap = ref({})
 
 function isCursorTextBlock(block) {
@@ -489,6 +487,10 @@ function handleFileInput(event) {
   event.target.value = ''
 }
 
+function openFilePicker() {
+  fileInputRef.value?.click()
+}
+
 function handleSurfaceClick(event) {
   if (event.target !== surfaceRef.value) {
     return
@@ -603,6 +605,7 @@ defineExpose({
   insertTextAtSelection,
   insertUploadedBlocks,
   isImportedBlockActive: () => blocks.value[activeIndex.value]?.type === BLOCK_TYPES.IMPORTED_TEXT,
+  openFilePicker,
 })
 </script>
 
@@ -616,36 +619,29 @@ defineExpose({
     @paste="handleSurfacePaste"
   >
     <div class="border-b border-stone-200 px-5 py-4 text-sm text-stone-600 dark:border-stone-800 dark:text-stone-400">
-      <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <p class="inline-flex items-center gap-2 font-medium text-stone-900 dark:text-stone-100">
           <ScanText class="h-4 w-4" />
-          <span>直接在这里输入文本，或粘贴截图。</span>
+          <span>输入文本、图片或文件(md、pdf)</span>
         </p>
         <div class="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
           <slot name="header-actions" />
         </div>
       </div>
-      <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
-        <span class="inline-flex items-center gap-1.5">
-          <ImageIcon class="h-3.5 w-3.5" />
-          <span>支持拖拽图片到编辑区</span>
-        </span>
-        <span class="text-stone-300 dark:text-stone-700">/</span>
-        <span class="inline-flex items-center gap-1.5">
-          <FileText class="h-3.5 w-3.5" />
-          <span>支持拖入 `.md` / `.txt` / `.pdf` 文件</span>
-        </span>
-        <span class="text-stone-300 dark:text-stone-700">/</span>
-        <label class="inline-flex cursor-pointer items-center gap-1.5 text-stone-700 underline decoration-stone-300 underline-offset-4 dark:text-stone-200 dark:decoration-stone-700">
-          <Upload class="h-3.5 w-3.5" />
-          <span>选择文件</span>
-          <input class="hidden" type="file" accept="image/*,.md,.markdown,.txt,.pdf,text/plain,text/markdown,application/pdf" multiple @change="handleFileInput" />
-        </label>
-        <span v-if="uploading" class="inline-flex items-center gap-1.5 rounded-sm border border-dashed border-stone-400 px-2 py-1 dark:border-stone-700">
+      <div v-if="uploading" class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+        <span class="inline-flex items-center gap-1.5 rounded-sm border border-dashed border-stone-400 px-2 py-1 dark:border-stone-700">
           <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
           <span>正在处理文件...</span>
         </span>
       </div>
+      <input
+        ref="fileInputRef"
+        class="hidden"
+        type="file"
+        accept="image/*,.md,.markdown,.txt,.pdf,text/plain,text/markdown,application/pdf"
+        multiple
+        @change="handleFileInput"
+      />
     </div>
 
     <div ref="contentRef" class="flex-1 overflow-y-auto px-5 py-5">
