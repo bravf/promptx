@@ -10,6 +10,12 @@
   color-scheme: dark;
 }
 
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
 body {
   @apply bg-stone-100 font-sans text-stone-900 antialiased dark:bg-stone-950 dark:text-stone-100;
 }

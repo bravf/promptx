@@ -4,11 +4,10 @@ import {
   ArrowLeft,
   CircleAlert,
   Copy,
-  Eye,
   LoaderCircle,
-  Save,
+  SendHorizontal,
+  Square,
   SquarePen,
-  Trash2,
   WandSparkles,
 } from 'lucide-vue-next'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
@@ -47,6 +46,8 @@ const showDeleteDialog = ref(false)
 const showLeaveDialog = ref(false)
 const lastSavedSnapshot = ref('')
 const editorRef = ref(null)
+const codexPanelRef = ref(null)
+const codexSending = ref(false)
 const { toastMessage, flashToast, clearToast } = useToast()
 let autoSaveTimer = null
 let loadRequestId = 0
@@ -305,6 +306,17 @@ async function prepareCodexPrompt() {
   return buildCurrentCodexPrompt()
 }
 
+async function sendToCodex() {
+  const started = await codexPanelRef.value?.send?.()
+  if (started) {
+    editorRef.value?.clearDocument()
+  }
+}
+
+function stopCodex() {
+  codexPanelRef.value?.stop?.()
+}
+
 function openDeleteDialog() {
   showDeleteDialog.value = true
 }
@@ -403,6 +415,12 @@ function handleBeforeUnload(event) {
 }
 
 function handleWindowKeydown(event) {
+  if (!event.metaKey && !event.ctrlKey && event.shiftKey && event.key === 'Enter') {
+    event.preventDefault()
+    sendToCodex()
+    return
+  }
+
   if (!(event.metaKey || event.ctrlKey)) {
     return
   }
@@ -446,7 +464,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
+  <div class="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
     <TopToast :message="toastMessage" />
     <ConfirmDialog
       :open="showClearDialog"
@@ -482,37 +500,23 @@ onBeforeUnmount(() => {
     <section v-if="loading" class="panel p-5 text-sm text-stone-600 dark:text-stone-400">正在加载文档...</section>
 
     <template v-else>
-      <section class="panel flex flex-col gap-4 p-4">
-        <div class="flex flex-col gap-3">
+      <section class="panel flex flex-col gap-2.5 p-2.5">
+        <div class="flex flex-col gap-2">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <RouterLink to="/" class="inline-flex items-center gap-2 text-sm text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100">
               <ArrowLeft class="h-4 w-4" />
               <span>返回首页</span>
             </RouterLink>
-            <div class="flex flex-wrap gap-2">
-              <button type="button" class="tool-button tool-button-primary inline-flex items-center gap-2 px-3 py-2 text-xs" :disabled="saving" @click="saveDocument()">
-                <Save class="h-4 w-4" />
-                <span>{{ saving ? '保存中...' : '保存' }}</span>
-              </button>
-              <RouterLink :to="`/p/${slug}`" class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs">
-                <Eye class="h-4 w-4" />
-                <span>查看</span>
-              </RouterLink>
-              <button type="button" class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs" @click="copyCodexPrompt">
-                <Copy class="h-4 w-4" />
-                <span>复制给 Codex</span>
-              </button>
-            </div>
           </div>
 
-          <div class="flex min-w-0 flex-1 items-center gap-3">
-            <span class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-sm border border-dashed border-stone-300 bg-stone-50 text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200">
-              <SquarePen class="h-4 w-4" />
+          <div class="flex min-w-0 flex-1 items-center gap-2.5">
+            <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-dashed border-stone-300 bg-stone-50 text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200">
+              <SquarePen class="h-3.5 w-3.5" />
             </span>
-            <input v-model="draft.title" class="min-w-0 flex-1 border-0 bg-transparent p-0 text-2xl font-semibold text-stone-900 outline-none placeholder:text-stone-400 dark:text-stone-100 dark:placeholder:text-stone-600" :placeholder="displayTitle" />
+            <input v-model="draft.title" class="min-w-0 flex-1 border-0 bg-transparent p-0 text-xl font-semibold text-stone-900 outline-none placeholder:text-stone-400 dark:text-stone-100 dark:placeholder:text-stone-600" :placeholder="displayTitle" />
           </div>
 
-          <div class="flex flex-wrap items-center gap-3 text-sm text-stone-500 dark:text-stone-400">
+          <div class="flex flex-wrap items-center gap-2.5 text-sm text-stone-500 dark:text-stone-400">
             <span class="inline-flex items-center gap-2">
               <LoaderCircle v-if="saving || uploading" class="h-4 w-4 animate-spin" />
               <WandSparkles v-else class="h-4 w-4" />
@@ -523,34 +527,64 @@ onBeforeUnmount(() => {
               <span>{{ error }}</span>
             </span>
           </div>
-
-          <div class="flex flex-wrap items-center gap-3 text-xs text-stone-500 dark:text-stone-400">
-            <button type="button" class="inline-flex items-center gap-2 text-stone-500 underline decoration-stone-300 underline-offset-4 hover:text-stone-900 dark:text-stone-400 dark:decoration-stone-700 dark:hover:text-stone-100" @click="openClearDialog">
-              <WandSparkles class="h-4 w-4" />
-              <span>清空正文</span>
-            </button>
-            <button type="button" class="inline-flex items-center gap-2 text-red-700 underline decoration-stone-300 underline-offset-4 hover:text-red-900 dark:text-red-300 dark:decoration-stone-700 dark:hover:text-red-200" @click="openDeleteDialog">
-              <Trash2 class="h-4 w-4" />
-              <span>删除文档</span>
-            </button>
-          </div>
         </div>
       </section>
 
-      <CodexSessionPanel
-        :build-prompt="prepareCodexPrompt"
-        storage-key="promptx:codex-session-id"
-      />
+      <div class="grid min-h-0 flex-1 grid-rows-2 gap-4 overflow-hidden lg:grid-cols-2 lg:grid-rows-1">
+        <div class="min-h-0 min-w-0 overflow-hidden">
+          <CodexSessionPanel
+            ref="codexPanelRef"
+            :build-prompt="prepareCodexPrompt"
+            storage-key="promptx:codex-session-id"
+            @sending-change="codexSending = $event"
+          />
+        </div>
 
-      <BlockEditor
-        ref="editorRef"
-        v-model="draft.blocks"
-        :uploading="uploading"
-        @upload-files="handleUpload"
-        @import-text-files="handleImportTextFiles"
-        @import-pdf-files="handleImportPdfFiles"
-        @clear-request="openClearDialog"
-      />
+        <div class="min-h-0 min-w-0">
+          <BlockEditor
+            ref="editorRef"
+            v-model="draft.blocks"
+            :uploading="uploading"
+            @upload-files="handleUpload"
+            @import-text-files="handleImportTextFiles"
+            @import-pdf-files="handleImportPdfFiles"
+            @clear-request="openClearDialog"
+          >
+            <template #header-actions>
+              <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3" @click="openClearDialog">
+                <WandSparkles class="h-4 w-4" />
+                <span class="sm:hidden">清空</span>
+                <span class="hidden sm:inline">清空正文</span>
+              </button>
+              <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3" @click="copyCodexPrompt">
+                <Copy class="h-4 w-4" />
+                <span class="sm:hidden">复制</span>
+                <span class="hidden sm:inline">复制给 Codex</span>
+              </button>
+              <button
+                v-if="!codexSending"
+                type="button"
+                class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3"
+                @click="sendToCodex"
+              >
+                <SendHorizontal class="h-4 w-4" />
+                <span class="sm:hidden">发送</span>
+                <span class="hidden sm:inline">发送给 Codex</span>
+              </button>
+              <button
+                v-else
+                type="button"
+                class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3"
+                @click="stopCodex"
+              >
+                <Square class="h-4 w-4" />
+                <span class="sm:hidden">停止</span>
+                <span class="hidden sm:inline">停止 Codex</span>
+              </button>
+            </template>
+          </BlockEditor>
+        </div>
+      </div>
     </template>
   </div>
 </template>

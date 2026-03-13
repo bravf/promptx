@@ -268,11 +268,14 @@ app.post('/api/codex/sessions/:sessionId/send-stream', async (request, reply) =>
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
     ...(requestOrigin ? {
       'Access-Control-Allow-Origin': requestOrigin,
       Vary: 'Origin',
     } : {}),
   })
+  reply.raw.socket?.setNoDelay?.(true)
+  reply.raw.flushHeaders?.()
 
   const writeEvent = (payload) => {
     reply.raw.write(`${JSON.stringify(payload)}\n`)

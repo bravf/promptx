@@ -95,7 +95,7 @@ watch(slug, () => {
 </script>
 
 <template>
-  <div class="mx-auto max-w-4xl">
+  <div class="w-full">
     <TopToast :message="toastMessage" />
 
     <section v-if="loading" class="panel p-5 text-sm text-stone-600 dark:text-stone-400">正在加载页面...</section>
