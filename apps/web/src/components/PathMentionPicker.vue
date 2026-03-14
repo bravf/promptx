@@ -33,6 +33,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'select'])
+const RECENT_PATHS_STORAGE_KEY = 'promptx:codex-recent-paths'
+const MAX_RECENT_PATHS = 12
 
 const rootNodes = ref([])
 const treeLoading = ref(false)
@@ -40,6 +42,8 @@ const treeError = ref('')
 const searchResults = ref([])
 const searchLoading = ref(false)
 const searchError = ref('')
+const recentPaths = ref([])
+const persistedExpandedPaths = ref([])
 const activeTab = ref('tree')
 const activeKey = ref('')
 const panelRef = ref(null)
@@ -60,7 +64,25 @@ let searchRequestId = 0
 const normalizedQuery = computed(() => String(props.query || '').trim())
 const isSearchMode = computed(() => Boolean(normalizedQuery.value))
 const treeItems = computed(() => flattenTreeNodes(rootNodes.value))
-const searchItems = computed(() => searchResults.value)
+const storageSessionKey = computed(() => String(props.sessionId || '').trim())
+const treeExpandedStorageKey = computed(() => storageSessionKey.value ? `promptx:codex-tree-expanded:${storageSessionKey.value}` : '')
+const recentSearchItems = computed(() => {
+  if (!normalizedQuery.value) {
+    return recentPaths.value
+  }
+
+  const matchedPaths = new Set(searchResults.value.map((item) => item.path))
+  return recentPaths.value.filter((item) => matchedPaths.has(item.path))
+})
+const normalSearchItems = computed(() => {
+  const pinnedPaths = new Set(recentSearchItems.value.map((item) => item.path))
+  return searchResults.value.filter((item) => !pinnedPaths.has(item.path))
+})
+const searchItems = computed(() => (
+  normalizedQuery.value
+    ? [...recentSearchItems.value, ...normalSearchItems.value]
+    : recentPaths.value
+))
 const visibleItems = computed(() => (activeTab.value === 'search' ? searchItems.value : treeItems.value))
 const currentLoading = computed(() => (activeTab.value === 'search' ? searchLoading.value : treeLoading.value))
 const currentError = computed(() => (activeTab.value === 'search' ? searchError.value : treeError.value))
@@ -68,6 +90,7 @@ const showSearchPromptState = computed(() => (
   activeTab.value === 'search'
   && Boolean(props.sessionId)
   && !normalizedQuery.value
+  && !recentPaths.value.length
 ))
 const showSearchEmptyState = computed(() => (
   activeTab.value === 'search'
@@ -84,6 +107,31 @@ const showTreeEmptyState = computed(() => (
   && !treeError.value
   && !treeItems.value.length
 ))
+
+function readStoredJson(key, fallback) {
+  if (!key || typeof window === 'undefined') {
+    return fallback
+  }
+
+  try {
+    const raw = window.localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function writeStoredJson(key, value) {
+  if (!key || typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // ignore storage failures
+  }
+}
 
 function sortEntries(items = []) {
   return [...items].sort((left, right) => {
@@ -137,6 +185,79 @@ function findTreeNode(targetPath, nodes = rootNodes.value) {
 
 function refreshTreeView() {
   rootNodes.value = [...rootNodes.value]
+}
+
+function getExpandedPathsSnapshot(nodes = rootNodes.value, output = []) {
+  nodes.forEach((node) => {
+    if (node.type === 'directory' && node.expanded) {
+      output.push(node.path)
+      if (node.children.length) {
+        getExpandedPathsSnapshot(node.children, output)
+      }
+    }
+  })
+
+  return output
+}
+
+function persistExpandedPaths() {
+  if (!treeExpandedStorageKey.value) {
+    return
+  }
+
+  const nextPaths = [...new Set(getExpandedPathsSnapshot())]
+  persistedExpandedPaths.value = nextPaths
+  writeStoredJson(treeExpandedStorageKey.value, nextPaths)
+}
+
+function loadPersistedExpandedPaths() {
+  persistedExpandedPaths.value = treeExpandedStorageKey.value
+    ? readStoredJson(treeExpandedStorageKey.value, []).filter(Boolean)
+    : []
+}
+
+function loadRecentPaths() {
+  const allItems = readStoredJson(RECENT_PATHS_STORAGE_KEY, [])
+  if (!Array.isArray(allItems) || !storageSessionKey.value) {
+    recentPaths.value = []
+    return
+  }
+
+  recentPaths.value = allItems
+    .filter((item) => item && item.sessionId === storageSessionKey.value && item.path)
+    .sort((left, right) => Number(right.usedAt || 0) - Number(left.usedAt || 0))
+    .slice(0, MAX_RECENT_PATHS)
+}
+
+function saveRecentPath(item) {
+  if (!storageSessionKey.value || !item?.path) {
+    return
+  }
+
+  const record = {
+    sessionId: storageSessionKey.value,
+    path: item.path,
+    name: item.name || getDisplayName(item),
+    type: item.type || 'file',
+    usedAt: Date.now(),
+  }
+  const existing = readStoredJson(RECENT_PATHS_STORAGE_KEY, [])
+  const nextRecords = [record]
+
+  if (Array.isArray(existing)) {
+    existing.forEach((entry) => {
+      if (!entry?.path || !entry?.sessionId) {
+        return
+      }
+      if (entry.sessionId === record.sessionId && entry.path === record.path) {
+        return
+      }
+      nextRecords.push(entry)
+    })
+  }
+
+  writeStoredJson(RECENT_PATHS_STORAGE_KEY, nextRecords.slice(0, 40))
+  loadRecentPaths()
 }
 
 function getDisplayName(item) {
@@ -323,18 +444,44 @@ async function loadTree(parentPath = '', options = {}) {
   }
 }
 
-async function loadInitialTree(options = {}) {
-  await loadTree('', options)
-
-  const expandableRoots = rootNodes.value.filter((node) => node.type === 'directory' && node.hasChildren)
-  await Promise.all(expandableRoots.map(async (node) => {
-    if (node.expanded && node.loaded) {
-      return
+async function restoreExpandedTree(nodes = rootNodes.value, expandedPathSet = new Set()) {
+  for (const node of nodes) {
+    if (node.type !== 'directory' || !expandedPathSet.has(node.path)) {
+      continue
     }
+
     node.expanded = true
     refreshTreeView()
     await loadTree(node.path)
-  }))
+
+    if (node.children.length) {
+      await restoreExpandedTree(node.children, expandedPathSet)
+    }
+  }
+}
+
+async function loadInitialTree(options = {}) {
+  await loadTree('', options)
+  const expandedPathSet = new Set(persistedExpandedPaths.value)
+  const hasPersistedPaths = expandedPathSet.size > 0
+
+  for (const node of rootNodes.value) {
+    if (node.type !== 'directory' || !node.hasChildren) {
+      continue
+    }
+
+    node.expanded = hasPersistedPaths ? expandedPathSet.has(node.path) : true
+  }
+  refreshTreeView()
+
+  if (hasPersistedPaths) {
+    await restoreExpandedTree(rootNodes.value, expandedPathSet)
+    return
+  }
+
+  const expandableRoots = rootNodes.value.filter((node) => node.type === 'directory' && node.expanded && node.hasChildren)
+  await Promise.all(expandableRoots.map((node) => loadTree(node.path)))
+  persistExpandedPaths()
 }
 
 async function toggleDirectory(pathValue) {
@@ -351,11 +498,13 @@ async function toggleDirectory(pathValue) {
     node.expanded = true
     refreshTreeView()
     await loadTree(node.path)
+    persistExpandedPaths()
     return
   }
 
   node.expanded = !node.expanded
   refreshTreeView()
+  persistExpandedPaths()
 }
 
 function emitSelect(item) {
@@ -363,6 +512,7 @@ function emitSelect(item) {
     return false
   }
 
+  saveRecentPath(item)
   emit('select', item)
   return true
 }
@@ -589,6 +739,18 @@ function buildPanelStyle(force = false) {
   return nextStyle
 }
 
+function updatePanelPosition(force = false) {
+  const nextStyle = buildPanelStyle(force)
+  panelStyle.value = {
+    ...panelStyle.value,
+    left: nextStyle.left,
+    top: nextStyle.top,
+    bottom: nextStyle.bottom,
+    width: nextStyle.width,
+    maxHeight: nextStyle.maxHeight,
+  }
+}
+
 function handlePointerDown(event) {
   if (!props.open || !panelRef.value) {
     return
@@ -620,8 +782,10 @@ watch(
     }
 
     panelPlacement.value = 'bottom'
-    panelStyle.value = buildPanelStyle(true)
+    updatePanelPosition(true)
     panelReady.value = true
+    loadRecentPaths()
+    loadPersistedExpandedPaths()
     setActiveTab(isSearchMode.value ? 'search' : 'tree')
     if (props.sessionId) {
       loadInitialTree({ force: true })
@@ -634,13 +798,18 @@ watch(
 watch(
   () => props.anchorRect,
   (anchorRect) => {
-    if (!props.open || panelReady.value || !anchorRect) {
+    if (!props.open || !anchorRect) {
       return
     }
 
-    panelPlacement.value = 'bottom'
-    panelStyle.value = buildPanelStyle(true)
-    panelReady.value = true
+    if (!panelReady.value) {
+      panelPlacement.value = 'bottom'
+      updatePanelPosition(true)
+      panelReady.value = true
+      return
+    }
+
+    updatePanelPosition(false)
   },
   { flush: 'sync' }
 )
@@ -652,6 +821,8 @@ watch(
     treeError.value = ''
     searchResults.value = []
     searchError.value = ''
+    loadRecentPaths()
+    loadPersistedExpandedPaths()
     if (!props.open || !props.sessionId) {
       return
     }
@@ -797,8 +968,49 @@ defineExpose({
         </div>
 
         <div v-else-if="activeTab === 'search'" class="space-y-1">
+          <div
+            v-if="recentSearchItems.length"
+            class="px-1 py-0.5 text-[10px] uppercase tracking-[0.12em] text-stone-400 dark:text-stone-500"
+          >
+            最近
+          </div>
           <button
-            v-for="item in searchItems"
+            v-for="item in recentSearchItems"
+            :key="item.path"
+            :ref="(element) => setItemRef(item.path, element)"
+            type="button"
+            class="flex w-full items-start gap-2 rounded-sm border border-transparent px-2.5 py-1.5 text-left transition"
+            :class="activeKey === item.path
+              ? 'bg-stone-100 dark:bg-stone-900'
+              : 'hover:bg-stone-50 dark:hover:bg-stone-900'"
+            @mouseenter="activeKey = item.path"
+            @click="emitSelect(item)"
+          >
+            <component
+              :is="item.type === 'directory' ? FolderOpen : File"
+              class="mt-0.5 h-4 w-4 shrink-0 text-stone-500 dark:text-stone-400"
+            />
+            <div class="min-w-0 flex-1">
+              <div>
+                <span
+                  class="truncate text-[13px] text-stone-900 dark:text-stone-100"
+                  v-html="getHighlightedName(item)"
+                />
+              </div>
+              <div
+                class="truncate font-mono text-[10px] text-stone-500 dark:text-stone-400"
+                v-html="getHighlightedPath(item)"
+              />
+            </div>
+          </button>
+          <div
+            v-if="normalizedQuery && normalSearchItems.length"
+            class="px-1 py-0.5 text-[10px] uppercase tracking-[0.12em] text-stone-400 dark:text-stone-500"
+          >
+            结果
+          </div>
+          <button
+            v-for="item in normalSearchItems"
             :key="item.path"
             :ref="(element) => setItemRef(item.path, element)"
             type="button"

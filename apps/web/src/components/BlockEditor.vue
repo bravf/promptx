@@ -38,6 +38,7 @@ const mentionPickerRef = ref(null)
 const selectionMap = ref({})
 const mentionState = ref(createMentionState())
 const mentionAnchorRect = ref(null)
+const mentionDismissedState = ref(null)
 
 function createMentionState() {
   return {
@@ -46,6 +47,7 @@ function createMentionState() {
     start: 0,
     end: 0,
     query: '',
+    trigger: 'mention',
   }
 }
 
@@ -100,9 +102,16 @@ function getMentionAnchorRect(index, position) {
     mirror.style[property] = computedStyle[property]
   })
 
-  mirror.textContent = textarea.value.slice(0, position)
-  marker.textContent = textarea.value.slice(position, position + 1) || ' '
+  const beforeText = textarea.value.slice(0, position)
+  const markerText = textarea.value.slice(position, position + 1) || ' '
+  const afterText = textarea.value.slice(position + 1)
+
+  mirror.textContent = beforeText
+  marker.textContent = markerText
   mirror.appendChild(marker)
+  if (afterText) {
+    mirror.appendChild(document.createTextNode(afterText))
+  }
   document.body.appendChild(mirror)
 
   const textareaRect = textarea.getBoundingClientRect()
@@ -129,7 +138,24 @@ function updateMentionAnchor() {
     return
   }
 
-  mentionAnchorRect.value = getMentionAnchorRect(state.blockIndex, state.start)
+  const nextAnchorRect = getMentionAnchorRect(state.blockIndex, state.start)
+  if (hasAnchorRectChanged(nextAnchorRect, mentionAnchorRect.value)) {
+    mentionAnchorRect.value = nextAnchorRect
+  }
+}
+
+function hasAnchorRectChanged(nextRect, currentRect) {
+  if (!nextRect && !currentRect) {
+    return false
+  }
+
+  if (!nextRect || !currentRect) {
+    return true
+  }
+
+  return Math.abs((nextRect.left || 0) - (currentRect.left || 0)) >= 1
+    || Math.abs((nextRect.top || 0) - (currentRect.top || 0)) >= 1
+    || Math.abs((nextRect.bottom || 0) - (currentRect.bottom || 0)) >= 1
 }
 
 function isCursorTextBlock(block) {
@@ -353,9 +379,53 @@ function recordSelection(index, event) {
   syncMentionState(index, event.target)
 }
 
-function closeMentionPicker() {
+function closeMentionPicker(options = {}) {
+  const { suppressCurrent = false, cleanupShortcut = false } = options
+  const currentState = mentionState.value
+  if (suppressCurrent && mentionState.value.open) {
+    mentionDismissedState.value = {
+      blockIndex: currentState.blockIndex,
+      start: currentState.start,
+      end: currentState.end,
+      query: currentState.query,
+      trigger: currentState.trigger,
+    }
+  }
   mentionState.value = createMentionState()
   mentionAnchorRect.value = null
+
+  if (cleanupShortcut && currentState.trigger === 'shortcut') {
+    removeShortcutMention(currentState)
+  }
+}
+
+function removeShortcutMention(state) {
+  const blockIndex = Number(state?.blockIndex)
+  if (blockIndex < 0) {
+    return
+  }
+
+  const currentBlock = blocks.value[blockIndex]
+  if (!currentBlock || !isTextLikeBlock(currentBlock)) {
+    return
+  }
+
+  const start = Math.max(0, Number(state.start) || 0)
+  const end = Math.max(start, Number(state.end) || start)
+  const nextContent = `${currentBlock.content.slice(0, start)}${currentBlock.content.slice(end)}`
+  const nextBlocks = [...blocks.value]
+
+  nextBlocks.splice(blockIndex, 1, {
+    ...currentBlock,
+    content: nextContent,
+  })
+  setBlocks(nextBlocks)
+  activeIndex.value = blockIndex
+  selectionMap.value[blockIndex] = {
+    start,
+    end: start,
+  }
+  nextTick(() => placeCursor(blockIndex, start))
 }
 
 function syncMentionState(index, target) {
@@ -380,29 +450,55 @@ function syncMentionState(index, target) {
 
   const content = String(currentBlock.content || '')
   const beforeCaret = content.slice(0, selectionEnd)
-  const match = beforeCaret.match(/(^|[\s([{@])@([^\s@]*)$/)
+  const mentionStart = beforeCaret.lastIndexOf('@')
 
-  if (!match) {
+  if (mentionStart < 0) {
     if (mentionState.value.blockIndex === index) {
       closeMentionPicker()
     }
     return
   }
 
-  const nextStart = selectionEnd - match[2].length - 1
+  const mentionQuery = beforeCaret.slice(mentionStart + 1)
+  if (/\s/.test(mentionQuery)) {
+    if (mentionState.value.blockIndex === index) {
+      closeMentionPicker()
+    }
+    return
+  }
+
+  const nextStart = mentionStart
+  const dismissed = mentionDismissedState.value
+  if (
+    dismissed
+    && dismissed.blockIndex === index
+    && dismissed.start === nextStart
+    && dismissed.end === selectionEnd
+    && dismissed.query === mentionQuery
+  ) {
+    return
+  }
+
+  mentionDismissedState.value = null
   const anchorChanged = !mentionState.value.open
     || mentionState.value.blockIndex !== index
     || mentionState.value.start !== nextStart
   const nextAnchorRect = getMentionAnchorRect(index, nextStart)
+  const nextTrigger = mentionState.value.open
+    && mentionState.value.blockIndex === index
+    && mentionState.value.start === nextStart
+    ? mentionState.value.trigger || 'mention'
+    : 'mention'
 
   mentionState.value = {
     open: true,
     blockIndex: index,
     start: nextStart,
     end: selectionEnd,
-    query: match[2],
+    query: mentionQuery,
+    trigger: nextTrigger,
   }
-  if (anchorChanged) {
+  if (anchorChanged || hasAnchorRectChanged(nextAnchorRect, mentionAnchorRect.value)) {
     mentionAnchorRect.value = nextAnchorRect
   }
 }
@@ -422,8 +518,11 @@ function applyMentionSelection(item) {
     return false
   }
 
-  const nextContent = `${currentBlock.content.slice(0, state.start)}@${pathValue} ${currentBlock.content.slice(state.end)}`
-  const nextCursor = state.start + pathValue.length + 2
+  const insertedValue = state.trigger === 'shortcut'
+    ? `${pathValue} `
+    : `@${pathValue} `
+  const nextContent = `${currentBlock.content.slice(0, state.start)}${insertedValue}${currentBlock.content.slice(state.end)}`
+  const nextCursor = state.start + insertedValue.length
   const nextBlocks = [...blocks.value]
 
   nextBlocks.splice(state.blockIndex, 1, {
@@ -437,6 +536,7 @@ function applyMentionSelection(item) {
     start: nextCursor,
     end: nextCursor,
   }
+  mentionDismissedState.value = null
   closeMentionPicker()
   nextTick(() => placeCursor(state.blockIndex, nextCursor))
   return true
@@ -722,6 +822,59 @@ function handleTextFocus(index) {
   syncMentionState(index, target)
 }
 
+function dismissMentionPicker() {
+  closeMentionPicker({
+    suppressCurrent: true,
+    cleanupShortcut: mentionState.value.trigger === 'shortcut',
+  })
+}
+
+function openPathPickerFromShortcut() {
+  const currentIndex = Math.min(activeIndex.value ?? 0, Math.max(blocks.value.length - 1, 0))
+  const currentBlock = blocks.value[currentIndex]
+  if (!currentBlock || !isTextLikeBlock(currentBlock)) {
+    return false
+  }
+
+  const target = textareas.value[currentIndex]
+  const fallbackPosition = currentBlock.content.length
+  const selection = {
+    start: target?.selectionStart ?? selectionMap.value[currentIndex]?.start ?? fallbackPosition,
+    end: target?.selectionEnd ?? selectionMap.value[currentIndex]?.end ?? fallbackPosition,
+  }
+  const start = Math.max(0, selection.start ?? 0)
+  const end = Math.max(start, selection.end ?? start)
+  const nextContent = `${currentBlock.content.slice(0, start)}@${currentBlock.content.slice(end)}`
+  const nextCursor = start + 1
+  const nextBlocks = [...blocks.value]
+
+  nextBlocks.splice(currentIndex, 1, {
+    ...currentBlock,
+    content: nextContent,
+  })
+  setBlocks(nextBlocks)
+  activeIndex.value = currentIndex
+  selectionMap.value[currentIndex] = {
+    start: nextCursor,
+    end: nextCursor,
+  }
+  mentionDismissedState.value = null
+
+  nextTick(() => {
+    placeCursor(currentIndex, nextCursor)
+    mentionState.value = {
+      open: true,
+      blockIndex: currentIndex,
+      start,
+      end: nextCursor,
+      query: '',
+      trigger: 'shortcut',
+    }
+    mentionAnchorRect.value = getMentionAnchorRect(currentIndex, start)
+  })
+  return true
+}
+
 function handleTextInput(index, event) {
   const mentionActive = mentionState.value.open && mentionState.value.blockIndex === index
   resizeTextarea(event.target, mentionActive
@@ -751,10 +904,17 @@ async function handleTextKeydown(index, event) {
     return
   }
 
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k') {
+    if (openPathPickerFromShortcut()) {
+      event.preventDefault()
+      return
+    }
+  }
+
   if (mentionState.value.open && mentionState.value.blockIndex === index) {
     if (event.key === 'Escape') {
       event.preventDefault()
-      closeMentionPicker()
+      dismissMentionPicker()
       return
     }
 
@@ -1053,7 +1213,7 @@ defineExpose({
       :session-id="codexSessionId"
       :query="mentionState.query"
       :anchor-rect="mentionAnchorRect"
-      @close="closeMentionPicker"
+      @close="dismissMentionPicker"
       @select="applyMentionSelection"
     />
   </section>
