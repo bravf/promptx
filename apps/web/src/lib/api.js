@@ -12,13 +12,19 @@ export {
   uploadImage,
 } from './assetApi.js'
 export {
+  clearTaskCodexRuns,
+  createTaskCodexRun,
   createCodexSession,
   deleteCodexSession,
+  listTaskCodexRuns,
   listCodexSessionFiles,
   listCodexSessions,
   listCodexWorkspaces,
   searchCodexSessionFiles,
   sendPromptToCodexSession,
+  stopCodexRun,
+  streamCodexRun,
   streamPromptToCodexSession,
+  updateTaskCodexSession,
   updateCodexSession,
 } from './codexApi.js'

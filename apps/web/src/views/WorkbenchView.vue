@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   CircleAlert,
   Copy,
@@ -24,23 +24,14 @@ const showDeleteDialog = ref(false)
 const editingTaskTitleSlug = ref('')
 const { toastMessage, flashToast, clearToast } = useToast()
 
-const panelRefs = new Map()
-
-function setCodexPanelRef(slug, element) {
-  if (!slug) {
-    return
-  }
-
-  if (element) {
-    panelRefs.set(slug, element)
-    return
-  }
-
-  panelRefs.delete(slug)
-}
+const codexPanelRef = ref(null)
 
 function getCurrentPanelRef(currentTaskSlug) {
-  return panelRefs.get(currentTaskSlug) || null
+  if (!currentTaskSlug) {
+    return null
+  }
+
+  return codexPanelRef.value
 }
 
 function scrollCurrentPanelToBottom() {
@@ -80,12 +71,15 @@ const {
   selectTask,
   updateLastPromptPreview,
   uploading,
-  getCodexSessionStorageKey,
 } = useWorkbenchTasks({
   clearToast,
   flashToast,
   scrollCurrentPanelToBottom,
 })
+
+const currentRenderedTask = computed(() =>
+  renderedTasks.value.find((task) => task.slug === currentTaskSlug.value) || null
+)
 
 usePageTitle(pageTitle)
 
@@ -201,7 +195,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  panelRefs.clear()
   window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('keydown', handleWindowKeydown)
 })
@@ -326,19 +319,15 @@ onBeforeUnmount(() => {
 
       <div class="grid min-h-0 gap-4 overflow-hidden lg:grid-cols-2 lg:grid-rows-1">
         <div class="min-h-0 min-w-0 overflow-hidden">
-          <div
-            v-for="task in renderedTasks"
-            :key="`panel-${task.slug}`"
-            v-show="task.slug === currentTaskSlug"
-            class="h-full min-h-0"
-          >
+          <div v-if="currentRenderedTask" class="h-full min-h-0">
             <CodexSessionPanel
-              :ref="(element) => setCodexPanelRef(task.slug, element)"
-              :active="task.slug === currentTaskSlug"
-              :build-prompt="() => prepareCodexPromptForTask(task.slug)"
-              :storage-key="getCodexSessionStorageKey(task.slug)"
-              @sending-change="handleTaskSendingChange(task.slug, $event)"
-              @selected-session-change="handleTaskSessionChange(task.slug, $event)"
+              ref="codexPanelRef"
+              :active="Boolean(currentRenderedTask?.slug)"
+              :task-slug="currentRenderedTask.slug"
+              :build-prompt="() => prepareCodexPromptForTask(currentRenderedTask.slug)"
+              :selected-session-id="currentRenderedTask.codexSessionId || ''"
+              @sending-change="handleTaskSendingChange(currentRenderedTask.slug, $event)"
+              @selected-session-change="handleTaskSessionChange(currentRenderedTask.slug, $event)"
             />
           </div>
         </div>

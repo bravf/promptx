@@ -13,11 +13,13 @@ import { EXPIRY_OPTIONS, VISIBILITY_OPTIONS } from '@promptx/shared'
 import {
   buildTaskExports,
   canEditTask,
+  clearTaskCodexSessionReferences,
   createTask,
   deleteTask,
   getTaskBySlug,
   listTasks,
   purgeExpiredTasks,
+  updateTaskCodexSession,
   updateTask,
 } from './repository.js'
 import {
@@ -32,12 +34,26 @@ import {
   listPromptxCodexSessions,
   updatePromptxCodexSession,
 } from './codexSessions.js'
+import {
+  appendCodexRunEvent,
+  createCodexRun,
+  deleteTaskCodexRuns,
+  getCodexRunById,
+  getRunningCodexRunBySessionId,
+  getRunningCodexRunByTaskSlug,
+  listRunningCodexSessionIds,
+  listRunningCodexTaskSlugs,
+  listTaskCodexRuns,
+  markInterruptedCodexRuns,
+  updateCodexRun,
+} from './codexRuns.js'
 import { importPdfBlocks } from './pdf.js'
 import { createTempFilePath, normalizeUploadFileName } from './upload.js'
 import { listWorkspaceTree, searchWorkspaceEntries } from './workspaceFiles.js'
 
 const app = Fastify({ logger: true })
-const activeCodexSessionRuns = new Map()
+const activeCodexRunControllers = new Map()
+const sseClients = new Set()
 const port = Number(process.env.PORT || 3000)
 const host = process.env.HOST || '0.0.0.0'
 const uploadsDir = path.resolve(process.cwd(), 'uploads')
@@ -50,53 +66,284 @@ fs.mkdirSync(uploadsDir, { recursive: true })
 fs.mkdirSync(tmpDir, { recursive: true })
 
 let lastExpiredPurgeAt = 0
+let sseEventId = 0
 
-function beginCodexSessionRun(sessionId = '') {
-  const normalized = String(sessionId || '').trim()
-  if (!normalized) {
-    return
-  }
-
-  activeCodexSessionRuns.set(normalized, (activeCodexSessionRuns.get(normalized) || 0) + 1)
+function createSseMessage(payload) {
+  return `id: ${++sseEventId}\ndata: ${JSON.stringify(payload)}\n\n`
 }
 
-function endCodexSessionRun(sessionId = '') {
-  const normalized = String(sessionId || '').trim()
-  if (!normalized) {
-    return
-  }
-
-  const nextCount = (activeCodexSessionRuns.get(normalized) || 0) - 1
-  if (nextCount > 0) {
-    activeCodexSessionRuns.set(normalized, nextCount)
-    return
-  }
-
-  activeCodexSessionRuns.delete(normalized)
-}
-
-function isCodexSessionRunning(sessionId = '') {
-  const normalized = String(sessionId || '').trim()
-  if (!normalized) {
+function writeSseMessage(target, payload) {
+  if (!target || target.destroyed || target.writableEnded) {
     return false
   }
 
-  return (activeCodexSessionRuns.get(normalized) || 0) > 0
+  try {
+    target.write(createSseMessage(payload))
+    return true
+  } catch {
+    return false
+  }
 }
 
-function decorateCodexSession(session) {
+function broadcastServerEvent(type, payload = {}) {
+  const message = {
+    type: String(type || '').trim(),
+    sentAt: new Date().toISOString(),
+    ...payload,
+  }
+
+  for (const client of [...sseClients]) {
+    if (!writeSseMessage(client, message)) {
+      sseClients.delete(client)
+    }
+  }
+}
+
+setInterval(() => {
+  for (const client of [...sseClients]) {
+    if (!client || client.destroyed || client.writableEnded) {
+      sseClients.delete(client)
+      continue
+    }
+
+    try {
+      client.write(': ping\n\n')
+    } catch {
+      sseClients.delete(client)
+    }
+  }
+}, 15000)
+
+function getRunningSessionIdSet() {
+  return new Set(listRunningCodexSessionIds())
+}
+
+function decorateCodexSession(session, runningSessionIds = getRunningSessionIdSet()) {
   if (!session) {
     return null
   }
 
   return {
     ...session,
-    running: isCodexSessionRunning(session.id),
+    running: runningSessionIds.has(session.id),
   }
 }
 
 function decorateCodexSessionList(items = []) {
-  return items.map((item) => decorateCodexSession(item))
+  const runningSessionIds = getRunningSessionIdSet()
+  return items.map((item) => decorateCodexSession(item, runningSessionIds))
+}
+
+function getRunningTaskSlugSet() {
+  return new Set(listRunningCodexTaskSlugs())
+}
+
+function decorateTask(task, runningTaskSlugs = getRunningTaskSlugSet()) {
+  if (!task) {
+    return null
+  }
+
+  return {
+    ...task,
+    running: runningTaskSlugs.has(task.slug),
+  }
+}
+
+function decorateTaskList(items = []) {
+  const runningTaskSlugs = getRunningTaskSlugSet()
+  return items.map((item) => decorateTask(item, runningTaskSlugs))
+}
+
+function getActiveCodexRunController(runId = '') {
+  return activeCodexRunControllers.get(String(runId || '').trim()) || null
+}
+
+function setActiveCodexRunController(runId = '', controller) {
+  const normalizedRunId = String(runId || '').trim()
+  if (!normalizedRunId || !controller) {
+    return
+  }
+
+  activeCodexRunControllers.set(normalizedRunId, controller)
+}
+
+function clearActiveCodexRunController(runId = '') {
+  const normalizedRunId = String(runId || '').trim()
+  if (!normalizedRunId) {
+    return
+  }
+
+  activeCodexRunControllers.delete(normalizedRunId)
+}
+
+function notifyActiveCodexRunListeners(runId = '', payload = {}) {
+  const controller = getActiveCodexRunController(runId)
+  if (!controller?.listeners?.size) {
+    return
+  }
+
+  controller.listeners.forEach((listener) => {
+    try {
+      listener(payload)
+    } catch {
+      // Ignore observer failures to avoid affecting the run lifecycle.
+    }
+  })
+}
+
+function subscribeActiveCodexRun(runId = '', listener) {
+  const controller = getActiveCodexRunController(runId)
+  if (!controller || typeof listener !== 'function') {
+    return () => {}
+  }
+
+  controller.listeners.add(listener)
+  return () => {
+    controller.listeners.delete(listener)
+  }
+}
+
+function startCodexRunInBackground(runRecord) {
+  const runId = String(runRecord?.id || '').trim()
+  if (!runId) {
+    return
+  }
+
+  const session = getPromptxCodexSessionById(runRecord.sessionId)
+  if (!session) {
+    updateCodexRun(runId, {
+      status: 'error',
+      errorMessage: '没有找到对应的 PromptX 会话。',
+      finishedAt: new Date().toISOString(),
+    })
+    return
+  }
+
+  let eventSeq = 0
+  let stopRequested = false
+
+  const persistRunEvent = (payload) => {
+    eventSeq += 1
+    const event = appendCodexRunEvent(runId, eventSeq, payload)
+    if (event) {
+      broadcastServerEvent('run.event', {
+        taskSlug: runRecord.taskSlug,
+        runId,
+        event,
+      })
+      notifyActiveCodexRunListeners(runId, {
+        type: 'event',
+        event,
+      })
+    }
+    return event
+  }
+
+  persistRunEvent({
+    type: 'session',
+    session: decorateCodexSession(session),
+  })
+
+  const stream = streamPromptToCodexSession(session, runRecord.prompt, {
+    onEvent(payload) {
+      persistRunEvent(payload)
+    },
+    onThreadStarted(threadId) {
+      const updatedSession = updatePromptxCodexSession(session.id, {
+        codexThreadId: threadId,
+      })
+
+      if (updatedSession) {
+        persistRunEvent({
+          type: 'session.updated',
+          session: decorateCodexSession(updatedSession),
+        })
+        broadcastServerEvent('sessions.changed', {
+          sessionId: session.id,
+        })
+      }
+    },
+  })
+
+  const controller = {
+    listeners: new Set(),
+    cancel() {
+      stopRequested = true
+      stream.cancel()
+    },
+    get stopRequested() {
+      return stopRequested
+    },
+  }
+  setActiveCodexRunController(runId, controller)
+
+  stream.result
+    .then((result) => {
+      const nextRun = updateCodexRun(runId, {
+        status: 'completed',
+        responseMessage: result.message || '',
+        errorMessage: '',
+        finishedAt: new Date().toISOString(),
+      })
+      notifyActiveCodexRunListeners(runId, {
+        type: 'run',
+        run: nextRun,
+      })
+      broadcastServerEvent('runs.changed', {
+        taskSlug: runRecord.taskSlug,
+        runId,
+      })
+      broadcastServerEvent('sessions.changed', {
+        sessionId: session.id,
+      })
+    })
+    .catch((error) => {
+      if (stopRequested) {
+        persistRunEvent({
+          type: 'stopped',
+          message: '执行已手动停止。',
+        })
+        const nextRun = updateCodexRun(runId, {
+          status: 'stopped',
+          responseMessage: '',
+          errorMessage: '',
+          finishedAt: new Date().toISOString(),
+        })
+        notifyActiveCodexRunListeners(runId, {
+          type: 'run',
+          run: nextRun,
+        })
+        broadcastServerEvent('runs.changed', {
+          taskSlug: runRecord.taskSlug,
+          runId,
+        })
+        broadcastServerEvent('sessions.changed', {
+          sessionId: session.id,
+        })
+        return
+      }
+
+      const nextRun = updateCodexRun(runId, {
+        status: 'error',
+        errorMessage: error.message || 'Codex 执行失败。',
+        finishedAt: new Date().toISOString(),
+      })
+      notifyActiveCodexRunListeners(runId, {
+        type: 'run',
+        run: nextRun,
+      })
+      broadcastServerEvent('runs.changed', {
+        taskSlug: runRecord.taskSlug,
+        runId,
+      })
+      broadcastServerEvent('sessions.changed', {
+        sessionId: session.id,
+      })
+    })
+    .finally(() => {
+      notifyActiveCodexRunListeners(runId, { type: 'close' })
+      clearActiveCodexRunController(runId)
+    })
 }
 
 function listLanIpv4Addresses() {
@@ -230,6 +477,14 @@ await app.register(multipart, {
   },
 })
 
+app.addContentTypeParser(
+  'application/x-www-form-urlencoded',
+  { parseAs: 'string' },
+  (request, body, done) => {
+    done(null, {})
+  }
+)
+
 await app.register(fastifyStatic, {
   root: uploadsDir,
   prefix: '/uploads/',
@@ -242,17 +497,49 @@ app.get('/api/meta', async () => ({
   visibilityOptions: VISIBILITY_OPTIONS,
 }))
 
+app.get('/api/events/stream', async (request, reply) => {
+  reply.hijack()
+  const requestOrigin = request.headers.origin
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    ...(requestOrigin ? {
+      'Access-Control-Allow-Origin': requestOrigin,
+      Vary: 'Origin',
+    } : {}),
+  })
+  reply.raw.socket?.setNoDelay?.(true)
+  reply.raw.flushHeaders?.()
+
+  sseClients.add(reply.raw)
+  writeSseMessage(reply.raw, {
+    type: 'ready',
+    sentAt: new Date().toISOString(),
+  })
+
+  const handleClose = () => {
+    sseClients.delete(reply.raw)
+  }
+
+  reply.raw.on('close', handleClose)
+})
+
 app.get('/api/tasks', async () => {
   purgeExpiredContent()
   return {
-    items: listTasks(),
+    items: decorateTaskList(listTasks()),
   }
 })
 
 app.post('/api/tasks', async (request, reply) => {
   purgeExpiredContent()
   const task = createTask(request.body || {})
-  return reply.code(201).send(task)
+  broadcastServerEvent('tasks.changed', {
+    taskSlug: task.slug,
+  })
+  return reply.code(201).send(decorateTask(task))
 })
 
 app.get('/api/tasks/:slug', async (request, reply) => {
@@ -266,7 +553,7 @@ app.get('/api/tasks/:slug', async (request, reply) => {
   }
 
   return {
-    ...task,
+    ...decorateTask(task),
     canEdit: canEditTask(request.params.slug),
   }
 })
@@ -277,16 +564,141 @@ app.put('/api/tasks/:slug', async (request, reply) => {
   if (result.error === 'not_found') {
     return reply.code(404).send({ message: '任务不存在。' })
   }
-  return result
+  broadcastServerEvent('tasks.changed', {
+    taskSlug: request.params.slug,
+  })
+  return decorateTask(result)
 })
 
 app.delete('/api/tasks/:slug', async (request, reply) => {
   purgeExpiredContent()
+  if (getRunningCodexRunByTaskSlug(request.params.slug)) {
+    return reply.code(409).send({ message: '当前任务正在执行中，请先停止后再删除。' })
+  }
   const result = deleteTask(request.params.slug)
   if (result.error === 'not_found') {
     return reply.code(404).send({ message: '任务不存在。' })
   }
   removeAssetFiles(result.removedAssets)
+  broadcastServerEvent('tasks.changed', {
+    taskSlug: request.params.slug,
+  })
+  return reply.code(204).send()
+})
+
+app.post('/api/tasks/:slug/codex-session', async (request, reply) => {
+  purgeExpiredContent()
+  const task = getTaskBySlug(request.params.slug)
+  if (!task || task.expired) {
+    return reply.code(404).send({ message: '任务不存在。' })
+  }
+
+  const sessionId = String(request.body?.sessionId || '').trim()
+  if (sessionId) {
+    const session = getPromptxCodexSessionById(sessionId)
+    if (!session) {
+      return reply.code(404).send({ message: '没有找到对应的 PromptX 会话。' })
+    }
+  }
+
+  const updatedTask = updateTaskCodexSession(request.params.slug, sessionId)
+  if (!updatedTask) {
+    return reply.code(404).send({ message: '任务不存在。' })
+  }
+
+  broadcastServerEvent('tasks.changed', {
+    taskSlug: request.params.slug,
+  })
+
+  return {
+    task: {
+      ...decorateTask(updatedTask),
+      canEdit: canEditTask(request.params.slug),
+    },
+  }
+})
+
+app.get('/api/tasks/:slug/codex-runs', async (request, reply) => {
+  purgeExpiredContent()
+  const task = getTaskBySlug(request.params.slug)
+  if (!task || task.expired) {
+    return reply.code(404).send({ message: '任务不存在。' })
+  }
+
+  return {
+    items: listTaskCodexRuns(request.params.slug, request.query?.limit),
+  }
+})
+
+app.post('/api/tasks/:slug/codex-runs', async (request, reply) => {
+  purgeExpiredContent()
+  const task = getTaskBySlug(request.params.slug)
+  if (!task || task.expired) {
+    return reply.code(404).send({ message: '任务不存在。' })
+  }
+
+  const sessionId = String(request.body?.sessionId || '').trim()
+  const prompt = String(request.body?.prompt || '').trim()
+
+  if (!sessionId) {
+    return reply.code(400).send({ message: '请先选择一个 PromptX 会话。' })
+  }
+  if (!prompt) {
+    return reply.code(400).send({ message: '没有可发送的提示词。' })
+  }
+
+  const session = getPromptxCodexSessionById(sessionId)
+  if (!session) {
+    return reply.code(404).send({ message: '没有找到对应的 PromptX 会话。' })
+  }
+
+  const runningRunOnSession = getRunningCodexRunBySessionId(sessionId)
+  if (runningRunOnSession) {
+    return reply.code(409).send({ message: '当前会话正在执行中，请等待完成后再发送。' })
+  }
+
+  const runRecord = createCodexRun({
+    taskSlug: request.params.slug,
+    sessionId,
+    prompt,
+  })
+
+  updateTaskCodexSession(request.params.slug, sessionId)
+  startCodexRunInBackground(runRecord)
+
+  broadcastServerEvent('tasks.changed', {
+    taskSlug: request.params.slug,
+  })
+  broadcastServerEvent('runs.changed', {
+    taskSlug: request.params.slug,
+    runId: runRecord.id,
+  })
+  broadcastServerEvent('sessions.changed', {
+    sessionId,
+  })
+
+  return reply.code(201).send({
+    run: getCodexRunById(runRecord.id),
+    session: decorateCodexSession(getPromptxCodexSessionById(sessionId)),
+  })
+})
+
+app.delete('/api/tasks/:slug/codex-runs', async (request, reply) => {
+  purgeExpiredContent()
+  const task = getTaskBySlug(request.params.slug)
+  if (!task || task.expired) {
+    return reply.code(404).send({ message: '任务不存在。' })
+  }
+
+  const runningRun = getRunningCodexRunByTaskSlug(request.params.slug)
+  if (runningRun) {
+    return reply.code(409).send({ message: '当前任务正在执行中，请先停止后再清空记录。' })
+  }
+
+  deleteTaskCodexRuns(request.params.slug)
+  broadcastServerEvent('runs.changed', {
+    taskSlug: request.params.slug,
+  })
   return reply.code(204).send()
 })
 
@@ -410,6 +822,9 @@ app.get('/api/codex/sessions/:sessionId/files/search', async (request, reply) =>
 
 app.post('/api/codex/sessions', async (request, reply) => {
   const session = createPromptxCodexSession(request.body || {})
+  broadcastServerEvent('sessions.changed', {
+    sessionId: session.id,
+  })
   return reply.code(201).send(decorateCodexSession(session))
 })
 
@@ -419,15 +834,26 @@ app.patch('/api/codex/sessions/:sessionId', async (request, reply) => {
     return reply.code(404).send({ message: '没有找到对应的 PromptX 会话。' })
   }
 
+  broadcastServerEvent('sessions.changed', {
+    sessionId: session.id,
+  })
   return decorateCodexSession(session)
 })
 
 app.delete('/api/codex/sessions/:sessionId', async (request, reply) => {
+  if (getRunningCodexRunBySessionId(request.params.sessionId)) {
+    return reply.code(409).send({ message: '当前会话正在执行中，请先停止后再删除。' })
+  }
+  clearTaskCodexSessionReferences(request.params.sessionId)
   const session = deletePromptxCodexSession(request.params.sessionId)
   if (!session) {
     return reply.code(404).send({ message: '没有找到对应的 PromptX 会话。' })
   }
 
+  broadcastServerEvent('sessions.changed', {
+    sessionId: request.params.sessionId,
+  })
+  broadcastServerEvent('tasks.changed')
   return reply.code(204).send()
 })
 
@@ -442,40 +868,58 @@ app.post('/api/codex/sessions/:sessionId/send', async (request, reply) => {
     return reply.code(400).send({ message: '没有收到可发送的提示词。' })
   }
 
-  beginCodexSessionRun(session.id)
+  const result = await sendPromptToCodexSession(session, prompt)
+  const nextSession = updatePromptxCodexSession(session.id, {
+    codexThreadId: result.threadId || session.codexThreadId,
+  }) || session
 
-  let responsePayload = null
-
-  try {
-    const result = await sendPromptToCodexSession(session, prompt)
-    const nextSession = updatePromptxCodexSession(session.id, {
-      codexThreadId: result.threadId || session.codexThreadId,
-    }) || session
-
-    responsePayload = {
-      session: nextSession,
-      message: result.message,
-      rawStdout: result.rawStdout,
-    }
-  } finally {
-    endCodexSessionRun(session.id)
-  }
+  broadcastServerEvent('sessions.changed', {
+    sessionId: session.id,
+  })
 
   return {
-    ...responsePayload,
-    session: decorateCodexSession(responsePayload.session),
+    session: decorateCodexSession(nextSession),
+    message: result.message,
+    rawStdout: result.rawStdout,
   }
 })
 
-app.post('/api/codex/sessions/:sessionId/send-stream', async (request, reply) => {
-  const session = getPromptxCodexSessionById(request.params.sessionId)
-  if (!session) {
-    return reply.code(404).send({ message: '没有找到对应的 PromptX 会话。' })
+app.post('/api/codex/runs/:runId/stop', async (request, reply) => {
+  const runRecord = getCodexRunById(request.params.runId)
+  if (!runRecord) {
+    return reply.code(404).send({ message: '没有找到对应的执行记录。' })
   }
 
-  const prompt = String(request.body?.prompt || '').trim()
-  if (!prompt) {
-    return reply.code(400).send({ message: '没有收到可发送的提示词。' })
+  if (runRecord.status !== 'running') {
+    return { run: runRecord }
+  }
+
+  const controller = getActiveCodexRunController(request.params.runId)
+  if (!controller) {
+    const stoppedRun = updateCodexRun(request.params.runId, {
+      status: 'stopped',
+      finishedAt: new Date().toISOString(),
+    })
+    broadcastServerEvent('runs.changed', {
+      taskSlug: stoppedRun?.taskSlug,
+      runId: request.params.runId,
+    })
+    broadcastServerEvent('sessions.changed', {
+      sessionId: stoppedRun?.sessionId,
+    })
+    return { run: stoppedRun }
+  }
+
+  controller.cancel()
+  return reply.code(202).send({
+    run: getCodexRunById(request.params.runId),
+  })
+})
+
+app.get('/api/codex/runs/:runId/stream', async (request, reply) => {
+  const runRecord = getCodexRunById(request.params.runId)
+  if (!runRecord) {
+    return reply.code(404).send({ message: '没有找到对应的执行记录。' })
   }
 
   reply.hijack()
@@ -493,69 +937,64 @@ app.post('/api/codex/sessions/:sessionId/send-stream', async (request, reply) =>
   reply.raw.socket?.setNoDelay?.(true)
   reply.raw.flushHeaders?.()
 
-  const writeEvent = (payload) => {
+  const writeMessage = (payload) => {
     if (reply.raw.destroyed || reply.raw.writableEnded) {
       return
     }
 
     try {
-      reply.raw.write(`${JSON.stringify(payload)}\n`)
+      reply.raw.write(`${JSON.stringify(payload)}
+`)
     } catch {
       // Ignore write failures after the client disconnects.
     }
   }
 
-  beginCodexSessionRun(session.id)
-
-  writeEvent({
-    type: 'session',
-    session: decorateCodexSession(session),
-  })
-
-  const stream = streamPromptToCodexSession(session, prompt, {
-    onEvent(event) {
-      writeEvent(event)
-    },
-    onThreadStarted(threadId) {
-      const updated = updatePromptxCodexSession(session.id, {
-        codexThreadId: threadId,
-      })
-      if (updated) {
-        writeEvent({
-          type: 'session.updated',
-          session: decorateCodexSession(updated),
-        })
-      }
-    },
-  })
-
-  const handleAbort = () => {
-    stream.cancel()
-  }
-
-  reply.raw.on('close', handleAbort)
-
-  try {
-    await stream.result
-  } catch (error) {
-    writeEvent({
-      type: 'error',
-      message: error.message || 'Codex 执行失败。',
-    })
-  } finally {
-    reply.raw.off('close', handleAbort)
-    endCodexSessionRun(session.id)
-
-    const finalSession = getPromptxCodexSessionById(session.id) || session
-    writeEvent({
-      type: 'session.updated',
-      session: decorateCodexSession(finalSession),
-    })
-
+  const closeStream = () => {
     if (!reply.raw.destroyed && !reply.raw.writableEnded) {
       reply.raw.end()
     }
   }
+
+  writeMessage({
+    type: 'run',
+    run: runRecord,
+  })
+
+  const afterSeq = Math.max(0, Number(request.query?.afterSeq) || 0)
+  const existingEvents = listCodexRunEvents(request.params.runId, {
+    afterSeq,
+  }) || []
+
+  existingEvents.forEach((event) => {
+    writeMessage({
+      type: 'event',
+      event,
+    })
+  })
+
+  const latestRun = getCodexRunById(request.params.runId)
+  if (!latestRun || latestRun.status !== 'running' || !getActiveCodexRunController(request.params.runId)) {
+    writeMessage({
+      type: 'run',
+      run: latestRun || runRecord,
+    })
+    closeStream()
+    return
+  }
+
+  const unsubscribe = subscribeActiveCodexRun(request.params.runId, (payload) => {
+    writeMessage(payload)
+    if (payload.type === 'close') {
+      closeStream()
+    }
+  })
+
+  const handleAbort = () => {
+    unsubscribe()
+  }
+
+  reply.raw.on('close', handleAbort)
 })
 
 app.get('/api/tasks/:slug/raw', async (request, reply) => {
@@ -575,6 +1014,7 @@ app.setErrorHandler((error, request, reply) => {
   reply.code(error.statusCode || 500).send({ message })
 })
 
+markInterruptedCodexRuns()
 purgeExpiredContent(true)
 
 app.listen({ port, host }).then(() => {

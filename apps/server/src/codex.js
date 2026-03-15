@@ -556,6 +556,21 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
     child,
     result,
     cancel() {
+      if (child.killed) {
+        return
+      }
+
+      if (process.platform === 'win32' && child.pid) {
+        try {
+          execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+            stdio: 'ignore',
+          })
+          return
+        } catch {
+          // Fall through to the default child kill when taskkill is unavailable.
+        }
+      }
+
       if (!child.killed) {
         child.kill('SIGTERM')
       }

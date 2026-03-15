@@ -8,11 +8,12 @@ import {
   importPdf,
   listTasks,
   resolveAssetUrl,
+  updateTaskCodexSession,
   updateTask,
   uploadImage,
 } from '../lib/api.js'
 import { buildCodexPrompt } from '../lib/codex.js'
-import { deleteTranscript } from '../lib/transcriptStore.js'
+import { subscribeServerEvents } from '../lib/serverEvents.js'
 
 const ACTIVE_TASK_STORAGE_KEY = 'promptx:active-task-slug'
 
@@ -28,6 +29,7 @@ function cloneDraftState(state = {}) {
     title: String(state.title || ''),
     autoTitle: String(state.autoTitle || ''),
     lastPromptPreview: String(state.lastPromptPreview || ''),
+    codexSessionId: String(state.codexSessionId || ''),
     blocks: cloneBlocks(state.blocks || []),
   }
 }
@@ -140,27 +142,14 @@ function clearRequestedTaskSlug() {
   }
 }
 
-function getCodexSessionStorageKey(slug) {
-  return slug ? `promptx:codex-session-id:${slug}` : 'promptx:codex-session-id'
-}
-
-async function clearTaskCodexCache(slug) {
-  if (!slug || typeof window === 'undefined') {
-    return
-  }
-
-  const sessionStorageKey = getCodexSessionStorageKey(slug)
-  window.localStorage.removeItem(sessionStorageKey)
-  window.localStorage.removeItem(`${sessionStorageKey}:turns`)
-  await deleteTranscript(`${sessionStorageKey}:turns`).catch(() => {})
-}
-
 function toTaskSummary(taskRecord) {
   return {
     slug: taskRecord.slug,
     title: String(taskRecord.title || ''),
     autoTitle: String(taskRecord.autoTitle || ''),
     lastPromptPreview: String(taskRecord.lastPromptPreview || ''),
+    codexSessionId: String(taskRecord.codexSessionId || ''),
+    running: Boolean(taskRecord.running),
     preview: String(taskRecord.lastPromptPreview || ''),
     updatedAt: taskRecord.updatedAt || taskRecord.createdAt || new Date().toISOString(),
     createdAt: taskRecord.createdAt || taskRecord.updatedAt || new Date().toISOString(),
@@ -185,6 +174,7 @@ export function useWorkbenchTasks(options = {}) {
     title: '',
     autoTitle: '',
     lastPromptPreview: '',
+    codexSessionId: '',
     blocks: [],
   })
   const loadingTasks = ref(true)
@@ -200,6 +190,7 @@ export function useWorkbenchTasks(options = {}) {
   let autoSaveTimer = null
   let savePromise = null
   let loadRequestId = 0
+  let unsubscribeServerEvents = null
 
   const currentTaskAutoTitle = computed(() => deriveAutoTaskTitle(draft.value.blocks))
   const currentTaskDisplayTitle = computed(() => resolveTaskDisplayTitle({
@@ -207,7 +198,7 @@ export function useWorkbenchTasks(options = {}) {
     autoTitle: draft.value.autoTitle,
     preview: deriveTaskPreview(draft.value.blocks),
   }, draft.value.blocks))
-  const currentSelectedSessionId = computed(() => selectedSessionMap.value[currentTaskSlug.value]?.id || '')
+  const currentSelectedSessionId = computed(() => selectedSessionMap.value[currentTaskSlug.value] || '')
   const isCurrentTaskSending = computed(() => Boolean(sendingTaskMap.value[currentTaskSlug.value]))
   const hasAnyTaskSending = computed(() => Object.values(sendingTaskMap.value).some(Boolean))
   const pageTitle = computed(() => currentTaskDisplayTitle.value || '未命名任务')
@@ -232,12 +223,14 @@ export function useWorkbenchTasks(options = {}) {
     title = draft.value.title,
     autoTitle = draft.value.autoTitle,
     lastPromptPreview = draft.value.lastPromptPreview,
+    codexSessionId = draft.value.codexSessionId,
     blocks = draft.value.blocks
   ) {
     return JSON.stringify({
       title: String(title || ''),
       autoTitle: String(autoTitle || ''),
       lastPromptPreview: String(lastPromptPreview || ''),
+      codexSessionId: String(codexSessionId || ''),
       blocks: normalizeBlocksForSave(blocks),
     })
   }
@@ -268,14 +261,18 @@ export function useWorkbenchTasks(options = {}) {
     const preview = task.slug === currentTaskSlug.value
       ? draft.value.lastPromptPreview || task.lastPromptPreview || ''
       : cachedDraft?.lastPromptPreview || task.lastPromptPreview || ''
+    const codexSessionId = task.slug === currentTaskSlug.value
+      ? selectedSessionMap.value[task.slug] || draft.value.codexSessionId || task.codexSessionId || ''
+      : cachedDraft?.codexSessionId || task.codexSessionId || ''
 
     return {
       ...task,
       title,
       autoTitle,
       preview,
+      codexSessionId,
       displayTitle: resolveTaskDisplayTitle({ title, autoTitle, preview }, blocks),
-      sending: Boolean(sendingTaskMap.value[task.slug]),
+      sending: Boolean(task.running || sendingTaskMap.value[task.slug]),
     }
   }
 
@@ -327,10 +324,87 @@ export function useWorkbenchTasks(options = {}) {
     }
   }
 
-  function handleTaskSessionChange(slug, session) {
+  function syncSendingTaskMapWithTasks(nextTasks = tasks.value) {
+    const nextMap = {}
+
+    ;(nextTasks || []).forEach((task) => {
+      if (!task?.slug) {
+        return
+      }
+      nextMap[task.slug] = Boolean(task.running)
+    })
+
+    sendingTaskMap.value = nextMap
+  }
+
+  function setTaskSelectedSessionId(slug, sessionId) {
+    if (!slug) {
+      return
+    }
+
     selectedSessionMap.value = {
       ...selectedSessionMap.value,
-      [slug]: session || null,
+      [slug]: String(sessionId || '').trim(),
+    }
+  }
+
+  async function handleTaskSessionChange(slug, sessionId) {
+    const targetSlug = String(slug || '').trim()
+    if (!targetSlug) {
+      return
+    }
+
+    const normalizedSessionId = String(sessionId || '').trim()
+    const previousSessionId = selectedSessionMap.value[targetSlug] || ''
+
+    setTaskSelectedSessionId(targetSlug, normalizedSessionId)
+
+    const cachedDraft = getTaskDraftState(targetSlug)
+    if (cachedDraft) {
+      setTaskDraftState(targetSlug, {
+        ...cachedDraft,
+        codexSessionId: normalizedSessionId,
+      })
+    }
+
+    const currentSummary = getTaskSummary(targetSlug)
+    if (currentSummary) {
+      upsertTaskSummary({
+        ...currentSummary,
+        codexSessionId: normalizedSessionId,
+      })
+    }
+
+    if (targetSlug === currentTaskSlug.value) {
+      draft.value = {
+        ...draft.value,
+        codexSessionId: normalizedSessionId,
+      }
+    }
+
+    try {
+      await updateTaskCodexSession(targetSlug, normalizedSessionId)
+    } catch (err) {
+      setTaskSelectedSessionId(targetSlug, previousSessionId)
+      if (cachedDraft) {
+        setTaskDraftState(targetSlug, {
+          ...cachedDraft,
+          codexSessionId: previousSessionId,
+        })
+      }
+      if (currentSummary) {
+        upsertTaskSummary({
+          ...currentSummary,
+          codexSessionId: previousSessionId,
+        })
+      }
+      if (targetSlug === currentTaskSlug.value) {
+        draft.value = {
+          ...draft.value,
+          codexSessionId: previousSessionId,
+        }
+      }
+      error.value = err.message
     }
   }
 
@@ -368,22 +442,76 @@ export function useWorkbenchTasks(options = {}) {
       title: String(draft.value.title || ''),
       autoTitle: String(draft.value.autoTitle || ''),
       lastPromptPreview: String(draft.value.lastPromptPreview || ''),
+      codexSessionId: String(selectedSessionMap.value[currentTaskSlug.value] || draft.value.codexSessionId || ''),
       preview: String(draft.value.lastPromptPreview || ''),
     })
   }
 
-  async function refreshTaskList() {
-    loadingTasks.value = true
-    error.value = ''
+  async function refreshTaskList(options = {}) {
+    const { silent = false } = options
+    if (!silent) {
+      loadingTasks.value = true
+      error.value = ''
+    }
 
     try {
       const payload = await listTasks()
-      tasks.value = sortTaskSummaries((payload.items || []).map(toTaskSummary))
+      const nextTasks = sortTaskSummaries((payload.items || []).map(toTaskSummary))
+      tasks.value = nextTasks
+      syncSendingTaskMapWithTasks(nextTasks)
     } catch (err) {
-      error.value = err.message
+      if (!silent) {
+        error.value = err.message
+      }
     } finally {
-      loadingTasks.value = false
+      if (!silent) {
+        loadingTasks.value = false
+      }
     }
+  }
+
+  async function syncTaskStateAfterServerChange(taskSlug = '') {
+    const currentSlug = String(currentTaskSlug.value || '').trim()
+    if (!currentSlug) {
+      return
+    }
+
+    const currentStillExists = tasks.value.some((task) => task.slug === currentSlug)
+    if (!currentStillExists) {
+      if (tasks.value.length) {
+        await loadTask(tasks.value[0].slug, { force: true })
+        return
+      }
+
+      currentTaskSlug.value = ''
+      persistActiveTaskSlug('')
+      draft.value = { title: '', autoTitle: '', lastPromptPreview: '', codexSessionId: '', blocks: [] }
+      lastSavedSnapshot.value = createSnapshot('', '', '', '', [])
+      hasUnsavedChanges.value = false
+      return
+    }
+
+    if (taskSlug && taskSlug !== currentSlug) {
+      return
+    }
+
+    if (hasUnsavedChanges.value || saving.value || uploading.value || loadingTask.value) {
+      return
+    }
+
+    await loadTask(currentSlug, { force: true })
+  }
+
+  async function handleServerEvent(event = {}) {
+    const eventType = String(event.type || '').trim()
+    if (eventType !== 'tasks.changed' && eventType !== 'runs.changed' && eventType !== 'ready') {
+      return
+    }
+
+    await refreshTaskList({ silent: true })
+    await syncTaskStateAfterServerChange(
+      eventType === 'ready' ? '' : event.taskSlug
+    )
   }
 
   async function hydrateTaskFromServer(slug) {
@@ -397,6 +525,7 @@ export function useWorkbenchTasks(options = {}) {
       title: String(task.title || ''),
       autoTitle: String(task.autoTitle || ''),
       lastPromptPreview: String(task.lastPromptPreview || ''),
+      codexSessionId: String(task.codexSessionId || ''),
       blocks: normalizedBlocks,
     }
 
@@ -434,10 +563,12 @@ export function useWorkbenchTasks(options = {}) {
       }
 
       draft.value = cloneDraftState(state)
+      setTaskSelectedSessionId(targetSlug, state.codexSessionId)
       lastSavedSnapshot.value = createSnapshot(
         draft.value.title,
         draft.value.autoTitle,
         draft.value.lastPromptPreview,
+        draft.value.codexSessionId,
         draft.value.blocks
       )
       hasUnsavedChanges.value = false
@@ -484,6 +615,7 @@ export function useWorkbenchTasks(options = {}) {
           title: String(draft.value.title || ''),
           autoTitle: String(draft.value.autoTitle || ''),
           lastPromptPreview: String(draft.value.lastPromptPreview || ''),
+          codexSessionId: String(selectedSessionMap.value[currentTaskSlug.value] || draft.value.codexSessionId || ''),
           expiry: 'none',
           visibility: 'private',
           blocks: normalizeBlocksForSave(draft.value.blocks),
@@ -493,6 +625,7 @@ export function useWorkbenchTasks(options = {}) {
           title: String(task.title || ''),
           autoTitle: String(task.autoTitle || ''),
           lastPromptPreview: String(task.lastPromptPreview || ''),
+          codexSessionId: String(selectedSessionMap.value[currentTaskSlug.value] || task.codexSessionId || ''),
           blocks: cloneBlocks(draft.value.blocks),
         }
         setTaskDraftState(currentTaskSlug.value, normalizedState)
@@ -500,6 +633,7 @@ export function useWorkbenchTasks(options = {}) {
           normalizedState.title,
           normalizedState.autoTitle,
           normalizedState.lastPromptPreview,
+          normalizedState.codexSessionId,
           normalizedState.blocks
         )
         hasUnsavedChanges.value = false
@@ -560,6 +694,7 @@ export function useWorkbenchTasks(options = {}) {
         title: String(task.title || ''),
         autoTitle: String(task.autoTitle || ''),
         lastPromptPreview: String(task.lastPromptPreview || ''),
+        codexSessionId: String(task.codexSessionId || ''),
         blocks: cloneBlocks(task.blocks || []),
       }
       setTaskDraftState(task.slug, initialState)
@@ -600,7 +735,6 @@ export function useWorkbenchTasks(options = {}) {
     try {
       const targetSlug = currentTaskSlug.value
       await deleteTask(targetSlug)
-      await clearTaskCodexCache(targetSlug)
       tasks.value = tasks.value.filter((task) => task.slug !== targetSlug)
 
       const nextDraftMap = { ...taskDraftMap.value }
@@ -620,8 +754,8 @@ export function useWorkbenchTasks(options = {}) {
       } else {
         currentTaskSlug.value = ''
         persistActiveTaskSlug('')
-        draft.value = { title: '', autoTitle: '', lastPromptPreview: '', blocks: [] }
-        lastSavedSnapshot.value = createSnapshot('', '', '', [])
+        draft.value = { title: '', autoTitle: '', lastPromptPreview: '', codexSessionId: '', blocks: [] }
+        lastSavedSnapshot.value = createSnapshot('', '', '', '', [])
         hasUnsavedChanges.value = false
         await createTaskAndSelect()
       }
@@ -848,7 +982,14 @@ export function useWorkbenchTasks(options = {}) {
 
   onBeforeUnmount(() => {
     clearAutoSaveTimer()
+    unsubscribeServerEvents?.()
   })
+
+  if (typeof window !== 'undefined' && !unsubscribeServerEvents) {
+    unsubscribeServerEvents = subscribeServerEvents((event) => {
+      handleServerEvent(event).catch(() => {})
+    })
+  }
 
   return {
     buildPromptForTask,
@@ -878,6 +1019,7 @@ export function useWorkbenchTasks(options = {}) {
     removeCurrentTask,
     removingTask,
     renderedTasks,
+    refreshTaskList,
     saveTask,
     saving,
     selectTask,
@@ -888,6 +1030,5 @@ export function useWorkbenchTasks(options = {}) {
     updateLastPromptPreview,
     uploading,
     creatingTask,
-    getCodexSessionStorageKey,
   }
 }

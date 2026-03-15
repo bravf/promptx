@@ -2,25 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  applyRunEventToTurn,
+  createTurnFromRun,
   formatCodexEvent,
-  restoreTurnsFromStorage,
+  getProcessStatus,
   sortSessions,
 } from './useCodexSessionPanel.js'
-
-function createMemoryStorage(initial = {}) {
-  const data = new Map(Object.entries(initial))
-  return {
-    getItem(key) {
-      return data.has(key) ? data.get(key) : null
-    },
-    removeItem(key) {
-      data.delete(key)
-    },
-    setItem(key, value) {
-      data.set(key, String(value))
-    },
-  }
-}
 
 test('sortSessions prioritizes running then current then updatedAt', () => {
   const sessions = sortSessions([
@@ -48,38 +35,96 @@ test('formatCodexEvent formats command completion details', () => {
   assert.match(event.detail, /pnpm build/)
 })
 
-test('restoreTurnsFromStorage prefers indexedDB transcript data', async () => {
-  const turns = await restoreTurnsFromStorage('task-a', {
-    getStoredTranscript: async () => [{ id: 1, prompt: 'from-db' }],
-    setStoredTranscript: async () => {
-      throw new Error('should not migrate legacy data')
-    },
-    storage: createMemoryStorage({
-      'task-a': JSON.stringify([{ id: 2, prompt: 'legacy' }]),
-    }),
-  })
-
-  assert.deepEqual(turns, [{ id: 1, prompt: 'from-db' }])
+test('getProcessStatus reflects stopped run', () => {
+  assert.equal(getProcessStatus({ status: 'stopped' }), '已停止')
 })
 
-test('restoreTurnsFromStorage migrates legacy localStorage transcript when indexedDB is empty', async () => {
-  const storage = createMemoryStorage({
-    'task-b': JSON.stringify([{ id: 2, prompt: 'legacy' }]),
-  })
-  const writes = []
+test('createTurnFromRun restores wrapped event payloads from persisted runs', () => {
+  let turnId = 0
+  let logId = 0
+  const mergedSessions = []
 
-  const turns = await restoreTurnsFromStorage('task-b', {
-    getStoredTranscript: async () => null,
-    setStoredTranscript: async (key, value) => {
-      writes.push({ key, value })
+  const turn = createTurnFromRun({
+    id: 'run-1',
+    prompt: 'hello',
+    status: 'completed',
+    responseMessage: 'done',
+    events: [
+      {
+        id: 1,
+        seq: 1,
+        eventType: 'session',
+        payload: {
+          type: 'session',
+          session: {
+            id: 'session-1',
+            title: 'demo',
+            cwd: 'D:/code/demo',
+          },
+        },
+      },
+      {
+        id: 2,
+        seq: 2,
+        eventType: 'completed',
+        payload: {
+          type: 'completed',
+          message: 'done',
+        },
+      },
+    ],
+  }, () => ++turnId, () => ++logId, (session) => {
+    mergedSessions.push(session.id)
+  })
+
+  assert.equal(turn.events.length, 2)
+  assert.deepEqual(mergedSessions, ['session-1'])
+  assert.equal(turn.responseMessage, 'done')
+  assert.equal(turn.lastEventSeq, 2)
+})
+
+test('applyRunEventToTurn appends incremental codex events once and updates response text', () => {
+  let turnId = 0
+  let logId = 0
+
+  const turn = createTurnFromRun({
+    id: 'run-2',
+    prompt: 'hello',
+    status: 'running',
+    events: [],
+  }, () => ++turnId, () => ++logId, () => {})
+
+  const applied = applyRunEventToTurn(turn, {
+    seq: 3,
+    payload: {
+      type: 'codex',
+      event: {
+        type: 'item.completed',
+        item: {
+          type: 'agent_message',
+          text: 'incremental reply',
+        },
+      },
     },
-    storage,
-  })
+  }, () => ++logId, () => {})
 
-  assert.deepEqual(turns, [{ id: 2, prompt: 'legacy' }])
-  assert.deepEqual(writes, [{
-    key: 'task-b',
-    value: [{ id: 2, prompt: 'legacy' }],
-  }])
-  assert.equal(storage.getItem('task-b'), null)
+  const duplicate = applyRunEventToTurn(turn, {
+    seq: 3,
+    payload: {
+      type: 'codex',
+      event: {
+        type: 'item.completed',
+        item: {
+          type: 'agent_message',
+          text: 'duplicate reply',
+        },
+      },
+    },
+  }, () => ++logId, () => {})
+
+  assert.equal(applied, true)
+  assert.equal(duplicate, false)
+  assert.equal(turn.responseMessage, 'incremental reply')
+  assert.equal(turn.events.length, 1)
+  assert.equal(turn.lastEventSeq, 3)
 })

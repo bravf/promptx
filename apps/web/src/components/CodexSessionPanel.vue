@@ -25,9 +25,13 @@ const props = defineProps({
     type: Function,
     default: null,
   },
-  storageKey: {
+  taskSlug: {
     type: String,
-    default: 'promptx:codex-session-id',
+    default: '',
+  },
+  selectedSessionId: {
+    type: String,
+    default: '',
   },
   active: {
     type: Boolean,

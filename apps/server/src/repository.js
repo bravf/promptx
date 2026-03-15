@@ -34,6 +34,7 @@ function toTask(row, blocks = []) {
     title: row.title,
     autoTitle: row.auto_title || '',
     lastPromptPreview: row.last_prompt_preview || '',
+    codexSessionId: row.codex_session_id || '',
     displayTitle,
     visibility: row.visibility,
     expiresAt: row.expires_at,
@@ -154,6 +155,7 @@ function mapTaskSummary(row, firstText = '', blockCount = 0) {
     title: row.title || '',
     autoTitle: row.auto_title || deriveTitleFromBlocks(textBlock) || '',
     lastPromptPreview: row.last_prompt_preview || '',
+    codexSessionId: row.codex_session_id || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     visibility: row.visibility,
@@ -193,7 +195,7 @@ function normalizeBlockInput(block = {}) {
 
 export function listTasks(limit = 30) {
   const rows = all(
-    `SELECT id, slug, title, auto_title, last_prompt_preview, visibility, expires_at, created_at, updated_at
+    `SELECT id, slug, title, auto_title, last_prompt_preview, codex_session_id, visibility, expires_at, created_at, updated_at
      FROM tasks
      ORDER BY updated_at DESC
      LIMIT ?`,
@@ -217,7 +219,7 @@ export function listTasks(limit = 30) {
 
 export function getTaskBySlug(slug) {
   const row = get(
-    `SELECT id, slug, title, auto_title, last_prompt_preview, visibility, expires_at, created_at, updated_at
+    `SELECT id, slug, title, auto_title, last_prompt_preview, codex_session_id, visibility, expires_at, created_at, updated_at
      FROM tasks
      WHERE slug = ?`,
     [slug]
@@ -236,6 +238,7 @@ export function createTask(input = {}) {
   const title = clampText(input.title || '', 140)
   const autoTitle = clampText(input.autoTitle || '', 140)
   const lastPromptPreview = clampText(input.lastPromptPreview || '', 280)
+  const codexSessionId = clampText(input.codexSessionId || '', 120)
   const visibility = normalizeVisibility(input.visibility)
   const expiresAt = resolveExpiresAt(normalizeExpiry(input.expiry || 'none'))
   const slug = ensureSlug(title)
@@ -243,9 +246,9 @@ export function createTask(input = {}) {
 
   transaction(() => {
     run(
-      `INSERT INTO tasks (slug, edit_token, title, auto_title, last_prompt_preview, visibility, expires_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [slug, editToken, title, autoTitle, lastPromptPreview, visibility, expiresAt, now, now]
+      `INSERT INTO tasks (slug, edit_token, title, auto_title, last_prompt_preview, codex_session_id, visibility, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [slug, editToken, title, autoTitle, lastPromptPreview, codexSessionId, visibility, expiresAt, now, now]
     )
   })
 
@@ -256,7 +259,12 @@ export function createTask(input = {}) {
 }
 
 export function updateTask(slug, input = {}) {
-  const existing = get('SELECT id, edit_token FROM tasks WHERE slug = ?', [slug])
+  const existing = get(
+    `SELECT id, edit_token, codex_session_id
+     FROM tasks
+     WHERE slug = ?`,
+    [slug]
+  )
   if (!existing) {
     return { error: 'not_found' }
   }
@@ -264,6 +272,9 @@ export function updateTask(slug, input = {}) {
   const title = clampText(input.title || '', 140)
   const autoTitle = clampText(input.autoTitle || '', 140)
   const lastPromptPreview = clampText(input.lastPromptPreview || '', 280)
+  const codexSessionId = Object.prototype.hasOwnProperty.call(input, 'codexSessionId')
+    ? clampText(input.codexSessionId || '', 120)
+    : String(existing.codex_session_id || '')
   const visibility = normalizeVisibility(input.visibility)
   const expiresAt = resolveExpiresAt(normalizeExpiry(input.expiry || 'none'))
   const updatedAt = new Date().toISOString()
@@ -274,9 +285,9 @@ export function updateTask(slug, input = {}) {
   transaction(() => {
     run(
       `UPDATE tasks
-       SET title = ?, auto_title = ?, last_prompt_preview = ?, visibility = ?, expires_at = ?, updated_at = ?
+       SET title = ?, auto_title = ?, last_prompt_preview = ?, codex_session_id = ?, visibility = ?, expires_at = ?, updated_at = ?
        WHERE slug = ?`,
-      [title, autoTitle, lastPromptPreview, visibility, expiresAt, updatedAt, slug]
+      [title, autoTitle, lastPromptPreview, codexSessionId, visibility, expiresAt, updatedAt, slug]
     )
 
     const incomingIds = new Set()
@@ -376,4 +387,56 @@ export function buildTaskExports(task) {
 
 export function canEditTask(slug) {
   return Boolean(get('SELECT 1 FROM tasks WHERE slug = ?', [slug]))
+}
+
+export function updateTaskCodexSession(slug, codexSessionId = '') {
+  const existing = get('SELECT slug FROM tasks WHERE slug = ?', [slug])
+  if (!existing) {
+    return null
+  }
+
+  const normalizedSessionId = String(codexSessionId || '').trim()
+  const updatedAt = new Date().toISOString()
+
+  transaction(() => {
+    run(
+      `UPDATE tasks
+       SET codex_session_id = ?, updated_at = ?
+       WHERE slug = ?`,
+      [normalizedSessionId, updatedAt, slug]
+    )
+  })
+
+  return getTaskBySlug(slug)
+}
+
+export function clearTaskCodexSessionReferences(codexSessionId = '') {
+  const normalizedSessionId = String(codexSessionId || '').trim()
+  if (!normalizedSessionId) {
+    return 0
+  }
+
+  const matchedCount = Number(
+    get(
+      `SELECT COUNT(*) AS count
+       FROM tasks
+       WHERE codex_session_id = ?`,
+      [normalizedSessionId]
+    )?.count || 0
+  )
+
+  if (!matchedCount) {
+    return 0
+  }
+
+  transaction(() => {
+    run(
+      `UPDATE tasks
+       SET codex_session_id = ''
+       WHERE codex_session_id = ?`,
+      [normalizedSessionId]
+    )
+  })
+
+  return matchedCount
 }
