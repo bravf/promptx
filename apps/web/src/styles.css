@@ -17,32 +17,32 @@ body,
 }
 
 body {
-  @apply bg-stone-100 font-sans text-stone-900 antialiased dark:bg-stone-950 dark:text-stone-100;
+  @apply bg-stone-100 font-sans text-stone-900 antialiased dark:bg-[#1b1714] dark:text-stone-100;
 }
 
 ::selection {
-  @apply bg-stone-300 text-stone-900 dark:bg-stone-700 dark:text-stone-50;
+  @apply bg-stone-300 text-stone-900 dark:bg-stone-600 dark:text-stone-50;
 }
 
 @layer components {
   .panel {
-    @apply rounded-sm border border-stone-300 bg-stone-50 shadow-panel dark:border-stone-800 dark:bg-stone-900;
+    @apply rounded-sm border border-stone-300 bg-stone-50 shadow-panel dark:border-[#453c36] dark:bg-[#28231f];
   }
 
   .dashed-panel {
-    @apply rounded-sm border border-dashed border-stone-400 bg-stone-50 dark:border-stone-700 dark:bg-stone-900;
+    @apply rounded-sm border border-dashed border-stone-400 bg-stone-50 dark:border-[#544941] dark:bg-[#2d2723];
   }
 
   .tool-button {
-    @apply inline-flex items-center justify-center rounded-sm border border-stone-300 bg-stone-50 font-medium text-stone-700 transition hover:bg-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:hover:bg-stone-800 dark:focus:ring-stone-600;
+    @apply inline-flex items-center justify-center rounded-sm border border-stone-300 bg-stone-50 font-medium text-stone-700 transition hover:bg-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#544941] dark:bg-[#302924] dark:text-stone-200 dark:hover:bg-[#38312b] dark:focus:ring-stone-500;
   }
 
   .tool-button-primary {
-    @apply border-stone-900 bg-stone-900 text-stone-50 hover:bg-stone-700 dark:border-stone-100 dark:bg-stone-100 dark:text-stone-950 dark:hover:bg-stone-300;
+    @apply border-stone-900 bg-stone-900 text-stone-50 hover:bg-stone-700 dark:border-[#d7d0c5] dark:bg-[#d7d0c5] dark:text-stone-950 dark:hover:bg-[#e4ddd2];
   }
 
   .tool-input {
-    @apply w-full rounded-sm border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-900 outline-none transition focus:border-stone-500 focus:ring-2 focus:ring-stone-300 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 dark:focus:border-stone-500 dark:focus:ring-stone-800;
+    @apply w-full rounded-sm border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-900 outline-none transition focus:border-stone-500 focus:ring-2 focus:ring-stone-300 dark:border-[#544941] dark:bg-[#211c19] dark:text-stone-100 dark:focus:border-stone-500 dark:focus:ring-stone-700;
   }
 
   .prose-like a {

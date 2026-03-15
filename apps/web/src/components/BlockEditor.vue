@@ -758,7 +758,7 @@ defineExpose({
     @dragover.prevent
     @paste="handleSurfacePaste"
   >
-    <div class="border-b border-stone-200 px-5 py-4 text-sm text-stone-600 dark:border-stone-800 dark:text-stone-400">
+    <div class="border-b border-stone-200 px-5 py-4 text-sm text-stone-600 dark:border-[#39312c] dark:text-stone-400">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <p class="inline-flex items-center gap-2 font-medium text-stone-900 dark:text-stone-100">
           <ScanText class="h-4 w-4" />
@@ -769,7 +769,7 @@ defineExpose({
         </div>
       </div>
       <div v-if="uploading" class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
-        <span class="inline-flex items-center gap-1.5 rounded-sm border border-dashed border-stone-400 px-2 py-1 dark:border-stone-700">
+        <span class="inline-flex items-center gap-1.5 rounded-sm border border-dashed border-stone-400 px-2 py-1 dark:border-[#544941]">
           <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
           <span>正在处理文件...</span>
         </span>
@@ -812,7 +812,7 @@ defineExpose({
         </div>
 
         <div v-else-if="block.type === BLOCK_TYPES.IMPORTED_TEXT" class="group relative dashed-panel overflow-hidden">
-          <div class="flex items-start justify-between gap-3 border-b border-dashed border-stone-300 px-4 py-3 text-xs text-stone-600 dark:border-stone-700 dark:text-stone-400">
+          <div class="flex items-start justify-between gap-3 border-b border-dashed border-stone-300 px-4 py-3 text-xs text-stone-600 dark:border-[#544941] dark:text-stone-400">
             <div class="min-w-0 pr-24">
               <p class="font-medium text-stone-900 dark:text-stone-100">导入文件</p>
               <p class="mt-1 truncate font-mono">{{ block.meta?.fileName || '未命名文件' }}</p>
@@ -863,8 +863,8 @@ defineExpose({
             <Trash2 class="h-3.5 w-3.5" />
             <span>删除</span>
           </button>
-          <div class="overflow-hidden rounded-sm border border-stone-300 bg-stone-100 dark:border-stone-700 dark:bg-stone-950" @click="focusAfterImage(index)">
-            <div class="flex items-center gap-2 border-b border-stone-200 px-4 py-3 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
+          <div class="overflow-hidden rounded-sm border border-stone-300 bg-stone-100 dark:border-[#544941] dark:bg-[#26211d]" @click="focusAfterImage(index)">
+            <div class="flex items-center gap-2 border-b border-stone-200 px-4 py-3 text-xs text-stone-500 dark:border-[#39312c] dark:text-stone-400">
               <ImageIcon class="h-4 w-4" />
               <span>已插入图片</span>
             </div>

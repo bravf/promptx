@@ -227,7 +227,7 @@ onBeforeUnmount(() => {
 
     <div class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-1">
       <aside class="panel flex min-h-0 flex-col overflow-hidden">
-        <div class="border-b border-stone-200 px-4 py-4 dark:border-stone-800">
+        <div class="border-b border-stone-200 px-4 py-4 dark:border-[#39312c]">
           <div class="flex items-center justify-between gap-3">
             <div class="flex min-h-8 items-center">
               <div class="text-sm font-medium text-stone-900 dark:text-stone-100">PromptX 工作台</div>
@@ -246,7 +246,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          <div v-if="loadingTasks && !renderedTasks.length" class="rounded-sm border border-dashed border-stone-300 bg-stone-50 px-3 py-4 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">
+          <div v-if="loadingTasks && !renderedTasks.length" class="rounded-sm border border-dashed border-stone-300 bg-stone-50 px-3 py-4 text-sm text-stone-500 dark:border-[#544941] dark:bg-[#2d2723] dark:text-stone-400">
             正在加载任务...
           </div>
 
@@ -256,8 +256,8 @@ onBeforeUnmount(() => {
               :key="task.slug"
               class="group relative rounded-sm border px-3 py-3 transition cursor-default"
               :class="task.slug === currentTaskSlug
-                ? 'border-stone-500 bg-stone-100 text-stone-900 dark:border-stone-500 dark:bg-stone-800 dark:text-stone-100'
-                : 'border-stone-300 bg-stone-50 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-900 dark:hover:bg-stone-800'"
+                ? 'border-stone-500 bg-stone-100 text-stone-900 dark:border-[#73665c] dark:bg-[#332c27] dark:text-stone-100'
+                : 'border-stone-300 bg-stone-50 hover:bg-stone-100 dark:border-[#453c36] dark:bg-[#26211d] dark:hover:bg-[#2f2924]'"
               @click="selectTask(task.slug)"
             >
               <span
@@ -291,7 +291,7 @@ onBeforeUnmount(() => {
                   <span
                     v-if="task.sending"
                     class="rounded-sm border border-dashed px-1.5 py-0.5"
-                    :class="'border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-300'"
+                    :class="'border-amber-300 text-amber-700 dark:border-[#7f6949] dark:bg-[#392f20] dark:text-[#e5ce9a]'"
                   >运行中</span>
                 </div>
               </div>
@@ -299,7 +299,7 @@ onBeforeUnmount(() => {
               <div class="mt-2 text-[11px] opacity-70">{{ new Date(task.updatedAt).toLocaleString('zh-CN') }}</div>
               <button
                 type="button"
-                class="absolute bottom-2 right-2 inline-flex h-6 w-6 items-center justify-center rounded-sm text-stone-500 opacity-0 transition hover:bg-red-100 hover:text-red-700 group-hover:opacity-100 focus:opacity-100 dark:text-stone-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                class="absolute bottom-2 right-2 inline-flex h-6 w-6 items-center justify-center rounded-sm text-stone-500 opacity-0 transition hover:bg-red-100 hover:text-red-700 group-hover:opacity-100 focus:opacity-100 dark:text-stone-500 dark:hover:bg-red-950/20 dark:hover:text-red-200"
                 :disabled="removingTask || creatingTask || task.sending"
                 @click.stop="selectTask(task.slug); openDeleteDialog()"
               >
@@ -309,7 +309,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="border-t border-stone-200 px-3 py-3 dark:border-stone-800">
+        <div class="border-t border-stone-200 px-3 py-3 dark:border-[#39312c]">
           <div v-if="error" class="mb-3 inline-flex min-w-0 items-start gap-2 text-xs text-red-700 dark:text-red-300">
             <CircleAlert class="mt-0.5 h-4 w-4 shrink-0" />
             <span class="min-w-0 break-words">{{ error }}</span>

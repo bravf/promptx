@@ -49,8 +49,8 @@ function getRuntimeStatusLabel(session) {
 
 function getRuntimeStatusClass(session) {
   return session?.running
-    ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-    : 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+    ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-[#7f6949] dark:bg-[#392f20] dark:text-[#e5ce9a]'
+    : 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-[#5b7562] dark:bg-[#243228] dark:text-[#deecdf]'
 }
 
 function openDropdown() {
@@ -176,7 +176,7 @@ onBeforeUnmount(() => {
   <div ref="rootRef" class="relative min-w-0">
     <button
       type="button"
-      class="flex w-full items-center gap-3 rounded-sm border border-stone-300 bg-white px-3 py-2 text-left transition hover:border-stone-500 focus:border-stone-500 focus:outline-none dark:border-stone-700 dark:bg-stone-950 dark:hover:border-stone-500 dark:focus:border-stone-400"
+      class="flex w-full items-center gap-3 rounded-sm border border-stone-300 bg-white px-3 py-2 text-left transition hover:border-stone-500 focus:border-stone-500 focus:outline-none dark:border-[#544941] dark:bg-[#211c19] dark:hover:border-[#73665c] dark:focus:border-stone-400"
       :class="disabled ? 'cursor-not-allowed opacity-60' : ''"
       :disabled="disabled"
       @click="toggleDropdown"
@@ -212,11 +212,11 @@ onBeforeUnmount(() => {
       <div
         v-if="open"
         ref="panelRef"
-        class="fixed z-30 flex overflow-hidden rounded-sm border border-stone-300 bg-white shadow-sm dark:border-stone-700 dark:bg-stone-950"
+        class="fixed z-30 flex overflow-hidden rounded-sm border border-stone-300 bg-white shadow-sm dark:border-[#544941] dark:bg-[#28231f]"
         :style="panelStyle"
       >
         <div class="flex min-h-0 w-full flex-col">
-          <div class="flex items-center justify-between gap-3 border-b border-dashed border-stone-300 px-3 py-2 text-[11px] text-stone-500 dark:border-stone-700 dark:text-stone-400">
+          <div class="flex items-center justify-between gap-3 border-b border-dashed border-stone-300 px-3 py-2 text-[11px] text-stone-500 dark:border-[#544941] dark:text-stone-400">
             <span>{{ loading ? '正在同步最新会话...' : `共 ${sessions.length} 个会话` }}</span>
             <LoaderCircle v-if="loading" class="h-3.5 w-3.5 animate-spin" />
           </div>
@@ -228,8 +228,8 @@ onBeforeUnmount(() => {
               type="button"
               class="w-full rounded-sm border border-dashed p-3 text-left transition"
               :class="session.id === modelValue
-                ? 'border-stone-500 bg-stone-50 dark:border-stone-500 dark:bg-stone-900'
-                : 'border-stone-300 bg-white hover:border-stone-500 dark:border-stone-700 dark:bg-stone-950 dark:hover:border-stone-500'"
+                ? 'border-stone-500 bg-stone-50 dark:border-[#73665c] dark:bg-[#332c27]'
+                : 'border-stone-300 bg-white hover:border-stone-500 dark:border-[#453c36] dark:bg-[#26211d] dark:hover:border-[#73665c]'"
               @click="selectSession(session.id)"
             >
               <div class="flex items-start gap-3">
@@ -253,7 +253,7 @@ onBeforeUnmount(() => {
 
             <div
               v-if="!sessions.length"
-              class="rounded-sm border border-dashed border-stone-300 bg-stone-50 px-3 py-4 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400"
+              class="rounded-sm border border-dashed border-stone-300 bg-stone-50 px-3 py-4 text-sm text-stone-500 dark:border-[#544941] dark:bg-[#2d2723] dark:text-stone-400"
             >
               还没有会话，请先到管理弹窗里新建。
             </div>
