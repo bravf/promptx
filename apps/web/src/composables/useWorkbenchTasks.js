@@ -15,6 +15,13 @@ import {
   uploadImage,
 } from '../lib/api.js'
 import { buildCodexPrompt } from '../lib/codex.js'
+import {
+  buildReviewCommentPromptBlocks,
+  getTaskReviewComments,
+  loadReviewCommentMap,
+  saveReviewCommentMap,
+  setTaskReviewComments,
+} from '../lib/reviewComments.js'
 import { translate } from './useI18n.js'
 import { useWorkbenchRealtime } from './useWorkbenchRealtime.js'
 
@@ -409,6 +416,7 @@ export function useWorkbenchTasks(options = {}) {
   const editorRef = ref(null)
   const tasks = ref([])
   const taskDraftMap = ref({})
+  const reviewCommentsMap = ref(loadReviewCommentMap())
   const selectedSessionMap = ref({})
   const sendingTaskMap = ref({})
   const currentTaskSlug = ref('')
@@ -457,6 +465,7 @@ export function useWorkbenchTasks(options = {}) {
   ))
   const hasCurrentDraftContent = computed(() => hasMeaningfulBlocks(draft.value.blocks))
   const currentTodoItems = computed(() => cloneTodoItems(draft.value.todoItems))
+  const currentReviewComments = computed(() => getTaskReviewComments(reviewCommentsMap.value, currentTaskSlug.value))
   const pageTitle = computed(() => currentTaskDisplayTitle.value || translate('workbench.untitledTask'))
   const renderedTasks = computed(() => tasks.value.map((task) => buildRenderedTask(task)))
 
@@ -466,6 +475,61 @@ export function useWorkbenchTasks(options = {}) {
     }
 
     return content.slice(apiBase.length)
+  }
+
+  function getReviewCommentsForTask(slug) {
+    return getTaskReviewComments(reviewCommentsMap.value, slug)
+  }
+
+  function setReviewCommentsForTask(slug, comments = []) {
+    reviewCommentsMap.value = setTaskReviewComments(reviewCommentsMap.value, slug, comments)
+    saveReviewCommentMap(reviewCommentsMap.value)
+  }
+
+  function addReviewCommentToTask(slug, comment = {}) {
+    const normalizedSlug = String(slug || '').trim()
+    if (!normalizedSlug) {
+      return null
+    }
+
+    const nextComment = {
+      id: String(
+        comment?.id
+        || globalThis.crypto?.randomUUID?.()
+        || `review-comment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      ).trim(),
+      createdAt: String(comment?.createdAt || new Date().toISOString()).trim(),
+      ...comment,
+    }
+
+    const nextComments = [
+      ...getReviewCommentsForTask(normalizedSlug),
+      nextComment,
+    ]
+    setReviewCommentsForTask(normalizedSlug, nextComments)
+    return nextComments[nextComments.length - 1] || null
+  }
+
+  function removeReviewCommentFromTask(slug, commentId = '') {
+    const normalizedSlug = String(slug || '').trim()
+    const normalizedCommentId = String(commentId || '').trim()
+    if (!normalizedSlug || !normalizedCommentId) {
+      return
+    }
+
+    setReviewCommentsForTask(
+      normalizedSlug,
+      getReviewCommentsForTask(normalizedSlug).filter((item) => item.id !== normalizedCommentId)
+    )
+  }
+
+  function clearReviewCommentsForTask(slug) {
+    const normalizedSlug = String(slug || '').trim()
+    if (!normalizedSlug) {
+      return
+    }
+
+    setReviewCommentsForTask(normalizedSlug, [])
   }
 
 function trimBoundaryBlankLines(value = '') {
@@ -1296,6 +1360,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
       const targetSlug = currentTaskSlug.value
       await deleteTask(targetSlug)
       tasks.value = tasks.value.filter((task) => task.slug !== targetSlug)
+      clearReviewCommentsForTask(targetSlug)
 
       const nextDraftMap = { ...taskDraftMap.value }
       delete nextDraftMap[targetSlug]
@@ -1587,9 +1652,14 @@ function normalizeTodoItemsForSnapshot(items = []) {
       return ''
     }
 
+    const reviewCommentBlocks = buildReviewCommentPromptBlocks(getReviewCommentsForTask(slug))
+
     return buildCodexPrompt({
       title: String(state.title || ''),
-      blocks: normalizeBlocksForSave(state.blocks || []),
+      blocks: [
+        ...reviewCommentBlocks,
+        ...normalizeBlocksForSave(state.blocks || []),
+      ],
     }, getTaskRawUrl(slug))
   }
 
@@ -1602,7 +1672,10 @@ function normalizeTodoItemsForSnapshot(items = []) {
       return []
     }
 
-    return cloneBlocks(normalizeBlocksForSave(state.blocks || []))
+    return cloneBlocks([
+      ...buildReviewCommentPromptBlocks(getReviewCommentsForTask(slug)),
+      ...normalizeBlocksForSave(state.blocks || []),
+    ])
   }
 
   async function ensureCodexPromptReady(taskSlug) {
@@ -1694,18 +1767,21 @@ function normalizeTodoItemsForSnapshot(items = []) {
   )
 
   return {
+    addReviewCommentToTask,
     addCurrentDraftToTodo,
     applyTaskSettingsUpdate,
     buildPromptForTask,
     getPromptBlocksForTask,
     buildPromptPreview,
     clearCurrentTaskContent,
+    clearReviewCommentsForTask,
     createTaskAndSelect,
     currentSelectedSessionId,
     currentTaskSendState,
     currentTaskAutoTitle,
     currentTaskDisplayTitle,
     currentTaskSlug,
+    currentReviewComments,
     draft,
     editorRef,
     error,
@@ -1730,6 +1806,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
     removingTask,
     renderedTasks,
     refreshTaskList,
+    removeReviewCommentFromTask,
     saveTask,
     saving,
     selectTask,

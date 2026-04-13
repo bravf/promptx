@@ -32,7 +32,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'create-review-comment'])
 const { t } = useI18n()
 
 const titleText = computed(() => {
@@ -63,6 +63,7 @@ const titleText = computed(() => {
       :preferred-scope="preferredScope"
       :preferred-run-id="preferredRunId"
       :focus-token="focusToken"
+      @create-review-comment="emit('create-review-comment', $event)"
     />
   </DialogShell>
 </template>

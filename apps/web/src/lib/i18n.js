@@ -407,6 +407,23 @@ export const MESSAGES = {
         : `已插入 ${count} 个文件块，稍后会自动保存`,
       pdfBlocksInserted: ({ blockCount, pageCount }) => `已插入 ${blockCount} 个图文块${pageCount ? `，共 ${pageCount} 页` : ''}，稍后会自动保存`,
     },
+    reviewComments: {
+      added: '已加入一条代码评论',
+      addAction: '评论这一行改动',
+      chipLabel: ({ count }) => count === 1 ? '[一条评论]' : `[${count} 条评论]`,
+      dialogTitle: ({ count }) => `${count} 条评论`,
+      empty: '还没有评论。',
+      remove: '删除',
+      createTitle: '添加代码评论',
+      inputLabel: '评论内容',
+      inputPlaceholder: '输入你希望 agent 处理的评论内容',
+      confirm: '确认评论',
+      scope: {
+        workspace: '当前工作区 diff',
+        task: '任务累计 diff',
+        run: '本轮 diff',
+      },
+    },
     projectManager: {
       managingTitle: 'PromptX 项目管理',
       createTitle: '新建项目',
@@ -1126,6 +1143,23 @@ export const MESSAGES = {
         ? `${count} imported block(s) inserted after the current import block. They will be auto-saved shortly.`
         : `${count} imported block(s) inserted. They will be auto-saved shortly.`,
       pdfBlocksInserted: ({ blockCount, pageCount }) => `${blockCount} mixed content block(s) inserted${pageCount ? ` across ${pageCount} page(s)` : ''}. They will be auto-saved shortly.`,
+    },
+    reviewComments: {
+      added: 'Added a code review comment',
+      addAction: 'Comment on this changed line',
+      chipLabel: ({ count }) => `[${count} comment${count === 1 ? '' : 's'}]`,
+      dialogTitle: ({ count }) => `${count} comment${count === 1 ? '' : 's'}`,
+      empty: 'No comments yet.',
+      remove: 'Remove',
+      createTitle: 'Add Code Comment',
+      inputLabel: 'Comment',
+      inputPlaceholder: 'Describe what you want the agent to address',
+      confirm: 'Add Comment',
+      scope: {
+        workspace: 'Current workspace diff',
+        task: 'Task cumulative diff',
+        run: 'Current run diff',
+      },
     },
     projectManager: {
       managingTitle: 'PromptX Project Manager',

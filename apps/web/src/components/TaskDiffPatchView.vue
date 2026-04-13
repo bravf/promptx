@@ -1,8 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, MessageSquarePlus } from 'lucide-vue-next'
 import { useI18n } from '../composables/useI18n.js'
 import { useTheme } from '../composables/useTheme.js'
+import { buildReviewCommentSnippet } from '../lib/reviewComments.js'
 import {
   DIFF_HIGHLIGHT_LIMITS,
   exceedsHighlightThresholdForLines,
@@ -15,6 +16,10 @@ const props = defineProps({
   activeHunkIndex: {
     type: Number,
     default: 0,
+  },
+  commentingEnabled: {
+    type: Boolean,
+    default: false,
   },
   getPatchLineClass: {
     type: Function,
@@ -57,9 +62,11 @@ const props = defineProps({
     default: () => {},
   },
 })
+const emit = defineEmits(['request-review-comment'])
 const { t } = useI18n()
 const { isDark } = useTheme()
 const renderedPatchLines = ref([])
+let longPressTimer = null
 const selectedLanguage = computed(() => inferPreviewLanguageFromPath(props.selectedFile?.path || ''))
 
 function getLinePrefix(line) {
@@ -168,6 +175,63 @@ watch(
   },
   { immediate: true, deep: true }
 )
+
+function canCommentOnLine(line = {}) {
+  if (!props.commentingEnabled) {
+    return false
+  }
+
+  return ['add', 'delete', 'context'].includes(String(line?.kind || '').trim())
+}
+
+function buildReviewCommentPayload(line = {}) {
+  if (!props.selectedFile || !canCommentOnLine(line)) {
+    return null
+  }
+
+  const snippet = buildReviewCommentSnippet(props.selectedPatchLines, line.id)
+  if (!snippet) {
+    return null
+  }
+
+  return {
+    anchorLineId: String(line.id || ''),
+    anchorOldNumber: line.oldNumber ?? '',
+    anchorNewNumber: line.newNumber ?? '',
+    content: String(line.content || '').trim(),
+    filePath: String(props.selectedFile.path || ''),
+    fileStatus: String(props.selectedFile.status || ''),
+    snippet,
+  }
+}
+
+function requestReviewComment(line = {}) {
+  const payload = buildReviewCommentPayload(line)
+  if (!payload) {
+    return
+  }
+
+  emit('request-review-comment', payload)
+}
+
+function clearLongPressTimer() {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+}
+
+function handleLineTouchStart(line) {
+  clearLongPressTimer()
+  if (!canCommentOnLine(line)) {
+    return
+  }
+
+  longPressTimer = setTimeout(() => {
+    longPressTimer = null
+    requestReviewComment(line)
+  }, 450)
+}
 </script>
 
 <template>
@@ -264,13 +328,17 @@ watch(
           v-for="line in renderedPatchLines"
           :key="line.id"
           :ref="(element) => setPatchLineRef(line.id, element)"
-          class="task-diff-row grid"
+          class="task-diff-row group relative grid"
           :class="[
             getPatchLineClass(line.kind),
             line.kind === 'hunk' && selectedPatchHunks[activeHunkIndex]?.id === line.id
               ? 'ring-1 ring-inset ring-[var(--theme-warning)]'
               : '',
           ]"
+          @touchstart="handleLineTouchStart(line)"
+          @touchend="clearLongPressTimer"
+          @touchcancel="clearLongPressTimer"
+          @touchmove="clearLongPressTimer"
         >
           <span class="task-diff-row__number select-none">
             {{ line.oldNumber }}
@@ -283,6 +351,15 @@ watch(
             :class="line.kind === 'meta' || line.kind === 'hunk' ? 'task-diff-line--plain' : ''"
             v-html="line.renderedHtml"
           />
+          <button
+            v-if="canCommentOnLine(line)"
+            type="button"
+            class="theme-icon-button absolute right-2 top-1 hidden h-7 w-7 items-center justify-center opacity-0 transition group-hover:opacity-100 sm:inline-flex"
+            :title="t('reviewComments.addAction')"
+            @click="requestReviewComment(line)"
+          >
+            <MessageSquarePlus class="h-4 w-4" />
+          </button>
         </div>
       </div>
     </div>

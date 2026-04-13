@@ -53,10 +53,12 @@ function scrollCurrentPanelToBottom() {
 
 const {
   addCurrentDraftToTodo,
+  addReviewCommentToTask,
   applyTaskSettingsUpdate,
   buildPromptForTask,
   getPromptBlocksForTask,
   clearCurrentTaskContent,
+  clearReviewCommentsForTask,
   createTaskAndSelect,
   creatingTask,
   currentSelectedSessionId,
@@ -64,6 +66,7 @@ const {
   currentTaskAutoTitle,
   currentTaskDisplayTitle,
   currentTaskSlug,
+  currentReviewComments,
   draft,
   editorRef,
   error,
@@ -81,6 +84,7 @@ const {
   pageTitle,
   prepareCodexPromptForTask,
   currentTodoItems,
+  removeReviewCommentFromTask,
   removeTodoItem,
   removeCurrentTask,
   reorderTaskList,
@@ -146,6 +150,7 @@ const inputPanelProps = computed(() => ({
   canAddTodo: hasCurrentDraftContent.value,
   codexSessionId: currentSelectedSessionId.value,
   isCurrentTaskSending: isCurrentTaskSending.value,
+  reviewComments: currentReviewComments.value,
   sendBehavior: sendBehavior.value,
   sendState: currentTaskSendState.value,
   loading: loadingTask.value,
@@ -450,7 +455,32 @@ async function sendToCodex() {
   if (!shouldPreserveDraftAfterSend) {
     clearCurrentTaskContent({ silent: true })
   }
+  clearReviewCommentsForTask(taskSlug)
   await saveTask({ auto: false, silent: true })
+}
+
+function handleCreateReviewComment(payload = {}) {
+  const taskSlug = currentTaskSlug.value
+  if (!taskSlug) {
+    return
+  }
+
+  const createdComment = addReviewCommentToTask(taskSlug, payload)
+  if (createdComment) {
+    flashToast({
+      message: t('reviewComments.added'),
+      type: 'success',
+    })
+  }
+}
+
+function handleRemoveReviewComment(commentId = '') {
+  const taskSlug = currentTaskSlug.value
+  if (!taskSlug) {
+    return
+  }
+
+  removeReviewCommentFromTask(taskSlug, commentId)
 }
 
 function focusMobileEditorIfNeeded() {
@@ -631,6 +661,7 @@ const inputPanelListeners = {
   'import-pdf-files': handleImportPdfFiles,
   'import-text-files': handleImportTextFiles,
   'manage-todo': openTodoDialog,
+  'remove-review-comment': handleRemoveReviewComment,
   'send-request': sendToCodex,
   'upload-files': handleUpload,
 }
@@ -703,6 +734,7 @@ const mobileDetailHeaderListeners = {
       :preferred-scope="preferredDiffScope"
       :preferred-run-id="preferredDiffRunId"
       :focus-token="diffFocusToken"
+      @create-review-comment="handleCreateReviewComment"
       @close="closeTaskDiff"
     />
     <WorkbenchSettingsDialog :open="showSettingsDialog" @close="closeSettingsDialog" />

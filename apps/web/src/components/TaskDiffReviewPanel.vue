@@ -1,9 +1,10 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Check, CircleAlert, FileDiff, FolderOpen, GitBranch, RefreshCw } from 'lucide-vue-next'
 import { formatDateTime, useI18n } from '../composables/useI18n.js'
 import { useMediaQuery } from '../composables/useMediaQuery.js'
 import { useTaskDiffReviewData } from '../composables/useTaskDiffReviewData.js'
+import DiffReviewCommentDialog from './DiffReviewCommentDialog.vue'
 import TaskDiffFileList from './TaskDiffFileList.vue'
 import TaskDiffPatchView from './TaskDiffPatchView.vue'
 import WorkbenchSelect from './WorkbenchSelect.vue'
@@ -30,6 +31,7 @@ const props = defineProps({
     default: false,
   },
 })
+const emit = defineEmits(['create-review-comment'])
 
 const {
   activeHunkIndex,
@@ -67,6 +69,12 @@ const {
 const { matches: isMobileLayout } = useMediaQuery('(max-width: 767px)')
 const mobilePanelTab = ref('files')
 const { t } = useI18n()
+const pendingReviewCommentContext = ref(null)
+const latestCompletedRunId = computed(() => terminalRuns.value[0]?.id || '')
+const commentingEnabled = computed(() => (
+  diffScope.value === 'workspace'
+  || (diffScope.value === 'run' && selectedRunId.value && selectedRunId.value === latestCompletedRunId.value)
+))
 
 function handleSelectFile(path) {
   selectedFilePath.value = path
@@ -100,10 +108,37 @@ watch(diffScope, () => {
     mobilePanelTab.value = 'files'
   }
 })
+
+function openReviewCommentDialog(payload = {}) {
+  pendingReviewCommentContext.value = {
+    ...payload,
+    scope: diffScope.value,
+    runId: diffScope.value === 'run' ? selectedRunId.value : '',
+  }
+}
+
+function closeReviewCommentDialog() {
+  pendingReviewCommentContext.value = null
+}
+
+function confirmReviewComment(comment) {
+  emit('create-review-comment', {
+    ...pendingReviewCommentContext.value,
+    comment,
+  })
+  closeReviewCommentDialog()
+}
 </script>
 
 <template>
   <section class="panel flex h-full min-h-0 flex-col overflow-hidden">
+    <DiffReviewCommentDialog
+      :open="Boolean(pendingReviewCommentContext)"
+      :context="pendingReviewCommentContext"
+      @close="closeReviewCommentDialog"
+      @confirm="confirmReviewComment"
+    />
+
     <div class="theme-divider border-b px-4 py-3">
       <div class="flex flex-col gap-2">
         <div class="grid grid-cols-4 gap-2 sm:flex sm:flex-wrap sm:items-center">
@@ -319,6 +354,7 @@ watch(diffScope, () => {
         <div v-show="mobilePanelTab === 'patch'" class="min-h-0 flex-1 overflow-hidden bg-[var(--theme-appPanelStrong)]">
           <TaskDiffPatchView
             :active-hunk-index="activeHunkIndex"
+            :commenting-enabled="commentingEnabled"
             :get-patch-line-class="getPatchLineClass"
             :get-status-class="getStatusClass"
             :get-status-label="getStatusLabel"
@@ -329,6 +365,7 @@ watch(diffScope, () => {
             :selected-patch-lines="selectedPatchLines"
             :set-patch-line-ref="setPatchLineRef"
             :set-patch-viewport-ref="setPatchViewportElement"
+            @request-review-comment="openReviewCommentDialog"
           />
         </div>
       </div>
@@ -358,6 +395,7 @@ watch(diffScope, () => {
         <div class="min-h-0 overflow-hidden bg-[var(--theme-appPanelStrong)]">
           <TaskDiffPatchView
             :active-hunk-index="activeHunkIndex"
+            :commenting-enabled="commentingEnabled"
             :get-patch-line-class="getPatchLineClass"
             :get-status-class="getStatusClass"
             :get-status-label="getStatusLabel"
@@ -368,6 +406,7 @@ watch(diffScope, () => {
             :selected-patch-lines="selectedPatchLines"
             :set-patch-line-ref="setPatchLineRef"
             :set-patch-viewport-ref="setPatchViewportElement"
+            @request-review-comment="openReviewCommentDialog"
           />
         </div>
       </div>

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import TiptapBlockEditor from './TiptapBlockEditor.vue'
 import WorkbenchEditorActions from './WorkbenchEditorActions.vue'
+import ReviewCommentsDialog from './ReviewCommentsDialog.vue'
 import { useI18n } from '../composables/useI18n.js'
 
 const props = defineProps({
@@ -29,6 +30,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  reviewComments: {
+    type: Array,
+    default: () => [],
+  },
   loading: {
     type: Boolean,
     default: false,
@@ -53,10 +58,12 @@ const emit = defineEmits([
   'clear-request',
   'copy-request',
   'manage-todo',
+  'remove-review-comment',
   'send-request',
 ])
 
 const blockEditorRef = ref(null)
+const showReviewCommentsDialog = ref(false)
 const { t } = useI18n()
 
 const blocks = computed({
@@ -114,14 +121,30 @@ defineExpose({
 </script>
 
 <template>
+  <ReviewCommentsDialog
+    :open="showReviewCommentsDialog"
+    :comments="reviewComments"
+    @close="showReviewCommentsDialog = false"
+    @remove="emit('remove-review-comment', $event)"
+  />
+
   <section
     v-if="loading && !modelValue.length"
     class="panel theme-muted-text flex h-full items-center px-5 py-4 text-sm"
   >
     {{ t('workbench.loadingTaskContent') }}
   </section>
+  <section v-else-if="reviewComments.length" class="panel theme-divider mb-3 border px-4 py-3">
+    <button
+      type="button"
+      class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
+      @click="showReviewCommentsDialog = true"
+    >
+      <span>{{ t('reviewComments.chipLabel', { count: reviewComments.length }) }}</span>
+    </button>
+  </section>
   <TiptapBlockEditor
-    v-else
+    v-if="!loading || modelValue.length"
     ref="blockEditorRef"
     v-model="blocks"
     :codex-session-id="codexSessionId"
