@@ -1,6 +1,17 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+function parseAllowedHosts(rawValue = '') {
+  return String(rawValue || '')
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+const allowedHosts = parseAllowedHosts(
+  process.env.PROMPTX_WEB_ALLOWED_HOSTS || ''
+)
+
 export default defineConfig({
   plugins: [vue()],
   build: {
@@ -48,5 +59,6 @@ export default defineConfig({
   server: {
     host: '127.0.0.1',
     port: 5173,
+    ...(allowedHosts.length ? { allowedHosts } : {}),
   },
 })
