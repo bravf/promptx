@@ -465,10 +465,11 @@ function handleCreateReviewComment(payload = {}) {
     return
   }
 
+  const isEditingExistingComment = Boolean(String(payload?.id || '').trim())
   const createdComment = addReviewCommentToTask(taskSlug, payload)
   if (createdComment) {
     flashToast({
-      message: t('reviewComments.added'),
+      message: t(isEditingExistingComment ? 'reviewComments.saved' : 'reviewComments.added'),
       type: 'success',
     })
   }
@@ -729,12 +730,14 @@ const mobileDetailHeaderListeners = {
     />
     <TaskDiffReviewDialog
       :open="showDiffDialog"
+      :review-comments="currentReviewComments"
       :task-slug="currentTaskSlug"
       :task-title="currentTaskDisplayTitle"
       :preferred-scope="preferredDiffScope"
       :preferred-run-id="preferredDiffRunId"
       :focus-token="diffFocusToken"
-      @create-review-comment="handleCreateReviewComment"
+      @save-review-comment="handleCreateReviewComment"
+      @remove-review-comment="handleRemoveReviewComment"
       @close="closeTaskDiff"
     />
     <WorkbenchSettingsDialog :open="showSettingsDialog" @close="closeSettingsDialog" />

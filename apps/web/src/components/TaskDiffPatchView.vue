@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ChevronDown, ChevronUp, MessageSquarePlus } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, MessageSquareMore, MessageSquarePlus, MessageSquareText, Trash2 } from 'lucide-vue-next'
 import { useI18n } from '../composables/useI18n.js'
 import { useTheme } from '../composables/useTheme.js'
 import { buildReviewCommentSnippet } from '../lib/reviewComments.js'
@@ -33,6 +33,10 @@ const props = defineProps({
     type: Function,
     default: (value) => value,
   },
+  isMobileLayout: {
+    type: Boolean,
+    default: false,
+  },
   jumpToAdjacentHunk: {
     type: Function,
     default: () => {},
@@ -40,6 +44,18 @@ const props = defineProps({
   patchLoading: {
     type: Boolean,
     default: false,
+  },
+  reviewComments: {
+    type: Array,
+    default: () => [],
+  },
+  reviewRunId: {
+    type: String,
+    default: '',
+  },
+  reviewScope: {
+    type: String,
+    default: 'workspace',
   },
   selectedFile: {
     type: Object,
@@ -62,12 +78,72 @@ const props = defineProps({
     default: () => {},
   },
 })
-const emit = defineEmits(['request-review-comment'])
+const emit = defineEmits(['save-review-comment', 'remove-review-comment'])
 const { t } = useI18n()
 const { isDark } = useTheme()
 const renderedPatchLines = ref([])
+const activeCommentLineId = ref('')
+const activeCommentId = ref('')
+const activeCommentDraft = ref('')
+const activeCommentPayload = ref(null)
+const commentEditorOpen = ref(false)
 let longPressTimer = null
 const selectedLanguage = computed(() => inferPreviewLanguageFromPath(props.selectedFile?.path || ''))
+const activeLineReviewComment = computed(() => {
+  if (!activeCommentPayload.value) {
+    return null
+  }
+
+  return reviewCommentsByAnchor.value.get(buildReviewCommentAnchorKey(activeCommentPayload.value)) || null
+})
+const showMobileCommentEditor = computed(() => (
+  props.isMobileLayout
+  && commentEditorOpen.value
+  && Boolean(activeCommentLineId.value && activeCommentPayload.value)
+))
+const showMobileCommentPreview = computed(() => (
+  props.isMobileLayout
+  && !commentEditorOpen.value
+  && Boolean(activeCommentLineId.value && activeCommentPayload.value && activeLineReviewComment.value)
+))
+const normalizedReviewScope = computed(() => (
+  props.reviewScope === 'run'
+    ? 'run'
+    : props.reviewScope === 'task'
+      ? 'task'
+      : 'workspace'
+))
+function buildReviewCommentAnchorKey(input = {}) {
+  return `${String(input?.anchorOldNumber ?? input?.oldNumber ?? '').trim()}::${String(input?.anchorNewNumber ?? input?.newNumber ?? '').trim()}`
+}
+
+const reviewCommentsByAnchor = computed(() => {
+  const currentFilePath = String(props.selectedFile?.path || '').trim()
+  const scope = normalizedReviewScope.value
+  const runId = scope === 'run' ? String(props.reviewRunId || '').trim() : ''
+  const entries = new Map()
+
+  ;(Array.isArray(props.reviewComments) ? props.reviewComments : []).forEach((comment) => {
+    if (String(comment?.filePath || '').trim() !== currentFilePath) {
+      return
+    }
+    if (String(comment?.scope || '').trim() !== scope) {
+      return
+    }
+    if (scope === 'run' && String(comment?.runId || '').trim() !== runId) {
+      return
+    }
+
+    const anchorKey = buildReviewCommentAnchorKey(comment)
+    if (anchorKey === '::') {
+      return
+    }
+
+    entries.set(anchorKey, comment)
+  })
+
+  return entries
+})
 
 function getLinePrefix(line) {
   if (line?.kind === 'add') {
@@ -176,6 +252,13 @@ watch(
   { immediate: true, deep: true }
 )
 
+watch(
+  () => [props.selectedFile?.path, normalizedReviewScope.value, props.reviewRunId],
+  () => {
+    closeInlineCommentEditor()
+  }
+)
+
 function canCommentOnLine(line = {}) {
   if (!props.commentingEnabled) {
     return false
@@ -189,8 +272,8 @@ function buildReviewCommentPayload(line = {}) {
     return null
   }
 
-  const snippet = buildReviewCommentSnippet(props.selectedPatchLines, line.id)
-  if (!snippet) {
+  const snippetPayload = buildReviewCommentSnippet(props.selectedPatchLines, line.id, { returnMeta: true })
+  if (!snippetPayload?.text) {
     return null
   }
 
@@ -201,17 +284,80 @@ function buildReviewCommentPayload(line = {}) {
     content: String(line.content || '').trim(),
     filePath: String(props.selectedFile.path || ''),
     fileStatus: String(props.selectedFile.status || ''),
-    snippet,
+    snippet: snippetPayload.text,
+    snippetAnchorLine: snippetPayload.anchorLine,
   }
 }
 
-function requestReviewComment(line = {}) {
+function getExistingReviewComment(line = {}) {
+  return reviewCommentsByAnchor.value.get(buildReviewCommentAnchorKey(line)) || null
+}
+
+function openInlineCommentEditor(line = {}) {
   const payload = buildReviewCommentPayload(line)
   if (!payload) {
     return
   }
 
-  emit('request-review-comment', payload)
+  const existingComment = getExistingReviewComment(line)
+  activeCommentLineId.value = payload.anchorLineId
+  activeCommentId.value = String(existingComment?.id || '').trim()
+  activeCommentDraft.value = String(existingComment?.comment || '')
+  activeCommentPayload.value = payload
+  commentEditorOpen.value = true
+}
+
+function requestReviewComment(line = {}) {
+  openInlineCommentEditor(line)
+}
+
+function closeInlineCommentEditor() {
+  activeCommentLineId.value = ''
+  activeCommentId.value = ''
+  activeCommentDraft.value = ''
+  activeCommentPayload.value = null
+  commentEditorOpen.value = false
+}
+
+function saveInlineComment() {
+  const comment = String(activeCommentDraft.value || '').trim()
+  if (!comment || !activeCommentPayload.value) {
+    return
+  }
+
+  emit('save-review-comment', {
+    ...activeCommentPayload.value,
+    ...(activeCommentId.value ? { id: activeCommentId.value } : {}),
+    scope: normalizedReviewScope.value,
+    runId: normalizedReviewScope.value === 'run' ? String(props.reviewRunId || '').trim() : '',
+    comment,
+  })
+  if (props.isMobileLayout) {
+    commentEditorOpen.value = false
+    activeCommentDraft.value = ''
+    return
+  }
+
+  closeInlineCommentEditor()
+}
+
+function removeInlineComment() {
+  if (!activeCommentId.value) {
+    return
+  }
+
+  emit('remove-review-comment', activeCommentId.value)
+  closeInlineCommentEditor()
+}
+
+function openMobileCommentPreviewEditor() {
+  if (!activeLineReviewComment.value) {
+    return
+  }
+
+  activeCommentId.value = String(activeLineReviewComment.value.id || '').trim()
+  activeCommentDraft.value = String(activeLineReviewComment.value.comment || '')
+  commentEditorOpen.value = true
 }
 
 function clearLongPressTimer() {
@@ -324,46 +470,202 @@ function handleLineTouchStart(line) {
     <div v-else-if="patchLoading && !selectedFile.patchLoaded" class="theme-muted-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">{{ t('diffReview.loadingFileDiff') }}</div>
     <div v-else-if="selectedPatchLines.length" :ref="setPatchViewportRef" class="flex-1 overflow-auto">
       <div class="task-diff-view min-w-max px-4 py-4 font-mono">
-        <div
-          v-for="line in renderedPatchLines"
-          :key="line.id"
-          :ref="(element) => setPatchLineRef(line.id, element)"
-          class="task-diff-row group relative grid"
-          :class="[
-            getPatchLineClass(line.kind),
-            line.kind === 'hunk' && selectedPatchHunks[activeHunkIndex]?.id === line.id
-              ? 'ring-1 ring-inset ring-[var(--theme-warning)]'
-              : '',
-          ]"
-          @touchstart="handleLineTouchStart(line)"
-          @touchend="clearLongPressTimer"
-          @touchcancel="clearLongPressTimer"
-          @touchmove="clearLongPressTimer"
-        >
-          <span class="task-diff-row__number select-none">
-            {{ line.oldNumber }}
-          </span>
-          <span class="task-diff-row__number select-none">
-            {{ line.newNumber }}
-          </span>
-          <pre
-            class="task-diff-line overflow-visible whitespace-pre px-3 py-0.5"
-            :class="line.kind === 'meta' || line.kind === 'hunk' ? 'task-diff-line--plain' : ''"
-            v-html="line.renderedHtml"
-          />
-          <button
-            v-if="canCommentOnLine(line)"
-            type="button"
-            class="theme-icon-button absolute right-2 top-1 hidden h-7 w-7 items-center justify-center opacity-0 transition group-hover:opacity-100 sm:inline-flex"
-            :title="t('reviewComments.addAction')"
-            @click="requestReviewComment(line)"
+        <template v-for="line in renderedPatchLines" :key="line.id">
+          <div
+            :ref="(element) => setPatchLineRef(line.id, element)"
+            class="task-diff-row group relative grid"
+            :class="[
+              getPatchLineClass(line.kind),
+              activeCommentLineId === line.id ? 'ring-1 ring-inset ring-[var(--theme-warning)]' : '',
+              line.kind === 'hunk' && selectedPatchHunks[activeHunkIndex]?.id === line.id
+                ? 'ring-1 ring-inset ring-[var(--theme-warning)]'
+                : '',
+            ]"
+            @touchstart="handleLineTouchStart(line)"
+            @touchend="clearLongPressTimer"
+            @touchcancel="clearLongPressTimer"
+            @touchmove="clearLongPressTimer"
           >
-            <MessageSquarePlus class="h-4 w-4" />
+            <span class="task-diff-row__number select-none">
+              {{ line.oldNumber }}
+            </span>
+            <span class="task-diff-row__number select-none">
+              {{ line.newNumber }}
+            </span>
+            <pre
+              class="task-diff-line overflow-visible whitespace-pre px-3 py-0.5"
+              :class="line.kind === 'meta' || line.kind === 'hunk' ? 'task-diff-line--plain' : ''"
+              v-html="line.renderedHtml"
+            />
+            <button
+              v-if="canCommentOnLine(line)"
+              type="button"
+              class="task-diff-line-comment-button theme-icon-button h-7 w-7 items-center justify-center transition sm:inline-flex"
+              :class="(
+                getExistingReviewComment(line)
+                && activeCommentLineId !== line.id
+              )
+                ? 'inline-flex opacity-100'
+                : 'hidden opacity-0 group-hover:opacity-100 sm:inline-flex'"
+              :title="t('reviewComments.addAction')"
+              @click="requestReviewComment(line)"
+            >
+              <MessageSquarePlus class="h-4 w-4" />
+            </button>
+          </div>
+
+          <div
+            v-if="!isMobileLayout && activeCommentLineId === line.id"
+            class="task-diff-row task-diff-row--comment grid"
+          >
+            <span class="task-diff-row__number" aria-hidden="true" />
+            <span class="task-diff-row__number" aria-hidden="true" />
+            <div class="task-diff-inline-review theme-inline-panel border border-dashed px-3 py-3">
+              <label class="space-y-1.5">
+                <span class="theme-muted-text inline-flex items-center gap-1.5 text-[11px]">
+                  <MessageSquareText class="h-3.5 w-3.5 shrink-0" />
+                  <span>{{ t('reviewComments.inputLabel') }}</span>
+                </span>
+                <textarea
+                  v-model="activeCommentDraft"
+                  class="tool-input min-h-[7rem] resize-y text-xs leading-6"
+                  :placeholder="t('reviewComments.inputPlaceholder')"
+                />
+              </label>
+
+              <div class="mt-3 flex items-center gap-2">
+                <button
+                  v-if="activeCommentId"
+                  type="button"
+                  class="tool-button px-3 py-2 text-xs"
+                  @click="removeInlineComment"
+                >
+                  <span class="inline-flex items-center gap-1.5">
+                    <Trash2 class="h-3.5 w-3.5" />
+                    <span>{{ t('reviewComments.remove') }}</span>
+                  </span>
+                </button>
+                <div class="ml-auto flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="tool-button px-3 py-2 text-xs"
+                    @click="closeInlineCommentEditor"
+                  >
+                    {{ t('common.cancel') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="tool-button tool-button-primary px-3 py-2 text-xs"
+                    :disabled="!activeCommentDraft.trim()"
+                    @click="saveInlineComment"
+                  >
+                    {{ activeCommentId ? t('reviewComments.saveConfirm') : t('reviewComments.createConfirm') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-else-if="!isMobileLayout && getExistingReviewComment(line)"
+            class="task-diff-row task-diff-row--comment grid"
+          >
+            <span class="task-diff-row__number" aria-hidden="true" />
+            <span class="task-diff-row__number" aria-hidden="true" />
+            <button
+              type="button"
+              class="task-diff-inline-comment theme-inline-panel w-full border border-dashed px-3 py-3 text-left transition"
+              @click="openInlineCommentEditor(line)"
+            >
+              <div class="flex items-start gap-2">
+                <MessageSquareMore class="mt-0.5 h-4 w-4 shrink-0 text-[var(--theme-textSecondary)]" />
+                <div class="min-w-0">
+                  <div class="theme-muted-text text-[11px]">
+                    {{ t('reviewComments.inlineLabel') }}
+                  </div>
+                  <p class="mt-1 whitespace-pre-wrap break-words text-xs leading-6 text-[var(--theme-textPrimary)]">
+                    {{ getExistingReviewComment(line)?.comment }}
+                  </p>
+                </div>
+              </div>
+            </button>
+          </div>
+        </template>
+      </div>
+    </div>
+    <div
+      v-if="showMobileCommentEditor"
+      class="theme-divider shrink-0 border-t bg-[var(--theme-appPanelStrong)] px-3 py-3"
+    >
+      <div class="theme-muted-text text-[11px]">{{ selectedFile?.path }}</div>
+      <pre class="theme-empty-state mt-2 overflow-x-auto rounded-sm px-3 py-2 font-mono text-[11px] leading-5">{{ activeCommentPayload?.content }}</pre>
+
+      <label class="mt-3 block space-y-1.5">
+        <span class="theme-muted-text inline-flex items-center gap-1.5 text-[11px]">
+          <MessageSquareText class="h-3.5 w-3.5 shrink-0" />
+          <span>{{ t('reviewComments.inputLabel') }}</span>
+        </span>
+        <textarea
+          v-model="activeCommentDraft"
+          class="tool-input min-h-[7rem] resize-y text-xs leading-6"
+          :placeholder="t('reviewComments.inputPlaceholder')"
+        />
+      </label>
+
+      <div class="mt-3 flex items-center gap-2">
+        <button
+          v-if="activeCommentId"
+          type="button"
+          class="tool-button px-3 py-2 text-xs"
+          @click="removeInlineComment"
+        >
+          <span class="inline-flex items-center gap-1.5">
+            <Trash2 class="h-3.5 w-3.5" />
+            <span>{{ t('reviewComments.remove') }}</span>
+          </span>
+        </button>
+        <div class="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            class="tool-button px-3 py-2 text-xs"
+            @click="closeInlineCommentEditor"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="button"
+            class="tool-button tool-button-primary px-3 py-2 text-xs"
+            :disabled="!activeCommentDraft.trim()"
+            @click="saveInlineComment"
+          >
+            {{ activeCommentId ? t('reviewComments.saveConfirm') : t('reviewComments.createConfirm') }}
           </button>
         </div>
       </div>
     </div>
-    <div v-else class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">
+    <div
+      v-else-if="showMobileCommentPreview"
+      class="theme-divider shrink-0 border-t bg-[var(--theme-appPanelStrong)] px-3 py-3"
+    >
+      <button
+        type="button"
+        class="task-diff-inline-comment theme-inline-panel w-full border border-dashed px-3 py-3 text-left transition"
+        @click="openMobileCommentPreviewEditor"
+      >
+        <div class="flex items-start gap-2">
+          <MessageSquareMore class="mt-0.5 h-4 w-4 shrink-0 text-[var(--theme-textSecondary)]" />
+          <div class="min-w-0">
+            <div class="theme-muted-text text-[11px]">
+              {{ t('reviewComments.inlineLabel') }}
+            </div>
+            <p class="mt-1 whitespace-pre-wrap break-words text-xs leading-6 text-[var(--theme-textPrimary)]">
+              {{ activeLineReviewComment?.comment }}
+            </p>
+          </div>
+        </div>
+      </button>
+    </div>
+    <div v-else-if="!selectedPatchLines.length" class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">
       <div class="theme-empty-state px-4 py-4">
         {{ t('diffReview.noFileDiffContent') }}
       </div>
@@ -377,7 +679,8 @@ function handleLineTouchStart(line) {
 
 <style scoped>
 .task-diff-row {
-  grid-template-columns: 3.1rem 3.1rem minmax(0, 1fr);
+  --task-diff-gutter-width: 3.1rem;
+  grid-template-columns: var(--task-diff-gutter-width) var(--task-diff-gutter-width) minmax(0, 1fr);
 }
 
 .task-diff-view {
@@ -423,5 +726,23 @@ function handleLineTouchStart(line) {
 
 .task-diff-line--plain {
   color: inherit;
+}
+
+.task-diff-row--comment {
+  background: color-mix(in srgb, var(--theme-appPanelStrong) 90%, transparent);
+}
+
+.task-diff-line-comment-button {
+  left: calc(var(--task-diff-gutter-width) * 2);
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+
+.task-diff-inline-review,
+.task-diff-inline-comment {
+  border-radius: 0.125rem;
+  margin: 0.25rem 0 0.5rem;
 }
 </style>

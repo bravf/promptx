@@ -4,7 +4,6 @@ import { Check, CircleAlert, FileDiff, FolderOpen, GitBranch, RefreshCw } from '
 import { formatDateTime, useI18n } from '../composables/useI18n.js'
 import { useMediaQuery } from '../composables/useMediaQuery.js'
 import { useTaskDiffReviewData } from '../composables/useTaskDiffReviewData.js'
-import DiffReviewCommentDialog from './DiffReviewCommentDialog.vue'
 import TaskDiffFileList from './TaskDiffFileList.vue'
 import TaskDiffPatchView from './TaskDiffPatchView.vue'
 import WorkbenchSelect from './WorkbenchSelect.vue'
@@ -30,8 +29,12 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  reviewComments: {
+    type: Array,
+    default: () => [],
+  },
 })
-const emit = defineEmits(['create-review-comment'])
+const emit = defineEmits(['save-review-comment', 'remove-review-comment'])
 
 const {
   activeHunkIndex,
@@ -69,7 +72,6 @@ const {
 const { matches: isMobileLayout } = useMediaQuery('(max-width: 767px)')
 const mobilePanelTab = ref('files')
 const { t } = useI18n()
-const pendingReviewCommentContext = ref(null)
 const latestCompletedRunId = computed(() => terminalRuns.value[0]?.id || '')
 const commentingEnabled = computed(() => (
   diffScope.value === 'workspace'
@@ -108,37 +110,10 @@ watch(diffScope, () => {
     mobilePanelTab.value = 'files'
   }
 })
-
-function openReviewCommentDialog(payload = {}) {
-  pendingReviewCommentContext.value = {
-    ...payload,
-    scope: diffScope.value,
-    runId: diffScope.value === 'run' ? selectedRunId.value : '',
-  }
-}
-
-function closeReviewCommentDialog() {
-  pendingReviewCommentContext.value = null
-}
-
-function confirmReviewComment(comment) {
-  emit('create-review-comment', {
-    ...pendingReviewCommentContext.value,
-    comment,
-  })
-  closeReviewCommentDialog()
-}
 </script>
 
 <template>
   <section class="panel flex h-full min-h-0 flex-col overflow-hidden">
-    <DiffReviewCommentDialog
-      :open="Boolean(pendingReviewCommentContext)"
-      :context="pendingReviewCommentContext"
-      @close="closeReviewCommentDialog"
-      @confirm="confirmReviewComment"
-    />
-
     <div class="theme-divider border-b px-4 py-3">
       <div class="flex flex-col gap-2">
         <div class="grid grid-cols-4 gap-2 sm:flex sm:flex-wrap sm:items-center">
@@ -358,14 +333,19 @@ function confirmReviewComment(comment) {
             :get-patch-line-class="getPatchLineClass"
             :get-status-class="getStatusClass"
             :get-status-label="getStatusLabel"
+            :is-mobile-layout="isMobileLayout"
             :jump-to-adjacent-hunk="jumpToAdjacentHunk"
             :patch-loading="patchLoading"
+            :review-comments="reviewComments"
+            :review-run-id="diffScope === 'run' ? selectedRunId : ''"
+            :review-scope="diffScope"
             :selected-file="selectedFile"
             :selected-patch-hunks="selectedPatchHunks"
             :selected-patch-lines="selectedPatchLines"
             :set-patch-line-ref="setPatchLineRef"
             :set-patch-viewport-ref="setPatchViewportElement"
-            @request-review-comment="openReviewCommentDialog"
+            @save-review-comment="emit('save-review-comment', $event)"
+            @remove-review-comment="emit('remove-review-comment', $event)"
           />
         </div>
       </div>
@@ -399,14 +379,19 @@ function confirmReviewComment(comment) {
             :get-patch-line-class="getPatchLineClass"
             :get-status-class="getStatusClass"
             :get-status-label="getStatusLabel"
+            :is-mobile-layout="isMobileLayout"
             :jump-to-adjacent-hunk="jumpToAdjacentHunk"
             :patch-loading="patchLoading"
+            :review-comments="reviewComments"
+            :review-run-id="diffScope === 'run' ? selectedRunId : ''"
+            :review-scope="diffScope"
             :selected-file="selectedFile"
             :selected-patch-hunks="selectedPatchHunks"
             :selected-patch-lines="selectedPatchLines"
             :set-patch-line-ref="setPatchLineRef"
             :set-patch-viewport-ref="setPatchViewportElement"
-            @request-review-comment="openReviewCommentDialog"
+            @save-review-comment="emit('save-review-comment', $event)"
+            @remove-review-comment="emit('remove-review-comment', $event)"
           />
         </div>
       </div>

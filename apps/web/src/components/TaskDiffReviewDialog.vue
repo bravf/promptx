@@ -10,6 +10,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  reviewComments: {
+    type: Array,
+    default: () => [],
+  },
   taskSlug: {
     type: String,
     default: '',
@@ -32,7 +36,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['close', 'create-review-comment'])
+const emit = defineEmits(['close', 'save-review-comment', 'remove-review-comment'])
 const { t } = useI18n()
 
 const titleText = computed(() => {
@@ -58,12 +62,14 @@ const titleText = computed(() => {
     </template>
 
     <TaskDiffReviewPanel
+      :review-comments="reviewComments"
       :task-slug="taskSlug"
       :active="open"
       :preferred-scope="preferredScope"
       :preferred-run-id="preferredRunId"
       :focus-token="focusToken"
-      @create-review-comment="emit('create-review-comment', $event)"
+      @save-review-comment="emit('save-review-comment', $event)"
+      @remove-review-comment="emit('remove-review-comment', $event)"
     />
   </DialogShell>
 </template>

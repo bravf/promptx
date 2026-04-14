@@ -971,12 +971,17 @@ defineExpose({
       data-promptx-editor-scroll="tiptap"
       @mousedown="handleSurfaceMouseDown"
     >
-      <EditorContent
-        v-if="editor"
-        :editor="editor"
-        class="min-h-full"
-        data-promptx-editor-content="tiptap"
-      />
+      <div class="flex min-h-full flex-col">
+        <div v-if="$slots['content-top']" class="mb-4 shrink-0">
+          <slot name="content-top" />
+        </div>
+        <EditorContent
+          v-if="editor"
+          :editor="editor"
+          class="min-h-[8rem] flex-1"
+          data-promptx-editor-content="tiptap"
+        />
+      </div>
     </div>
 
     <ImagePreviewOverlay

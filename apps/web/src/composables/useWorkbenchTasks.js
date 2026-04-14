@@ -502,10 +502,20 @@ export function useWorkbenchTasks(options = {}) {
       ...comment,
     }
 
-    const nextComments = [
-      ...getReviewCommentsForTask(normalizedSlug),
-      nextComment,
-    ]
+    const existingComments = getReviewCommentsForTask(normalizedSlug)
+    const existingIndex = existingComments.findIndex((item) => item.id === nextComment.id)
+    const nextComments = [...existingComments]
+
+    if (existingIndex >= 0) {
+      nextComments.splice(existingIndex, 1, {
+        ...existingComments[existingIndex],
+        ...nextComment,
+      })
+      setReviewCommentsForTask(normalizedSlug, nextComments)
+      return nextComments[existingIndex] || null
+    }
+
+    nextComments.push(nextComment)
     setReviewCommentsForTask(normalizedSlug, nextComments)
     return nextComments[nextComments.length - 1] || null
   }

@@ -1,8 +1,8 @@
 import { BLOCK_TYPES } from '@promptx/shared'
 
 export const REVIEW_COMMENTS_STORAGE_KEY = 'promptx:task-review-comments'
-export const REVIEW_COMMENT_CONTEXT_BEFORE = 4
-export const REVIEW_COMMENT_CONTEXT_AFTER = 4
+export const REVIEW_COMMENT_CONTEXT_BEFORE = 3
+export const REVIEW_COMMENT_CONTEXT_AFTER = 3
 
 function normalizeScope(value = '') {
   const normalized = String(value || '').trim()
@@ -14,6 +14,7 @@ function normalizeSnippet(value = '') {
 }
 
 export function normalizeReviewComment(input = {}) {
+  const snippetAnchorLine = Number(input.snippetAnchorLine)
   return {
     id: String(input.id || '').trim(),
     scope: normalizeScope(input.scope),
@@ -25,6 +26,7 @@ export function normalizeReviewComment(input = {}) {
     anchorNewNumber: String(input.anchorNewNumber ?? '').trim(),
     content: String(input.content || '').trim(),
     snippet: normalizeSnippet(input.snippet),
+    snippetAnchorLine: Number.isInteger(snippetAnchorLine) && snippetAnchorLine >= 0 ? snippetAnchorLine : -1,
     comment: String(input.comment || '').trim(),
     createdAt: String(input.createdAt || '').trim(),
   }
@@ -103,55 +105,27 @@ export function setTaskReviewComments(map = {}, taskSlug = '', comments = []) {
 
 export function buildReviewCommentSnippet(lines = [], anchorLineId = '', options = {}) {
   const normalizedLines = Array.isArray(lines) ? lines : []
-  const anchorIndex = normalizedLines.findIndex((line) => String(line?.id || '') === String(anchorLineId || '').trim())
-  if (anchorIndex < 0) {
-    return ''
-  }
-
   const beforeCount = Math.max(0, Number(options.beforeCount) || REVIEW_COMMENT_CONTEXT_BEFORE)
   const afterCount = Math.max(0, Number(options.afterCount) || REVIEW_COMMENT_CONTEXT_AFTER)
   const isCodeLine = (line) => ['add', 'delete', 'context'].includes(String(line?.kind || '').trim())
-
-  let start = anchorIndex
-  let beforeSeen = 0
-  while (start > 0 && beforeSeen < beforeCount) {
-    if (String(normalizedLines[start - 1]?.kind || '') === 'hunk') {
-      start -= 1
-      break
-    }
-
-    start -= 1
-    if (isCodeLine(normalizedLines[start])) {
-      beforeSeen += 1
-    }
+  const codeLines = normalizedLines.filter((line) => isCodeLine(line))
+  const anchorIndex = codeLines.findIndex((line) => String(line?.id || '') === String(anchorLineId || '').trim())
+  if (anchorIndex < 0) {
+    return options.returnMeta ? { text: '', anchorLine: -1 } : ''
   }
 
-  let end = anchorIndex
-  let afterSeen = 0
-  while (end < normalizedLines.length - 1 && afterSeen < afterCount) {
-    if (String(normalizedLines[end + 1]?.kind || '') === 'hunk') {
-      break
-    }
-
-    end += 1
-    if (isCodeLine(normalizedLines[end])) {
-      afterSeen += 1
-    }
-  }
-
-  for (let index = start; index >= 0; index -= 1) {
-    if (String(normalizedLines[index]?.kind || '') === 'hunk') {
-      start = index
-      break
-    }
-  }
-
-  return normalizedLines
-    .slice(start, end + 1)
-    .filter((line) => String(line?.kind || '') !== 'meta')
+  const start = Math.max(0, anchorIndex - beforeCount)
+  const end = Math.min(codeLines.length, anchorIndex + afterCount + 1)
+  const snippetLines = codeLines
+    .slice(start, end)
     .map((line) => String(line?.content || '').replace(/\r\n/g, '\n'))
-    .join('\n')
-    .trim()
+
+  const payload = {
+    text: snippetLines.join('\n').trim(),
+    anchorLine: anchorIndex - start,
+  }
+
+  return options.returnMeta ? payload : payload.text
 }
 
 function buildReviewCommentPromptText(comment = {}, index = 0) {
@@ -163,10 +137,8 @@ function buildReviewCommentPromptText(comment = {}, index = 0) {
 
   lines.push(
     `content: ${normalizedComment.content}`,
-    '',
     'context:',
     normalizedComment.snippet,
-    '',
     'comment:',
     normalizedComment.comment
   )

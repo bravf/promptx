@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { MessageSquareText } from 'lucide-vue-next'
 import TiptapBlockEditor from './TiptapBlockEditor.vue'
 import WorkbenchEditorActions from './WorkbenchEditorActions.vue'
 import ReviewCommentsDialog from './ReviewCommentsDialog.vue'
@@ -134,15 +135,6 @@ defineExpose({
   >
     {{ t('workbench.loadingTaskContent') }}
   </section>
-  <section v-else-if="reviewComments.length" class="panel theme-divider mb-3 border px-4 py-3">
-    <button
-      type="button"
-      class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
-      @click="showReviewCommentsDialog = true"
-    >
-      <span>{{ t('reviewComments.chipLabel', { count: reviewComments.length }) }}</span>
-    </button>
-  </section>
   <TiptapBlockEditor
     v-if="!loading || modelValue.length"
     ref="blockEditorRef"
@@ -157,6 +149,18 @@ defineExpose({
     @clear-request="emit('clear-request')"
     @send-request="emit('send-request')"
   >
+    <template v-if="reviewComments.length" #content-top>
+      <button
+        type="button"
+        class="tool-button inline-flex max-w-full items-center gap-2 px-3 py-2 text-xs"
+        @mousedown.prevent
+        @click="showReviewCommentsDialog = true"
+      >
+        <MessageSquareText class="h-3.5 w-3.5 shrink-0" />
+        <span class="truncate">{{ t('reviewComments.chipLabel', { count: reviewComments.length }) }}</span>
+      </button>
+    </template>
+
     <template #header-actions>
       <WorkbenchEditorActions
         :can-add-todo="canAddTodo"
