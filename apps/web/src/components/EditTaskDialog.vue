@@ -387,7 +387,7 @@ watch(
   <DialogShell
     :open="open"
     :stack-level="3"
-    panel-class="settings-dialog-panel h-full max-w-5xl sm:h-[42rem] sm:max-h-[88vh]"
+    panel-class="settings-dialog-panel h-[calc(100dvh-1rem)] max-w-5xl sm:h-[96vh] sm:max-h-[96vh]"
     header-class="settings-dialog-header px-5 py-4"
     body-class="settings-dialog-body min-h-0 flex flex-1 flex-col overflow-hidden"
     @close="emit('close')"

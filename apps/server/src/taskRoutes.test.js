@@ -182,7 +182,7 @@ test('task routes block remote shell commands', async () => {
   }
 })
 
-test('task routes allow remote shell commands when relay setting explicitly enables it', async () => {
+test('task routes allow relay remote shell commands when remote command security uses relay mode', async () => {
   let allowShellCommand = false
   const app = Fastify()
   registerTaskRoutes(app, {
@@ -196,6 +196,12 @@ test('task routes allow remote shell commands when relay setting explicitly enab
     deleteTaskCodexRuns: () => {},
     getPromptxCodexSessionById: () => ({ id: 'session-1' }),
     getRelayConfig: () => ({ allowRemoteShell: true }),
+    getSystemConfig: () => ({
+      remoteCommandSecurity: {
+        mode: 'relay',
+        trustedProxyToken: '',
+      },
+    }),
     getRunningCodexRunByTaskSlug: () => null,
     getTaskBySlug: (slug) => ({ slug, expired: false }),
     getTaskGitDiffReviewInSubprocess: async () => ({}),
@@ -242,7 +248,7 @@ test('task routes allow remote shell commands when relay setting explicitly enab
   }
 })
 
-test('task routes still block non-relay remote shell requests even when relay shell is enabled', async () => {
+test('task routes block non-relay remote shell requests in relay security mode', async () => {
   const app = Fastify()
   registerTaskRoutes(app, {
     broadcastServerEvent: () => {},
@@ -255,6 +261,12 @@ test('task routes still block non-relay remote shell requests even when relay sh
     deleteTaskCodexRuns: () => {},
     getPromptxCodexSessionById: () => ({ id: 'session-1' }),
     getRelayConfig: () => ({ allowRemoteShell: true }),
+    getSystemConfig: () => ({
+      remoteCommandSecurity: {
+        mode: 'relay',
+        trustedProxyToken: '',
+      },
+    }),
     getRunningCodexRunByTaskSlug: () => null,
     getTaskBySlug: (slug) => ({ slug, expired: false }),
     getTaskGitDiffReviewInSubprocess: async () => ({}),
@@ -321,7 +333,6 @@ test('task routes allow trusted proxy remote shell commands when configured', as
     getRelayConfig: () => ({ allowRemoteShell: false }),
     getSystemConfig: () => ({
       remoteCommandSecurity: {
-        enabled: true,
         mode: 'trusted-proxy',
         trustedProxyToken: 'trusted-token',
       },
@@ -373,6 +384,76 @@ test('task routes allow trusted proxy remote shell commands when configured', as
   }
 })
 
+test('task routes ignore legacy relay allowRemoteShell when remote command security is disabled', async () => {
+  const app = Fastify()
+  registerTaskRoutes(app, {
+    broadcastServerEvent: () => {},
+    buildTaskExports: () => ({ raw: '' }),
+    canEditTask: () => true,
+    createTask: () => null,
+    decorateTask: (task) => task,
+    decorateTaskList: (items) => items,
+    deleteTask: () => ({ error: 'not_found' }),
+    deleteTaskCodexRuns: () => {},
+    getPromptxCodexSessionById: () => ({ id: 'session-1' }),
+    getRelayConfig: () => ({ allowRemoteShell: true }),
+    getSystemConfig: () => ({
+      remoteCommandSecurity: {
+        mode: 'disabled',
+        trustedProxyToken: '',
+      },
+    }),
+    getRunningCodexRunByTaskSlug: () => null,
+    getTaskBySlug: (slug) => ({ slug, expired: false }),
+    getTaskGitDiffReviewInSubprocess: async () => ({}),
+    listTaskCodexRunsWithOptions: () => [],
+    listTaskWorkspaceDiffSummaries: () => [],
+    listTasks: () => [],
+    reorderTasks: () => ({ changed: false, items: [] }),
+    purgeExpiredContent: () => {},
+    removeAssetFiles: () => {},
+    runDispatchService: {
+      async startTaskRunForTask(payload = {}) {
+        if (payload.allowShellCommand !== true) {
+          const error = new Error('当前入口未被允许执行命令。请在设置 -> 通用 -> 远程命令安全中启用对应模式，或改为本机本地访问。')
+          error.statusCode = 403
+          error.messageKey = 'errors.shellLocalOnly'
+          throw error
+        }
+        return {
+          run: { id: 'run-shell-1', status: 'queued' },
+          runnerDispatchPending: false,
+        }
+      },
+    },
+    updateTask: () => null,
+    updateTaskCodexSession: () => null,
+  })
+  await app.ready()
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tasks/task-1/codex-runs',
+      headers: buildInternalAuthHeaders({
+        origin: 'https://dongdong.promptx.mushayu.com',
+        'x-promptx-relay-request': '1',
+      }),
+      payload: {
+        sessionId: 'session-1',
+        prompt: '!pwd',
+        promptBlocks: [{ type: 'text', content: '!pwd' }],
+        commandMode: 'shell',
+      },
+    })
+
+    assert.equal(response.statusCode, 403)
+    assert.equal(response.json().messageKey, 'errors.shellLocalOnly')
+  } finally {
+    await app.close()
+  }
+})
+
 test('task routes block trusted proxy remote shell commands when token mismatches', async () => {
   const app = Fastify()
   registerTaskRoutes(app, {
@@ -388,7 +469,6 @@ test('task routes block trusted proxy remote shell commands when token mismatche
     getRelayConfig: () => ({ allowRemoteShell: false }),
     getSystemConfig: () => ({
       remoteCommandSecurity: {
-        enabled: true,
         mode: 'trusted-proxy',
         trustedProxyToken: 'trusted-token',
       },

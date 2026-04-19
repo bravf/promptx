@@ -68,7 +68,7 @@ function formatCreatedAt(value = '') {
   <DialogShell
     :open="open"
     :stack-level="2"
-    panel-class="settings-dialog-panel max-w-3xl sm:h-[40rem] sm:max-h-[86vh]"
+    panel-class="settings-dialog-panel h-[calc(100dvh-1rem)] max-w-3xl sm:h-[96vh] sm:max-h-[96vh]"
     header-class="px-5 py-4"
     body-class="min-h-0 flex flex-1 flex-col overflow-hidden"
     @close="emit('close')"

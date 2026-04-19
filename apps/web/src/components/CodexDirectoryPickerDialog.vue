@@ -764,7 +764,7 @@ onBeforeUnmount(() => {
   <DialogShell
     :open="open"
     :stack-level="1"
-    panel-class="settings-dialog-panel h-full max-w-4xl sm:h-auto sm:max-h-[86vh]"
+    panel-class="settings-dialog-panel h-[calc(100dvh-1rem)] max-w-4xl sm:h-[96vh] sm:max-h-[96vh]"
     header-class="settings-dialog-header px-5 py-4"
     body-class="settings-dialog-body flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-5"
     :close-disabled="treeLoading || searchLoading"

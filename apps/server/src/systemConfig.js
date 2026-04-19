@@ -7,7 +7,7 @@ const SYSTEM_CONFIG_FILE = 'system-config.json'
 const DEFAULT_RUNNER_MAX_CONCURRENT_RUNS = 3
 const MIN_RUNNER_MAX_CONCURRENT_RUNS = 1
 const MAX_RUNNER_MAX_CONCURRENT_RUNS = 16
-const REMOTE_COMMAND_SECURITY_MODES = new Set(['relay', 'trusted-proxy'])
+const REMOTE_COMMAND_SECURITY_MODES = new Set(['disabled', 'relay', 'trusted-proxy'])
 
 function getSystemConfigPath() {
   const { dataDir } = ensurePromptxStorageReady()
@@ -42,19 +42,19 @@ function normalizeRunnerConfig(input = {}, fallback = {}) {
 }
 
 function normalizeRemoteCommandSecurityConfig(input = {}, fallback = {}) {
-  const fallbackMode = REMOTE_COMMAND_SECURITY_MODES.has(String(fallback?.mode || '').trim())
-    ? String(fallback.mode).trim()
-    : 'relay'
-  const mode = REMOTE_COMMAND_SECURITY_MODES.has(String(input?.mode || '').trim())
-    ? String(input.mode).trim()
-    : fallbackMode
+  const inputMode = String(input?.mode || '').trim()
+  const fallbackMode = String(fallback?.mode || '').trim()
+  const mode = REMOTE_COMMAND_SECURITY_MODES.has(inputMode)
+    ? inputMode
+    : REMOTE_COMMAND_SECURITY_MODES.has(fallbackMode)
+      ? fallbackMode
+      : 'disabled'
 
   return {
-    enabled: typeof input?.enabled === 'boolean'
-      ? input.enabled
-      : Boolean(fallback?.enabled),
     mode,
-    trustedProxyToken: String(input?.trustedProxyToken || fallback?.trustedProxyToken || '').trim(),
+    trustedProxyToken: mode === 'trusted-proxy'
+      ? String(input?.trustedProxyToken || fallback?.trustedProxyToken || '').trim()
+      : '',
   }
 }
 
@@ -95,7 +95,7 @@ function getSystemConfigManagedByEnv() {
   }
 }
 
-function getSystemConfigForClient() {
+function getSystemConfigForRuntime() {
   const stored = readStoredSystemConfig()
   const managedByEnv = getSystemConfigManagedByEnv()
 
@@ -108,8 +108,21 @@ function getSystemConfigForClient() {
   }, stored)
 }
 
+function getSystemConfigForClient() {
+  const effective = getSystemConfigForRuntime()
+
+  return {
+    runner: effective.runner,
+    remoteCommandSecurity: {
+      mode: String(effective.remoteCommandSecurity?.mode || 'disabled').trim() || 'disabled',
+      trustedProxyTokenConfigured: Boolean(String(effective.remoteCommandSecurity?.trustedProxyToken || '').trim()),
+    },
+  }
+}
+
 export {
   getSystemConfigForClient,
+  getSystemConfigForRuntime,
   getSystemConfigManagedByEnv,
   getSystemConfigPath,
   normalizeSystemConfig,

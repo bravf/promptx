@@ -42,3 +42,71 @@ test('system config module reads env override and stored values', async () => {
     }
   }
 })
+
+test('system config module redacts trusted proxy token for client payloads', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-system-config-'))
+  const originalDataDir = process.env.PROMPTX_DATA_DIR
+  process.env.PROMPTX_DATA_DIR = tempDir
+
+  try {
+    const module = await import(`./systemConfig.js?test=${Date.now()}-redact`)
+    module.writeStoredSystemConfig({
+      runner: {
+        maxConcurrentRuns: 3,
+      },
+      remoteCommandSecurity: {
+        mode: 'trusted-proxy',
+        trustedProxyToken: 'trusted-token',
+      },
+    })
+
+    assert.equal(module.getSystemConfigForRuntime().remoteCommandSecurity.trustedProxyToken, 'trusted-token')
+    assert.deepEqual(module.getSystemConfigForClient().remoteCommandSecurity, {
+      mode: 'trusted-proxy',
+      trustedProxyTokenConfigured: true,
+    })
+  } finally {
+    if (typeof originalDataDir === 'string') {
+      process.env.PROMPTX_DATA_DIR = originalDataDir
+    } else {
+      delete process.env.PROMPTX_DATA_DIR
+    }
+  }
+})
+
+test('system config module clears trusted proxy token when mode is not trusted-proxy', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-system-config-'))
+  const originalDataDir = process.env.PROMPTX_DATA_DIR
+  process.env.PROMPTX_DATA_DIR = tempDir
+
+  try {
+    const module = await import(`./systemConfig.js?test=${Date.now()}-clear-token`)
+    module.writeStoredSystemConfig({
+      remoteCommandSecurity: {
+        mode: 'trusted-proxy',
+        trustedProxyToken: 'trusted-token',
+      },
+    })
+
+    const saved = module.writeStoredSystemConfig({
+      remoteCommandSecurity: {
+        mode: 'relay',
+      },
+    })
+
+    assert.deepEqual(saved.remoteCommandSecurity, {
+      mode: 'relay',
+      trustedProxyToken: '',
+    })
+    assert.deepEqual(module.readStoredSystemConfig().remoteCommandSecurity, {
+      mode: 'relay',
+      trustedProxyToken: '',
+    })
+  } finally {
+    if (typeof originalDataDir === 'string') {
+      process.env.PROMPTX_DATA_DIR = originalDataDir
+    } else {
+      delete process.env.PROMPTX_DATA_DIR
+    }
+  }
+})

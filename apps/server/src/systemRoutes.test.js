@@ -108,9 +108,8 @@ test('system routes persist config and hot update runner when env does not overr
     assert.deepEqual(response.json(), {
       config: {
         remoteCommandSecurity: {
-          enabled: false,
-          mode: 'relay',
-          trustedProxyToken: '',
+          mode: 'disabled',
+          trustedProxyTokenConfigured: false,
         },
         runner: {
           maxConcurrentRuns: 4,
@@ -123,6 +122,48 @@ test('system routes persist config and hot update runner when env does not overr
       },
     })
     assert.deepEqual(services.runnerUpdates, [{ maxConcurrentRuns: 4 }])
+  })
+})
+
+test('system routes redact trusted proxy token in public and internal config responses', async (t) => {
+  await withTestApp(t, {}, async ({ app }) => {
+    const saveResponse = await app.inject({
+      method: 'PUT',
+      url: '/api/system/config',
+      payload: {
+        remoteCommandSecurity: {
+          mode: 'trusted-proxy',
+          trustedProxyToken: 'trusted-token',
+        },
+      },
+    })
+
+    assert.equal(saveResponse.statusCode, 200)
+    assert.deepEqual(saveResponse.json().config.remoteCommandSecurity, {
+      mode: 'trusted-proxy',
+      trustedProxyTokenConfigured: true,
+    })
+
+    const publicResponse = await app.inject({
+      method: 'GET',
+      url: '/api/system/config',
+    })
+    assert.equal(publicResponse.statusCode, 200)
+    assert.deepEqual(publicResponse.json().config.remoteCommandSecurity, {
+      mode: 'trusted-proxy',
+      trustedProxyTokenConfigured: true,
+    })
+
+    const internalResponse = await app.inject({
+      method: 'GET',
+      url: '/internal/system-config',
+      headers: buildInternalAuthHeaders(),
+    })
+    assert.equal(internalResponse.statusCode, 200)
+    assert.deepEqual(internalResponse.json().config.remoteCommandSecurity, {
+      mode: 'trusted-proxy',
+      trustedProxyTokenConfigured: true,
+    })
   })
 })
 

@@ -45,6 +45,7 @@ const systemError = ref('')
 const systemSuccess = ref('')
 const generalSecuritySaving = ref(false)
 const generalSecuritySaved = ref(false)
+const trustedProxyTokenConfigured = ref(false)
 const systemDiagnosticsLoading = ref(false)
 const systemDiagnosticsError = ref('')
 const systemDiagnostics = ref(null)
@@ -68,8 +69,7 @@ const systemForm = reactive({
 })
 const generalForm = reactive({
   sendBehavior: '',
-  remoteCommandSecurityEnabled: false,
-  remoteCommandSecurityMode: 'relay',
+  remoteCommandSecurityMode: 'disabled',
   trustedProxyToken: '',
 })
 const activeSection = ref('general')
@@ -412,9 +412,9 @@ function syncRelayForm(payload = {}) {
 
 function syncSystemForm(payload = {}) {
   systemForm.runnerMaxConcurrentRuns = Math.max(1, Number(payload?.runner?.maxConcurrentRuns) || 3)
-  generalForm.remoteCommandSecurityEnabled = Boolean(payload?.remoteCommandSecurity?.enabled)
-  generalForm.remoteCommandSecurityMode = String(payload?.remoteCommandSecurity?.mode || 'relay').trim() || 'relay'
-  generalForm.trustedProxyToken = String(payload?.remoteCommandSecurity?.trustedProxyToken || '')
+  generalForm.remoteCommandSecurityMode = String(payload?.remoteCommandSecurity?.mode || 'disabled').trim() || 'disabled'
+  generalForm.trustedProxyToken = ''
+  trustedProxyTokenConfigured.value = Boolean(payload?.remoteCommandSecurity?.trustedProxyTokenConfigured)
 }
 
 function syncGeneralForm() {
@@ -527,13 +527,6 @@ async function handleSaveSystem() {
       runner: {
         maxConcurrentRuns: systemForm.runnerMaxConcurrentRuns,
       },
-      remoteCommandSecurity: {
-        enabled: generalForm.remoteCommandSecurityEnabled,
-        mode: generalForm.remoteCommandSecurityMode,
-        trustedProxyToken: generalForm.remoteCommandSecurityMode === 'trusted-proxy'
-          ? generalForm.trustedProxyToken
-          : '',
-      },
     })
     syncSystemForm(payload?.config || {})
     systemManagedByEnv.runnerMaxConcurrentRuns = Boolean(payload?.managedByEnv?.runner?.maxConcurrentRuns)
@@ -560,16 +553,7 @@ async function handleSaveRemoteCommandSecurity() {
 
   try {
     const payload = await updateSystemConfig({
-      runner: {
-        maxConcurrentRuns: systemForm.runnerMaxConcurrentRuns,
-      },
-      remoteCommandSecurity: {
-        enabled: generalForm.remoteCommandSecurityEnabled,
-        mode: generalForm.remoteCommandSecurityMode,
-        trustedProxyToken: generalForm.remoteCommandSecurityMode === 'trusted-proxy'
-          ? generalForm.trustedProxyToken
-          : '',
-      },
+      remoteCommandSecurity: buildRemoteCommandSecurityPayload(),
     })
 
     syncSystemForm(payload?.config || {})
@@ -584,6 +568,23 @@ async function handleSaveRemoteCommandSecurity() {
   } finally {
     generalSecuritySaving.value = false
   }
+}
+
+function buildRemoteCommandSecurityPayload() {
+  const payload = {
+    mode: generalForm.remoteCommandSecurityMode,
+  }
+
+  const trustedProxyToken = String(generalForm.trustedProxyToken || '').trim()
+  if (generalForm.remoteCommandSecurityMode === 'trusted-proxy' && trustedProxyToken) {
+    payload.trustedProxyToken = trustedProxyToken
+  }
+
+  return payload
+}
+
+function selectRemoteCommandSecurityMode(mode) {
+  generalForm.remoteCommandSecurityMode = mode
 }
 
 function hasCompleteRelayFields() {
@@ -749,7 +750,7 @@ onBeforeUnmount(() => {
   <DialogShell
     :open="open"
     :stack-level="2"
-    panel-class="settings-dialog-panel h-full max-w-5xl sm:h-[42rem] sm:max-h-[88vh]"
+    panel-class="settings-dialog-panel h-[calc(100dvh-1rem)] max-w-5xl sm:h-[96vh] sm:max-h-[96vh]"
     header-class="settings-dialog-header px-5 py-4"
     body-class="settings-dialog-body min-h-0 flex flex-1 flex-col sm:flex-row"
     @close="emit('close')"
@@ -808,48 +809,114 @@ onBeforeUnmount(() => {
 
               <section class="settings-section-card space-y-4 px-4 py-4">
                 <div>
-                  <div class="theme-heading text-sm font-medium">{{ t('settingsDialog.general.remoteCommandSecurityTitle') }}</div>
-                  <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('settingsDialog.general.remoteCommandSecurityDescription') }}</p>
+                  <div class="theme-heading text-sm font-medium">{{ t('locale.title') }}</div>
+                  <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('locale.description') }}</p>
                 </div>
 
-                <label class="settings-form-card flex items-center justify-between gap-3 px-3 py-2">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--theme-textPrimary)]">{{ t('settingsDialog.general.remoteCommandSecurityEnableTitle') }}</div>
-                    <p class="theme-muted-text mt-1 text-xs">{{ t('settingsDialog.general.remoteCommandSecurityEnableDescription') }}</p>
-                  </div>
-                  <input
-                    v-model="generalForm.remoteCommandSecurityEnabled"
-                    type="checkbox"
-                    class="h-4 w-4"
-                  />
-                </label>
-
-                <label class="space-y-1.5">
-                  <span class="theme-muted-text text-xs">{{ t('settingsDialog.general.remoteCommandSecurityModeField') }}</span>
+                <label class="block space-y-1.5">
+                  <span class="theme-muted-text text-xs">{{ t('locale.field') }}</span>
                   <WorkbenchSelect
-                    v-model="generalForm.remoteCommandSecurityMode"
-                    :options="[
-                      { value: 'relay', label: t('settingsDialog.general.remoteCommandSecurityModeRelay') },
-                      { value: 'trusted-proxy', label: t('settingsDialog.general.remoteCommandSecurityModeTrustedProxy') },
-                    ]"
+                    :model-value="locale"
+                    :options="localeFieldOptions"
                     :get-option-value="(option) => option.value"
+                    @update:model-value="handleLocaleChange"
                   >
                     <template #trigger="{ selectedOption }">
                       <div class="truncate text-sm text-[var(--theme-textPrimary)]">
                         {{ selectedOption?.label || t('common.select') }}
                       </div>
                     </template>
-                    <template #option="{ option, select }">
+                    <template #option="{ option, selected, select }">
                       <button
                         type="button"
                         class="workbench-select-option theme-filter-idle w-full rounded-sm border border-dashed px-3 py-2 text-left text-sm"
                         @click="select()"
                       >
-                        {{ option.label }}
+                        <div class="flex items-center justify-between gap-3">
+                          <div class="min-w-0">
+                            <div class="truncate text-[var(--theme-textPrimary)]">{{ option.label }}</div>
+                            <div class="theme-muted-text mt-1 truncate text-xs">{{ option.englishLabel }}</div>
+                          </div>
+                          <span v-if="selected" class="theme-status-success rounded-sm border border-dashed px-2 py-0.5 text-[10px]">{{ t('common.enabled') }}</span>
+                        </div>
                       </button>
                     </template>
                   </WorkbenchSelect>
                 </label>
+
+                <p class="theme-muted-text theme-note-text">{{ t('locale.immediateHint') }}</p>
+              </section>
+
+              <section class="settings-section-card space-y-4 px-4 py-4">
+                <div>
+                  <div class="theme-heading text-sm font-medium">{{ t('settingsDialog.general.remoteCommandSecurityTitle') }}</div>
+                  <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('settingsDialog.general.remoteCommandSecurityDescription') }}</p>
+                </div>
+
+                <div class="space-y-1.5">
+                  <span class="theme-muted-text text-xs">{{ t('settingsDialog.general.remoteCommandSecurityModeField') }}</span>
+                  <div class="space-y-2">
+                    <label
+                      class="settings-form-card flex cursor-pointer items-start justify-between gap-3 px-3 py-3"
+                      :class="generalForm.remoteCommandSecurityMode === 'disabled' ? 'ring-1 ring-[var(--theme-primary)]' : ''"
+                    >
+                      <div class="min-w-0">
+                        <div class="text-sm font-medium text-[var(--theme-textPrimary)]">
+                          {{ t('settingsDialog.general.remoteCommandSecurityModeDisabled') }}
+                        </div>
+                        <p class="theme-muted-text mt-1 text-xs leading-5">
+                          {{ t('settingsDialog.general.remoteCommandSecurityModeDisabledDescription') }}
+                        </p>
+                      </div>
+                      <input
+                        :checked="generalForm.remoteCommandSecurityMode === 'disabled'"
+                        type="checkbox"
+                        class="mt-0.5 h-4 w-4 shrink-0"
+                        @change="selectRemoteCommandSecurityMode('disabled')"
+                      />
+                    </label>
+
+                    <label
+                      class="settings-form-card flex cursor-pointer items-start justify-between gap-3 px-3 py-3"
+                      :class="generalForm.remoteCommandSecurityMode === 'relay' ? 'ring-1 ring-[var(--theme-primary)]' : ''"
+                    >
+                      <div class="min-w-0">
+                        <div class="text-sm font-medium text-[var(--theme-textPrimary)]">
+                          {{ t('settingsDialog.general.remoteCommandSecurityModeRelay') }}
+                        </div>
+                        <p class="theme-muted-text mt-1 text-xs leading-5">
+                          {{ t('settingsDialog.general.remoteCommandSecurityModeRelayDescription') }}
+                        </p>
+                      </div>
+                      <input
+                        :checked="generalForm.remoteCommandSecurityMode === 'relay'"
+                        type="checkbox"
+                        class="mt-0.5 h-4 w-4 shrink-0"
+                        @change="selectRemoteCommandSecurityMode('relay')"
+                      />
+                    </label>
+
+                    <label
+                      class="settings-form-card flex cursor-pointer items-start justify-between gap-3 px-3 py-3"
+                      :class="generalForm.remoteCommandSecurityMode === 'trusted-proxy' ? 'ring-1 ring-[var(--theme-primary)]' : ''"
+                    >
+                      <div class="min-w-0">
+                        <div class="text-sm font-medium text-[var(--theme-textPrimary)]">
+                          {{ t('settingsDialog.general.remoteCommandSecurityModeTrustedProxy') }}
+                        </div>
+                        <p class="theme-muted-text mt-1 text-xs leading-5">
+                          {{ t('settingsDialog.general.remoteCommandSecurityModeTrustedProxyDescription') }}
+                        </p>
+                      </div>
+                      <input
+                        :checked="generalForm.remoteCommandSecurityMode === 'trusted-proxy'"
+                        type="checkbox"
+                        class="mt-0.5 h-4 w-4 shrink-0"
+                        @change="selectRemoteCommandSecurityMode('trusted-proxy')"
+                      />
+                    </label>
+                  </div>
+                </div>
 
                 <label v-if="generalForm.remoteCommandSecurityMode === 'trusted-proxy'" class="space-y-1.5">
                   <span class="theme-muted-text text-xs">{{ t('settingsDialog.general.trustedProxyTokenField') }}</span>
@@ -857,10 +924,20 @@ onBeforeUnmount(() => {
                     v-model="generalForm.trustedProxyToken"
                     type="password"
                     class="tool-input"
-                    :placeholder="t('settingsDialog.general.trustedProxyTokenPlaceholder')"
+                    :placeholder="trustedProxyTokenConfigured ? t('settingsDialog.general.trustedProxyTokenReplacePlaceholder') : t('settingsDialog.general.trustedProxyTokenPlaceholder')"
                   >
+                  <p
+                    v-if="trustedProxyTokenConfigured"
+                    class="theme-muted-text text-xs leading-5"
+                  >
+                    {{ t('settingsDialog.general.trustedProxyTokenConfiguredHint') }}
+                  </p>
                   <p class="theme-muted-text text-xs leading-5">
-                    {{ t('settingsDialog.general.trustedProxyTokenHint') }}
+                    {{
+                      trustedProxyTokenConfigured
+                        ? t('settingsDialog.general.trustedProxyTokenReplaceHint')
+                        : t('settingsDialog.general.trustedProxyTokenHint')
+                    }}
                   </p>
                 </label>
 
@@ -907,46 +984,6 @@ onBeforeUnmount(() => {
 
               <section class="settings-section-card px-4 py-4">
                 <ThemeToggle />
-              </section>
-
-              <section class="settings-section-card space-y-4 px-4 py-4">
-                <div>
-                  <div class="theme-heading text-sm font-medium">{{ t('locale.title') }}</div>
-                  <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('locale.description') }}</p>
-                </div>
-
-                <label class="block space-y-1.5">
-                  <span class="theme-muted-text text-xs">{{ t('locale.field') }}</span>
-                  <WorkbenchSelect
-                    :model-value="locale"
-                    :options="localeFieldOptions"
-                    :get-option-value="(option) => option.value"
-                    @update:model-value="handleLocaleChange"
-                  >
-                    <template #trigger="{ selectedOption }">
-                      <div class="truncate text-sm text-[var(--theme-textPrimary)]">
-                        {{ selectedOption?.label || t('common.select') }}
-                      </div>
-                    </template>
-                    <template #option="{ option, selected, select }">
-                      <button
-                        type="button"
-                        class="workbench-select-option theme-filter-idle w-full rounded-sm border border-dashed px-3 py-2 text-left text-sm"
-                        @click="select()"
-                      >
-                        <div class="flex items-center justify-between gap-3">
-                          <div class="min-w-0">
-                            <div class="truncate text-[var(--theme-textPrimary)]">{{ option.label }}</div>
-                            <div class="theme-muted-text mt-1 truncate text-xs">{{ option.englishLabel }}</div>
-                          </div>
-                          <span v-if="selected" class="theme-status-success rounded-sm border border-dashed px-2 py-0.5 text-[10px]">{{ t('common.enabled') }}</span>
-                        </div>
-                      </button>
-                    </template>
-                  </WorkbenchSelect>
-                </label>
-
-                <p class="theme-muted-text theme-note-text">{{ t('locale.immediateHint') }}</p>
               </section>
             </section>
 

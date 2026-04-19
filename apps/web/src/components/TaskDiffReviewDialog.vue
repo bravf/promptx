@@ -50,7 +50,7 @@ function handleInsertCodeContext(payload) {
   <DialogShell
     :open="open"
     :stack-level="2"
-    panel-class="settings-dialog-panel h-full sm:h-[90vh] sm:w-[90vw] sm:max-w-[90vw]"
+    panel-class="settings-dialog-panel h-[calc(100dvh-1rem)] sm:h-[96vh] sm:max-h-[96vh] sm:w-[90vw] sm:max-w-[90vw]"
     header-class="settings-dialog-header px-5 py-4"
     body-class="settings-dialog-body min-h-0 flex-1 overflow-hidden p-3 sm:p-4"
     @close="emit('close')"
