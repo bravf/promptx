@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { Cpu, Eye, EyeOff, Info, Keyboard, LoaderCircle, Palette, Settings2, Wifi } from 'lucide-vue-next'
+import { Check, Cpu, Eye, EyeOff, Info, Keyboard, LoaderCircle, Palette, Settings2, Wifi } from 'lucide-vue-next'
 import DialogShell from './DialogShell.vue'
 import DialogSideNav from './DialogSideNav.vue'
 import ThemeToggle from './ThemeToggle.vue'
@@ -43,6 +43,8 @@ const systemLoading = ref(false)
 const systemSaving = ref(false)
 const systemError = ref('')
 const systemSuccess = ref('')
+const generalSecuritySaving = ref(false)
+const generalSecuritySaved = ref(false)
 const systemDiagnosticsLoading = ref(false)
 const systemDiagnosticsError = ref('')
 const systemDiagnostics = ref(null)
@@ -60,18 +62,21 @@ const relayForm = reactive({
   relayUrl: '',
   deviceId: '',
   deviceToken: '',
-  allowRemoteShell: false,
 })
 const systemForm = reactive({
   runnerMaxConcurrentRuns: 3,
 })
 const generalForm = reactive({
   sendBehavior: '',
+  remoteCommandSecurityEnabled: false,
+  remoteCommandSecurityMode: 'relay',
+  trustedProxyToken: '',
 })
 const activeSection = ref('general')
 let relayCopyTimer = null
 let systemCopyTimer = null
 let systemDiagnosticsTimer = null
+let generalSecuritySavedTimer = null
 
 const settingsSections = computed(() => ([
   {
@@ -276,7 +281,6 @@ const relayDiagnosticsText = computed(() => {
       relayUrl: relayForm.relayUrl,
       deviceId: relayForm.deviceId,
       deviceTokenMasked: maskedToken,
-      allowRemoteShell: relayForm.allowRemoteShell,
       managedByEnv: relayManagedByEnv.value,
     },
     status: relayStatus.value || null,
@@ -404,11 +408,13 @@ function syncRelayForm(payload = {}) {
   relayForm.relayUrl = String(payload?.relayUrl || '')
   relayForm.deviceId = String(payload?.deviceId || '')
   relayForm.deviceToken = String(payload?.deviceToken || '')
-  relayForm.allowRemoteShell = Boolean(payload?.allowRemoteShell)
 }
 
 function syncSystemForm(payload = {}) {
   systemForm.runnerMaxConcurrentRuns = Math.max(1, Number(payload?.runner?.maxConcurrentRuns) || 3)
+  generalForm.remoteCommandSecurityEnabled = Boolean(payload?.remoteCommandSecurity?.enabled)
+  generalForm.remoteCommandSecurityMode = String(payload?.remoteCommandSecurity?.mode || 'relay').trim() || 'relay'
+  generalForm.trustedProxyToken = String(payload?.remoteCommandSecurity?.trustedProxyToken || '')
 }
 
 function syncGeneralForm() {
@@ -478,7 +484,6 @@ async function handleSaveRelay() {
       relayUrl: relayForm.relayUrl,
       deviceId: relayForm.deviceId,
       deviceToken: relayForm.deviceToken,
-      allowRemoteShell: relayForm.allowRemoteShell,
     })
     syncRelayForm(payload?.config || {})
     relayManagedByEnv.value = Boolean(payload?.managedByEnv)
@@ -522,6 +527,13 @@ async function handleSaveSystem() {
       runner: {
         maxConcurrentRuns: systemForm.runnerMaxConcurrentRuns,
       },
+      remoteCommandSecurity: {
+        enabled: generalForm.remoteCommandSecurityEnabled,
+        mode: generalForm.remoteCommandSecurityMode,
+        trustedProxyToken: generalForm.remoteCommandSecurityMode === 'trusted-proxy'
+          ? generalForm.trustedProxyToken
+          : '',
+      },
     })
     syncSystemForm(payload?.config || {})
     systemManagedByEnv.runnerMaxConcurrentRuns = Boolean(payload?.managedByEnv?.runner?.maxConcurrentRuns)
@@ -531,6 +543,46 @@ async function handleSaveSystem() {
     systemError.value = error?.message || t('settingsDialog.system.systemConfigSaveFailed')
   } finally {
     systemSaving.value = false
+  }
+}
+
+function clearGeneralSecuritySavedState() {
+  if (generalSecuritySavedTimer) {
+    clearTimeout(generalSecuritySavedTimer)
+    generalSecuritySavedTimer = null
+  }
+  generalSecuritySaved.value = false
+}
+
+async function handleSaveRemoteCommandSecurity() {
+  generalSecuritySaving.value = true
+  systemError.value = ''
+
+  try {
+    const payload = await updateSystemConfig({
+      runner: {
+        maxConcurrentRuns: systemForm.runnerMaxConcurrentRuns,
+      },
+      remoteCommandSecurity: {
+        enabled: generalForm.remoteCommandSecurityEnabled,
+        mode: generalForm.remoteCommandSecurityMode,
+        trustedProxyToken: generalForm.remoteCommandSecurityMode === 'trusted-proxy'
+          ? generalForm.trustedProxyToken
+          : '',
+      },
+    })
+
+    syncSystemForm(payload?.config || {})
+    clearGeneralSecuritySavedState()
+    generalSecuritySaved.value = true
+    generalSecuritySavedTimer = setTimeout(() => {
+      generalSecuritySaved.value = false
+      generalSecuritySavedTimer = null
+    }, 1200)
+  } catch (error) {
+    systemError.value = error?.message || t('settingsDialog.system.systemConfigSaveFailed')
+  } finally {
+    generalSecuritySaving.value = false
   }
 }
 
@@ -563,7 +615,6 @@ async function handleToggleRelayEnabled() {
       relayUrl: relayForm.relayUrl,
       deviceId: relayForm.deviceId,
       deviceToken: relayForm.deviceToken,
-      allowRemoteShell: relayForm.allowRemoteShell,
     })
     syncRelayForm(payload?.config || {})
     relayManagedByEnv.value = Boolean(payload?.managedByEnv)
@@ -689,6 +740,7 @@ onBeforeUnmount(() => {
     clearTimeout(systemCopyTimer)
     systemCopyTimer = null
   }
+  clearGeneralSecuritySavedState()
   stopSystemDiagnosticsPolling()
 })
 </script>
@@ -751,6 +803,95 @@ onBeforeUnmount(() => {
                       <p class="theme-muted-text mt-1 text-xs leading-5">{{ option.description }}</p>
                     </div>
                   </label>
+                </div>
+              </section>
+
+              <section class="settings-section-card space-y-4 px-4 py-4">
+                <div>
+                  <div class="theme-heading text-sm font-medium">{{ t('settingsDialog.general.remoteCommandSecurityTitle') }}</div>
+                  <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('settingsDialog.general.remoteCommandSecurityDescription') }}</p>
+                </div>
+
+                <label class="settings-form-card flex items-center justify-between gap-3 px-3 py-2">
+                  <div>
+                    <div class="text-sm font-medium text-[var(--theme-textPrimary)]">{{ t('settingsDialog.general.remoteCommandSecurityEnableTitle') }}</div>
+                    <p class="theme-muted-text mt-1 text-xs">{{ t('settingsDialog.general.remoteCommandSecurityEnableDescription') }}</p>
+                  </div>
+                  <input
+                    v-model="generalForm.remoteCommandSecurityEnabled"
+                    type="checkbox"
+                    class="h-4 w-4"
+                  />
+                </label>
+
+                <label class="space-y-1.5">
+                  <span class="theme-muted-text text-xs">{{ t('settingsDialog.general.remoteCommandSecurityModeField') }}</span>
+                  <WorkbenchSelect
+                    v-model="generalForm.remoteCommandSecurityMode"
+                    :options="[
+                      { value: 'relay', label: t('settingsDialog.general.remoteCommandSecurityModeRelay') },
+                      { value: 'trusted-proxy', label: t('settingsDialog.general.remoteCommandSecurityModeTrustedProxy') },
+                    ]"
+                    :get-option-value="(option) => option.value"
+                  >
+                    <template #trigger="{ selectedOption }">
+                      <div class="truncate text-sm text-[var(--theme-textPrimary)]">
+                        {{ selectedOption?.label || t('common.select') }}
+                      </div>
+                    </template>
+                    <template #option="{ option, select }">
+                      <button
+                        type="button"
+                        class="workbench-select-option theme-filter-idle w-full rounded-sm border border-dashed px-3 py-2 text-left text-sm"
+                        @click="select()"
+                      >
+                        {{ option.label }}
+                      </button>
+                    </template>
+                  </WorkbenchSelect>
+                </label>
+
+                <label v-if="generalForm.remoteCommandSecurityMode === 'trusted-proxy'" class="space-y-1.5">
+                  <span class="theme-muted-text text-xs">{{ t('settingsDialog.general.trustedProxyTokenField') }}</span>
+                  <input
+                    v-model="generalForm.trustedProxyToken"
+                    type="password"
+                    class="tool-input"
+                    :placeholder="t('settingsDialog.general.trustedProxyTokenPlaceholder')"
+                  >
+                  <p class="theme-muted-text text-xs leading-5">
+                    {{ t('settingsDialog.general.trustedProxyTokenHint') }}
+                  </p>
+                </label>
+
+                <div class="settings-form-card px-3 py-3">
+                  <p class="text-xs leading-5 text-[var(--theme-warningText)]">
+                    {{ t('settingsDialog.general.remoteCommandSecurityWarning') }}
+                  </p>
+                </div>
+
+                <div class="settings-form-footer flex flex-wrap items-center justify-end gap-3">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
+                      :class="generalSecuritySaved ? 'tool-button-accent-subtle' : 'tool-button-primary'"
+                      :disabled="generalSecuritySaving"
+                      @click="handleSaveRemoteCommandSecurity"
+                    >
+                      <LoaderCircle v-if="generalSecuritySaving" class="h-4 w-4 animate-spin" />
+                      <Check v-else-if="generalSecuritySaved" class="h-4 w-4" />
+                      <span>
+                        {{
+                          generalSecuritySaving
+                            ? t('common.saving')
+                            : generalSecuritySaved
+                              ? t('settingsDialog.general.remoteCommandSecuritySaved')
+                              : t('settingsDialog.general.remoteCommandSecuritySave')
+                        }}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </section>
             </section>
@@ -888,23 +1029,6 @@ onBeforeUnmount(() => {
                     </div>
                   </label>
                 </div>
-
-                <label class="settings-form-card flex items-center justify-between gap-3 px-3 py-2">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--theme-textPrimary)]">{{ t('settingsDialog.relay.allowRemoteShellTitle') }}</div>
-                    <p class="theme-muted-text mt-1 text-xs">{{ t('settingsDialog.relay.allowRemoteShellDescription') }}</p>
-                  </div>
-                  <input
-                    v-model="relayForm.allowRemoteShell"
-                    type="checkbox"
-                    class="h-4 w-4"
-                    :disabled="relayManagedByEnv"
-                  />
-                </label>
-
-                <p class="theme-status-warning theme-note-text">
-                  {{ t('settingsDialog.relay.allowRemoteShellWarning') }}
-                </p>
 
                 <div class="settings-form-footer flex flex-wrap items-center justify-between gap-3">
                   <div class="min-w-0 space-y-1">

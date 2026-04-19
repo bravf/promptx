@@ -136,7 +136,7 @@ export function createRunDispatchService(options = {}) {
       throw createApiError('errors.shellEmptyCommand', '请输入要执行的命令，例如 !git status', 400)
     }
     if (commandMode === 'shell' && !allowShellCommand) {
-      throw createApiError('errors.shellLocalOnly', '命令模式默认仅允许在本机本地界面中使用；如需对远程访问开放，请先到设置里显式开启。', 403)
+      throw createApiError('errors.shellLocalOnly', '当前入口未被允许执行命令。请在设置 -> 通用 -> 远程命令安全中启用对应模式，或改为本机本地访问。', 403)
     }
 
     const task = getTaskBySlug(normalizedTaskSlug)

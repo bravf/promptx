@@ -2,6 +2,7 @@ import { normalizeCodexRunEventsMode } from '../../../packages/shared/src/index.
 import { getApiErrorPayload } from './apiErrors.js'
 import { isValidInternalAuthToken, readInternalAuthToken } from './internalAuth.js'
 import { getRelayConfigForClient } from './relayConfig.js'
+import { getSystemConfigForClient } from './systemConfig.js'
 
 const MAX_TASK_REORDER_COUNT = 200
 
@@ -62,9 +63,28 @@ function isRelayProxyRequest(request) {
   return isValidInternalAuthToken(readInternalAuthToken(request?.headers || {}))
 }
 
-function isShellCommandRequestAllowed(request, relayConfig = {}) {
+function isTrustedProxyRequest(request, remoteCommandSecurity = {}) {
+  if (String(request?.headers?.['x-promptx-trusted-proxy'] || '').trim() !== '1') {
+    return false
+  }
+
+  const token = String(request?.headers?.['x-promptx-proxy-token'] || '').trim()
+  const expectedToken = String(remoteCommandSecurity?.trustedProxyToken || '').trim()
+  return Boolean(token && expectedToken && token === expectedToken)
+}
+
+function isShellCommandRequestAllowed(request, relayConfig = {}, systemConfig = {}) {
   if (isLocalShellCommandRequest(request)) {
     return true
+  }
+
+  const remoteCommandSecurity = systemConfig?.remoteCommandSecurity || {}
+  if (remoteCommandSecurity?.enabled === true) {
+    if (remoteCommandSecurity.mode === 'trusted-proxy') {
+      return isTrustedProxyRequest(request, remoteCommandSecurity)
+    }
+
+    return isRelayProxyRequest(request)
   }
 
   return isRelayProxyRequest(request) && Boolean(relayConfig?.allowRemoteShell)
@@ -184,6 +204,7 @@ function registerTaskRoutes(app, options = {}) {
     deleteTaskCodexRuns,
     getPromptxCodexSessionById,
     getRelayConfig = getRelayConfigForClient,
+    getSystemConfig = getSystemConfigForClient,
     getRunningCodexRunByTaskSlug,
     getTaskBySlug,
     getTaskGitDiffReviewInSubprocess,
@@ -438,7 +459,7 @@ function registerTaskRoutes(app, options = {}) {
         displayEngine: request.body?.displayEngine,
         commandMode: request.body?.commandMode,
         command: request.body?.command,
-        allowShellCommand: isShellCommandRequestAllowed(request, getRelayConfig()),
+        allowShellCommand: isShellCommandRequestAllowed(request, getRelayConfig(), getSystemConfig()),
       })
       return reply.code(payload?.runnerDispatchPending ? 202 : 201).send(payload)
     } catch (error) {

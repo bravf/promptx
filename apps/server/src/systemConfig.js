@@ -7,6 +7,7 @@ const SYSTEM_CONFIG_FILE = 'system-config.json'
 const DEFAULT_RUNNER_MAX_CONCURRENT_RUNS = 3
 const MIN_RUNNER_MAX_CONCURRENT_RUNS = 1
 const MAX_RUNNER_MAX_CONCURRENT_RUNS = 16
+const REMOTE_COMMAND_SECURITY_MODES = new Set(['relay', 'trusted-proxy'])
 
 function getSystemConfigPath() {
   const { dataDir } = ensurePromptxStorageReady()
@@ -40,9 +41,30 @@ function normalizeRunnerConfig(input = {}, fallback = {}) {
   }
 }
 
+function normalizeRemoteCommandSecurityConfig(input = {}, fallback = {}) {
+  const fallbackMode = REMOTE_COMMAND_SECURITY_MODES.has(String(fallback?.mode || '').trim())
+    ? String(fallback.mode).trim()
+    : 'relay'
+  const mode = REMOTE_COMMAND_SECURITY_MODES.has(String(input?.mode || '').trim())
+    ? String(input.mode).trim()
+    : fallbackMode
+
+  return {
+    enabled: typeof input?.enabled === 'boolean'
+      ? input.enabled
+      : Boolean(fallback?.enabled),
+    mode,
+    trustedProxyToken: String(input?.trustedProxyToken || fallback?.trustedProxyToken || '').trim(),
+  }
+}
+
 function normalizeSystemConfig(input = {}, fallback = {}) {
   return {
     runner: normalizeRunnerConfig(input?.runner || {}, fallback?.runner || {}),
+    remoteCommandSecurity: normalizeRemoteCommandSecurityConfig(
+      input?.remoteCommandSecurity || {},
+      fallback?.remoteCommandSecurity || {}
+    ),
   }
 }
 

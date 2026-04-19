@@ -107,6 +107,11 @@ test('system routes persist config and hot update runner when env does not overr
     assert.equal(response.statusCode, 200)
     assert.deepEqual(response.json(), {
       config: {
+        remoteCommandSecurity: {
+          enabled: false,
+          mode: 'relay',
+          trustedProxyToken: '',
+        },
         runner: {
           maxConcurrentRuns: 4,
         },
