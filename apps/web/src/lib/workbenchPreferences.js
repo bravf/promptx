@@ -26,6 +26,7 @@ export const WORKBENCH_SEND_BEHAVIOR_OPTIONS = [
 
 export const WORKBENCH_PREFERENCE_KEYS = {
   SEND_BEHAVIOR: 'sendBehavior',
+  NOTIFICATION_SOUND_ENABLED: 'notificationSoundEnabled',
 }
 
 export const WORKBENCH_PREFERENCE_STORAGE = {
@@ -41,6 +42,12 @@ const WORKBENCH_PREFERENCE_DEFINITIONS = {
     section: 'general',
     storage: WORKBENCH_PREFERENCE_STORAGE.CLIENT,
     defaultValue: WORKBENCH_SEND_BEHAVIOR.SHIFT_ENTER,
+  },
+  [WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED]: {
+    key: WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED,
+    section: 'general',
+    storage: WORKBENCH_PREFERENCE_STORAGE.CLIENT,
+    defaultValue: false,
   },
 }
 
@@ -83,6 +90,7 @@ const workbenchPreferencesReady = ref(false)
 function createDefaultWorkbenchPreferences() {
   return {
     [WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR]: WORKBENCH_PREFERENCE_DEFINITIONS[WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR].defaultValue,
+    [WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED]: WORKBENCH_PREFERENCE_DEFINITIONS[WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED].defaultValue,
   }
 }
 
@@ -97,9 +105,24 @@ function normalizeSendBehavior(value = '') {
   return WORKBENCH_SEND_BEHAVIOR.SHIFT_ENTER
 }
 
+function normalizeNotificationSoundEnabled(value = false) {
+  if (typeof value === 'string') {
+    const normalized = String(value).trim().toLowerCase()
+    if (['1', 'true', 'on', 'yes'].includes(normalized)) {
+      return true
+    }
+    if (['0', 'false', 'off', 'no', ''].includes(normalized)) {
+      return false
+    }
+  }
+
+  return Boolean(value)
+}
+
 function normalizeWorkbenchPreferences(input = {}) {
   return {
     [WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR]: normalizeSendBehavior(input?.[WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR]),
+    [WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED]: normalizeNotificationSoundEnabled(input?.[WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED]),
   }
 }
 
@@ -196,10 +219,12 @@ export function shouldSendOnWorkbenchKeydown(event, options = {}) {
 export function useWorkbenchPreferences() {
   const preferences = computed(() => workbenchPreferences.value)
   const sendBehavior = computed(() => getWorkbenchPreference(WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR))
+  const notificationSoundEnabled = computed(() => getWorkbenchPreference(WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED))
 
   return {
     preferences,
     sendBehavior,
+    notificationSoundEnabled,
     workbenchPreferencesReady,
     initializeWorkbenchPreferences,
     getPreference: getWorkbenchPreference,

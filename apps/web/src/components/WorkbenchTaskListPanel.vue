@@ -202,6 +202,11 @@ function handleDragEnd(event) {
             v-if="task.slug === currentTaskSlug"
             class="theme-selection-indicator absolute inset-y-2 left-0 w-1 rounded-full"
           />
+          <span
+            v-if="task.hasUnreadUpdate"
+            class="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--theme-danger)] shadow-[0_0_0_2px_var(--theme-appPanel)]"
+            aria-hidden="true"
+          />
           <div class="flex items-start justify-between gap-3">
             <div class="flex min-w-0 flex-1 items-start gap-2 overflow-hidden">
               <button

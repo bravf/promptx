@@ -14,13 +14,23 @@ test('initializeWorkbenchPreferences falls back to shift+enter send behavior', (
   const preferences = initializeWorkbenchPreferences()
 
   assert.equal(preferences.sendBehavior, WORKBENCH_SEND_BEHAVIOR.SHIFT_ENTER)
+  assert.equal(preferences.notificationSoundEnabled, false)
   assert.equal(getWorkbenchPreference(WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR), WORKBENCH_SEND_BEHAVIOR.SHIFT_ENTER)
+  assert.equal(getWorkbenchPreference(WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED), false)
 })
 
 test('setWorkbenchPreference normalizes unknown send behavior to shift+enter', () => {
   setWorkbenchPreference(WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR, 'unknown')
 
   assert.equal(getWorkbenchPreference(WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR), WORKBENCH_SEND_BEHAVIOR.SHIFT_ENTER)
+})
+
+test('setWorkbenchPreference normalizes notification sound flag to boolean', () => {
+  setWorkbenchPreference(WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED, 'true')
+  assert.equal(getWorkbenchPreference(WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED), true)
+
+  setWorkbenchPreference(WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED, 'off')
+  assert.equal(getWorkbenchPreference(WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED), false)
 })
 
 test('shouldSendOnWorkbenchKeydown respects enter send behavior', () => {
