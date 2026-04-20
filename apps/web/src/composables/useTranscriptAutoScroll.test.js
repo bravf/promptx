@@ -165,3 +165,28 @@ test('仅仅滚离底部但没有新消息时，不显示跳底提示', () => {
     restoreWindow()
   }
 })
+
+test('切任务后会重置离底状态并强制跟到底部', async () => {
+  const restoreWindow = installWindowStubs()
+  const transcriptRef = ref({
+    scrollHeight: 1000,
+    clientHeight: 200,
+    scrollTop: 420,
+  })
+  const hasNewerMessages = ref(true)
+
+  try {
+    const autoScroll = useTranscriptAutoScroll({ transcriptRef, hasNewerMessages })
+    autoScroll.handleTranscriptScroll()
+    autoScroll.beginForceFollowWindow({ durationMs: 200 })
+    transcriptRef.value.scrollHeight = 1400
+    autoScroll.scheduleScrollToBottom()
+    await flushScrollScheduling()
+
+    assert.equal(transcriptRef.value.scrollTop, 1400)
+    assert.equal(hasNewerMessages.value, false)
+    autoScroll.destroy()
+  } finally {
+    restoreWindow()
+  }
+})

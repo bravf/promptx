@@ -199,6 +199,7 @@ export function useCodexSessionPanel(props, emit) {
   ))
 
   const {
+    beginForceFollowWindow,
     destroy: destroyTranscriptAutoScroll,
     handleTranscriptScroll,
     handleTranscriptTouchEnd,
@@ -479,6 +480,7 @@ export function useCodexSessionPanel(props, emit) {
       showManager.value = false
       sessionError.value = ''
       if (props.active) {
+        beginForceFollowWindow()
         refreshRunHistory({ force: true, scrollToLatest: true }).catch(() => {})
       }
     },

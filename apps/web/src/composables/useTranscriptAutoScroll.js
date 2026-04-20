@@ -1,5 +1,8 @@
 import { nextTick } from 'vue'
 
+const TASK_SWITCH_FORCE_FOLLOW_MS = 1200
+const TASK_SWITCH_FORCE_FOLLOW_TICK_DELAYS = [0, 80, 220, 500, 900]
+
 export function useTranscriptAutoScroll(options = {}) {
   const {
     transcriptRef,
@@ -13,6 +16,22 @@ export function useTranscriptAutoScroll(options = {}) {
   let detachedHasNewMessages = false
   let interactionReleaseJobId = 0
   let followingBottom = true
+  let forceFollowUntil = 0
+  let forceFollowTickTimerIds = []
+  let forceFollowEndTimerId = 0
+  let forceFollowResizeObserver = null
+
+  function getTimerApi() {
+    const timerHost = typeof window !== 'undefined' ? window : globalThis
+    if (typeof timerHost?.setTimeout !== 'function' || typeof timerHost?.clearTimeout !== 'function') {
+      return null
+    }
+
+    return {
+      setTimeout: timerHost.setTimeout.bind(timerHost),
+      clearTimeout: timerHost.clearTimeout.bind(timerHost),
+    }
+  }
 
   function clearPendingScrollFrames() {
     if (typeof window === 'undefined' || !pendingScrollFrameIds.length) {
@@ -29,6 +48,34 @@ export function useTranscriptAutoScroll(options = {}) {
   function cancelScheduledScrollToBottom() {
     pendingScrollJobId += 1
     clearPendingScrollFrames()
+  }
+
+  function clearForceFollowTimers() {
+    const timerApi = getTimerApi()
+    if (!timerApi) {
+      forceFollowTickTimerIds = []
+      forceFollowEndTimerId = 0
+      return
+    }
+
+    forceFollowTickTimerIds.forEach((timerId) => {
+      timerApi.clearTimeout(timerId)
+    })
+    forceFollowTickTimerIds = []
+
+    if (forceFollowEndTimerId) {
+      timerApi.clearTimeout(forceFollowEndTimerId)
+      forceFollowEndTimerId = 0
+    }
+  }
+
+  function stopForceFollowObserver() {
+    forceFollowResizeObserver?.disconnect?.()
+    forceFollowResizeObserver = null
+  }
+
+  function isForceFollowing() {
+    return forceFollowUntil > Date.now()
   }
 
   function setHasNewerMessages(nextValue) {
@@ -55,7 +102,7 @@ export function useTranscriptAutoScroll(options = {}) {
   }
 
   function shouldAutoFollow() {
-    return followingBottom && !userInteracting
+    return isForceFollowing() || (followingBottom && !userInteracting)
   }
 
   function clearDetachedMessagesIfNeeded() {
@@ -77,6 +124,9 @@ export function useTranscriptAutoScroll(options = {}) {
   function handleTranscriptTouchStart() {
     interactionReleaseJobId += 1
     userInteracting = true
+    forceFollowUntil = 0
+    clearForceFollowTimers()
+    stopForceFollowObserver()
     cancelScheduledScrollToBottom()
   }
 
@@ -103,6 +153,9 @@ export function useTranscriptAutoScroll(options = {}) {
 
   function handleTranscriptTouchMove() {
     userInteracting = true
+    forceFollowUntil = 0
+    clearForceFollowTimers()
+    stopForceFollowObserver()
     cancelScheduledScrollToBottom()
   }
 
@@ -155,8 +208,54 @@ export function useTranscriptAutoScroll(options = {}) {
     scheduleScrollToBottom({ force: true })
   }
 
+  function beginForceFollowWindow(options = {}) {
+    const durationMs = Number(options.durationMs)
+    const duration = Math.max(0, Number.isFinite(durationMs) ? durationMs : TASK_SWITCH_FORCE_FOLLOW_MS)
+    const timerApi = getTimerApi()
+    resetAutoStickToBottom()
+    forceFollowUntil = Date.now() + duration
+    clearForceFollowTimers()
+    stopForceFollowObserver()
+
+    if (timerApi) {
+      forceFollowTickTimerIds = TASK_SWITCH_FORCE_FOLLOW_TICK_DELAYS.map((delay) => timerApi.setTimeout(() => {
+        if (!isForceFollowing()) {
+          return
+        }
+        scheduleScrollToBottom({ force: true })
+      }, delay))
+
+      forceFollowEndTimerId = timerApi.setTimeout(() => {
+        forceFollowUntil = 0
+        forceFollowEndTimerId = 0
+        clearForceFollowTimers()
+        stopForceFollowObserver()
+      }, duration + 40)
+    }
+
+    if (typeof window !== 'undefined') {
+      if (typeof window.ResizeObserver === 'function') {
+        forceFollowResizeObserver = new window.ResizeObserver(() => {
+          if (!isForceFollowing()) {
+            return
+          }
+          scheduleScrollToBottom({ force: true })
+        })
+
+        if (transcriptRef?.value) {
+          forceFollowResizeObserver.observe(transcriptRef.value)
+        }
+      }
+    }
+
+    scheduleScrollToBottom({ force: true })
+  }
+
   function destroy() {
     interactionReleaseJobId += 1
+    forceFollowUntil = 0
+    clearForceFollowTimers()
+    stopForceFollowObserver()
     cancelScheduledScrollToBottom()
   }
 
@@ -167,6 +266,7 @@ export function useTranscriptAutoScroll(options = {}) {
     handleTranscriptTouchEnd,
     handleTranscriptTouchMove,
     handleTranscriptTouchStart,
+    beginForceFollowWindow,
     isTranscriptNearBottom,
     resetAutoStickToBottom,
     scheduleScrollToBottom,
