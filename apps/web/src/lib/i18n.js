@@ -44,6 +44,7 @@ export const MESSAGES = {
     },
     workbench: {
       title: 'PromptX 工作台',
+      newMessageTitle: 'PromptX 你有新消息...',
       tasks: '任务',
       settings: '设置',
       createTask: '新建任务',
@@ -174,6 +175,12 @@ export const MESSAGES = {
               description: '回车只用于编辑内容，必须点击发送按钮才会发送。',
             },
           },
+        },
+        notificationSound: {
+          title: '通知音',
+          description: '控制任务产生未读新进展时是否播放提示音。',
+          switchLabel: '启用通知音',
+          switchHint: '默认关闭。开启后，非当前聚焦任务出现新的未读结果时会播放提示音。',
         },
       },
       relay: {
@@ -815,6 +822,7 @@ export const MESSAGES = {
     },
     workbench: {
       title: 'Workspace',
+      newMessageTitle: 'PromptX You Have New Messages...',
       tasks: 'Tasks',
       settings: 'Settings',
       createTask: 'New',
@@ -945,6 +953,12 @@ export const MESSAGES = {
               description: 'Enter is always used for editing. Sending only happens from the send button.',
             },
           },
+        },
+        notificationSound: {
+          title: 'Notification Sound',
+          description: 'Control whether unread task updates play a notification sound.',
+          switchLabel: 'Enable Notification Sound',
+          switchHint: 'Disabled by default. When enabled, a sound plays when a non-focused task gets a new unread result.',
         },
       },
       relay: {

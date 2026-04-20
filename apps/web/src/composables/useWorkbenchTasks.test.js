@@ -2,12 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  applyTerminalRunUnreadUpdate,
   buildPromptPreview,
+  clearFocusedTaskUnreadUpdateInMap,
   deriveTaskPreview,
   isActiveRunStatus,
   isCurrentTaskSendingState,
+  isTerminalRunStatus,
   isTaskRunning,
+  markTaskUnreadUpdateInMap,
   mergeTaskSummariesWithWorkspaceDiff,
+  pruneNotifiedTerminalRunMap,
   reorderTaskSummaries,
   resolveTaskDisplayTitle,
   shouldRefreshWorkspaceDiffSummaries,
@@ -65,6 +70,111 @@ test('isActiveRunStatus matches queued through stopping only', () => {
   assert.equal(isActiveRunStatus('stopping'), true)
   assert.equal(isActiveRunStatus('completed'), false)
   assert.equal(isActiveRunStatus('error'), false)
+})
+
+test('isTerminalRunStatus matches all terminal outcomes used by notifications', () => {
+  assert.equal(isTerminalRunStatus('completed'), true)
+  assert.equal(isTerminalRunStatus('error'), true)
+  assert.equal(isTerminalRunStatus('stopped'), true)
+  assert.equal(isTerminalRunStatus('interrupted'), true)
+  assert.equal(isTerminalRunStatus('stop_timeout'), true)
+  assert.equal(isTerminalRunStatus('failed'), true)
+  assert.equal(isTerminalRunStatus('cancelled'), true)
+  assert.equal(isTerminalRunStatus('timeout'), true)
+  assert.equal(isTerminalRunStatus('running'), false)
+})
+
+test('markTaskUnreadUpdateInMap skips focused current task', () => {
+  const result = markTaskUnreadUpdateInMap({}, 'task-a', {
+    currentTaskSlug: 'task-a',
+    pageFocused: true,
+  })
+
+  assert.deepEqual(result.unreadMap, {})
+  assert.equal(result.didMark, false)
+})
+
+test('applyTerminalRunUnreadUpdate marks unread once and dedupes repeated terminal status', () => {
+  const first = applyTerminalRunUnreadUpdate({
+    unreadMap: {},
+    notifiedMap: {},
+    taskSlug: 'task-b',
+    change: {
+      runId: 'run-1',
+      status: 'completed',
+    },
+    currentTaskSlug: 'task-a',
+    pageFocused: true,
+  })
+
+  assert.deepEqual(first.unreadMap, {
+    'task-b': true,
+  })
+  assert.equal(first.didMark, true)
+  assert.equal(first.didDedupe, false)
+  assert.deepEqual(first.notifiedMap['run-1'], {
+    taskSlug: 'task-b',
+    status: 'completed',
+  })
+
+  const second = applyTerminalRunUnreadUpdate({
+    unreadMap: first.unreadMap,
+    notifiedMap: first.notifiedMap,
+    taskSlug: 'task-b',
+    change: {
+      runId: 'run-1',
+      status: 'completed',
+    },
+    currentTaskSlug: 'task-a',
+    pageFocused: true,
+  })
+
+  assert.deepEqual(second.unreadMap, {
+    'task-b': true,
+  })
+  assert.equal(second.didMark, false)
+  assert.equal(second.didDedupe, true)
+})
+
+test('clearFocusedTaskUnreadUpdateInMap only clears current task when page is focused', () => {
+  const unreadMap = {
+    'task-a': true,
+    'task-b': true,
+  }
+
+  assert.deepEqual(clearFocusedTaskUnreadUpdateInMap(unreadMap, {
+    currentTaskSlug: 'task-a',
+    pageFocused: false,
+  }), unreadMap)
+
+  assert.deepEqual(clearFocusedTaskUnreadUpdateInMap(unreadMap, {
+    currentTaskSlug: 'task-a',
+    pageFocused: true,
+  }), {
+    'task-b': true,
+  })
+})
+
+test('pruneNotifiedTerminalRunMap drops removed tasks and keeps known ones', () => {
+  const result = pruneNotifiedTerminalRunMap({
+    'run-1': {
+      taskSlug: 'task-a',
+      status: 'completed',
+    },
+    'run-2': {
+      taskSlug: 'task-b',
+      status: 'failed',
+    },
+  }, [
+    { slug: 'task-b' },
+  ])
+
+  assert.deepEqual(result, {
+    'run-2': {
+      taskSlug: 'task-b',
+      status: 'failed',
+    },
+  })
 })
 
 test('reorderTaskSummaries follows explicit slug order', () => {

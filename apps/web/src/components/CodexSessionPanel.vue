@@ -211,6 +211,17 @@ watch(
   }
 )
 
+watch(
+  () => props.taskSlug,
+  (nextTaskSlug, previousTaskSlug) => {
+    if (!String(nextTaskSlug || '').trim() || nextTaskSlug === previousTaskSlug) {
+      return
+    }
+
+    selectedAgentFilter.value = 'all'
+  }
+)
+
 function shouldHideSystemEvent(item = {}) {
   if (item?.kind === 'reasoning') {
     return true

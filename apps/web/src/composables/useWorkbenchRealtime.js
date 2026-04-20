@@ -29,6 +29,9 @@ const TERMINAL_RUN_STATUSES = new Set([
   'stopped',
   'interrupted',
   'stop_timeout',
+  'failed',
+  'cancelled',
+  'timeout',
 ])
 
 function bumpVersion(versionMap, taskSlug = '') {

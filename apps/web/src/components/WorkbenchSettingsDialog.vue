@@ -69,6 +69,7 @@ const systemForm = reactive({
 })
 const generalForm = reactive({
   sendBehavior: '',
+  notificationSoundEnabled: false,
   remoteCommandSecurityMode: 'disabled',
   trustedProxyToken: '',
 })
@@ -422,6 +423,9 @@ function syncGeneralForm() {
     getPreference(WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR)
       || WORKBENCH_SEND_BEHAVIOR_OPTIONS[1]?.value
       || ''
+  )
+  generalForm.notificationSoundEnabled = Boolean(
+    getPreference(WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED)
   )
 }
 
@@ -805,6 +809,26 @@ onBeforeUnmount(() => {
                     </div>
                   </label>
                 </div>
+              </section>
+
+              <section class="settings-section-card space-y-4 px-4 py-4">
+                <div>
+                  <div class="theme-heading text-sm font-medium">{{ t('settingsDialog.general.notificationSound.title') }}</div>
+                  <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('settingsDialog.general.notificationSound.description') }}</p>
+                </div>
+
+                <label class="settings-form-card flex items-center justify-between gap-3 px-3 py-3">
+                  <div class="min-w-0">
+                    <div class="text-sm font-medium text-[var(--theme-textPrimary)]">{{ t('settingsDialog.general.notificationSound.switchLabel') }}</div>
+                    <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('settingsDialog.general.notificationSound.switchHint') }}</p>
+                  </div>
+                  <input
+                    v-model="generalForm.notificationSoundEnabled"
+                    type="checkbox"
+                    class="h-4 w-4 shrink-0"
+                    @change="setPreference(WORKBENCH_PREFERENCE_KEYS.NOTIFICATION_SOUND_ENABLED, generalForm.notificationSoundEnabled)"
+                  >
+                </label>
               </section>
 
               <section class="settings-section-card space-y-4 px-4 py-4">

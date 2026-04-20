@@ -35,13 +35,18 @@ const preferredDiffScope = ref('workspace')
 const preferredDiffRunId = ref('')
 const { t } = useI18n()
 const { toastMessage, toastType, flashToast, clearToast } = useToast()
-const { sendBehavior } = useWorkbenchPreferences()
+const { notificationSoundEnabled, sendBehavior } = useWorkbenchPreferences()
 const TaskDiffReviewDialog = defineAsyncComponent(() => import('../components/TaskDiffReviewDialog.vue'))
 const WorkbenchSettingsDialog = defineAsyncComponent(() => import('../components/WorkbenchSettingsDialog.vue'))
+const NOTIFICATION_SOUND_URL = '/sounds/notify-didi.wav?v=20260420-1'
+const NOTIFICATION_SOUND_THROTTLE_MS = 3000
 
 const codexPanelRef = ref(null)
 const currentProjectAgentBindings = ref([])
 const selectedAgentEngineMap = ref({})
+let notificationAudio = null
+let notificationAudioPrimed = false
+let lastNotificationSoundAt = 0
 
 function normalizeSelectedAgentEngine(value = '', bindings = currentProjectAgentBindings.value) {
   const normalized = String(value || '').trim()
@@ -117,6 +122,7 @@ const {
   handleUpload,
   hasCurrentDraftContent,
   hasUnsavedChanges,
+  hasUnreadTaskUpdates,
   initializeWorkbench,
   isCurrentTaskSending,
   loadingTask,
@@ -132,6 +138,7 @@ const {
   saveTask,
   saving,
   selectTask,
+  unreadNotificationVersion,
   updateLastPromptPreview,
   useTodoItem,
   uploading,
@@ -144,6 +151,10 @@ const {
 const currentRenderedTask = computed(() =>
   renderedTasks.value.find((task) => task.slug === currentTaskSlug.value) || null
 )
+const effectivePageTitle = computed(() => (
+  hasUnreadTaskUpdates.value ? t('workbench.newMessageTitle') : pageTitle.value
+))
+const useRawPageTitle = computed(() => hasUnreadTaskUpdates.value)
 const currentTaskDiffSupported = computed(() => Boolean(currentRenderedTask.value?.workspaceDiffSummary?.supported))
 const currentTaskBuildPrompt = computed(() => {
   const task = currentRenderedTask.value
@@ -216,7 +227,84 @@ function resolvePreferredMobileDetailTab(task) {
   return 'input'
 }
 
-usePageTitle(pageTitle)
+usePageTitle(effectivePageTitle, {
+  raw: useRawPageTitle,
+})
+
+function ensureNotificationAudio() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  if (!notificationAudio) {
+    notificationAudio = new Audio(NOTIFICATION_SOUND_URL)
+    notificationAudio.preload = 'auto'
+    notificationAudio.volume = 0.7
+  }
+
+  return notificationAudio
+}
+
+function primeNotificationAudio() {
+  if (!notificationSoundEnabled.value) {
+    return
+  }
+
+  const audio = ensureNotificationAudio()
+  if (!audio || notificationAudioPrimed) {
+    return
+  }
+
+  try {
+    audio.muted = true
+    const playPromise = audio.play()
+    if (playPromise && typeof playPromise.then === 'function') {
+      playPromise
+        .then(() => {
+          audio.pause()
+          audio.currentTime = 0
+          audio.muted = false
+          notificationAudioPrimed = true
+        })
+        .catch(() => {
+          audio.muted = false
+        })
+      return
+    }
+
+    audio.pause()
+    audio.currentTime = 0
+    audio.muted = false
+    notificationAudioPrimed = true
+  } catch {
+    audio.muted = false
+  }
+}
+
+function handleUserGestureForNotificationAudio() {
+  primeNotificationAudio()
+}
+
+function playTurnFinishedNotificationSound() {
+  const audio = ensureNotificationAudio()
+  if (!audio || !notificationSoundEnabled.value) {
+    return
+  }
+
+  const now = Date.now()
+  if (now - lastNotificationSoundAt < NOTIFICATION_SOUND_THROTTLE_MS) {
+    return
+  }
+  lastNotificationSoundAt = now
+
+  try {
+    audio.muted = false
+    audio.currentTime = 0
+    audio.play().catch(() => {})
+  } catch {
+    // Browser autoplay policies can still block notification sounds.
+  }
+}
 
 function openTaskDiff(scope = 'workspace', runId = '') {
   preferredDiffScope.value = scope === 'run' ? 'run' : scope === 'task' ? 'task' : 'workspace'
@@ -756,11 +844,13 @@ onMounted(() => {
   initializeWorkbench()
   window.addEventListener('beforeunload', handleBeforeUnload)
   window.addEventListener('keydown', handleWindowKeydown)
+  window.addEventListener('pointerdown', handleUserGestureForNotificationAudio, { passive: true })
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('keydown', handleWindowKeydown)
+  window.removeEventListener('pointerdown', handleUserGestureForNotificationAudio)
 })
 
 watch(
@@ -772,6 +862,14 @@ watch(
     focusMobileEditorIfNeeded()
   }
 )
+
+watch(unreadNotificationVersion, (version, previousVersion) => {
+  if (Number(version) <= Number(previousVersion || 0)) {
+    return
+  }
+
+  playTurnFinishedNotificationSound()
+})
 
 const taskListPanelListeners = {
   'update:draftTitle': updateDraftTitle,

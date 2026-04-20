@@ -1,4 +1,4 @@
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { BLOCK_TYPES, deriveTitleFromBlocks } from '@promptx/shared'
 import {
   createTask,
@@ -21,6 +21,17 @@ import { useWorkbenchRealtime } from './useWorkbenchRealtime.js'
 const ACTIVE_TASK_STORAGE_KEY = 'promptx:active-task-slug'
 const SERVER_SYNC_DELAY = 150
 const LOCAL_REORDER_SSE_SUPPRESS_MS = 1500
+export const MAX_NOTIFIED_TERMINAL_RUNS = 500
+const TERMINAL_RUN_STATUSES = new Set([
+  'completed',
+  'error',
+  'stopped',
+  'interrupted',
+  'stop_timeout',
+  'failed',
+  'cancelled',
+  'timeout',
+])
 
 function normalizeWorkspaceDiffSummary(summary = null) {
   if (!summary || typeof summary !== 'object') {
@@ -158,6 +169,165 @@ export function getCurrentTaskSendState(task = {}, localSending = false) {
 
 export function isActiveRunStatus(status = '') {
   return ['queued', 'starting', 'running', 'stopping'].includes(String(status || '').trim())
+}
+
+export function isTerminalRunStatus(status = '') {
+  return TERMINAL_RUN_STATUSES.has(String(status || '').trim())
+}
+
+export function isTaskUnreadFocused(taskSlug = '', currentTaskSlug = '', pageFocused = false) {
+  const normalizedTaskSlug = String(taskSlug || '').trim()
+  return Boolean(normalizedTaskSlug && normalizedTaskSlug === String(currentTaskSlug || '').trim() && pageFocused)
+}
+
+export function markTaskUnreadUpdateInMap(unreadMap = {}, taskSlug = '', options = {}) {
+  const normalizedTaskSlug = String(taskSlug || '').trim()
+  if (!normalizedTaskSlug || isTaskUnreadFocused(normalizedTaskSlug, options.currentTaskSlug, options.pageFocused)) {
+    return {
+      unreadMap,
+      didMark: false,
+    }
+  }
+
+  if (unreadMap?.[normalizedTaskSlug]) {
+    return {
+      unreadMap,
+      didMark: false,
+    }
+  }
+
+  return {
+    unreadMap: {
+      ...(unreadMap || {}),
+      [normalizedTaskSlug]: true,
+    },
+    didMark: true,
+  }
+}
+
+export function clearTaskUnreadUpdateInMap(unreadMap = {}, taskSlug = '') {
+  const normalizedTaskSlug = String(taskSlug || '').trim()
+  if (!normalizedTaskSlug || !unreadMap?.[normalizedTaskSlug]) {
+    return unreadMap
+  }
+
+  const nextMap = { ...(unreadMap || {}) }
+  delete nextMap[normalizedTaskSlug]
+  return nextMap
+}
+
+export function clearFocusedTaskUnreadUpdateInMap(unreadMap = {}, options = {}) {
+  if (!options.pageFocused) {
+    return unreadMap
+  }
+
+  return clearTaskUnreadUpdateInMap(unreadMap, options.currentTaskSlug)
+}
+
+export function pruneUnreadTaskUpdateMap(unreadMap = {}, nextTasks = []) {
+  const knownTaskSlugs = new Set(
+    (nextTasks || [])
+      .map((task) => String(task?.slug || '').trim())
+      .filter(Boolean)
+  )
+  const nextUnreadMap = {}
+
+  Object.entries(unreadMap || {}).forEach(([taskSlug, value]) => {
+    if (knownTaskSlugs.has(taskSlug) && value) {
+      nextUnreadMap[taskSlug] = true
+    }
+  })
+
+  return nextUnreadMap
+}
+
+function normalizeNotifiedTerminalRunEntry(entry = null) {
+  if (typeof entry === 'string') {
+    return {
+      status: entry,
+      taskSlug: '',
+    }
+  }
+
+  return {
+    status: String(entry?.status || '').trim(),
+    taskSlug: String(entry?.taskSlug || '').trim(),
+  }
+}
+
+export function capNotifiedTerminalRunMap(notifiedMap = {}, maxEntries = MAX_NOTIFIED_TERMINAL_RUNS) {
+  const limit = Math.max(1, Number(maxEntries) || MAX_NOTIFIED_TERMINAL_RUNS)
+  const entries = Object.entries(notifiedMap || {})
+  if (entries.length <= limit) {
+    return notifiedMap
+  }
+
+  return Object.fromEntries(entries.slice(-limit))
+}
+
+export function pruneNotifiedTerminalRunMap(notifiedMap = {}, nextTasks = [], maxEntries = MAX_NOTIFIED_TERMINAL_RUNS) {
+  const knownTaskSlugs = new Set(
+    (nextTasks || [])
+      .map((task) => String(task?.slug || '').trim())
+      .filter(Boolean)
+  )
+  const nextNotifiedMap = {}
+
+  Object.entries(notifiedMap || {}).forEach(([runId, entry]) => {
+    const normalizedEntry = normalizeNotifiedTerminalRunEntry(entry)
+    if (normalizedEntry.taskSlug && knownTaskSlugs.has(normalizedEntry.taskSlug)) {
+      nextNotifiedMap[runId] = normalizedEntry
+    }
+  })
+
+  return capNotifiedTerminalRunMap(nextNotifiedMap, maxEntries)
+}
+
+export function applyTerminalRunUnreadUpdate(input = {}) {
+  const normalizedTaskSlug = String(input.taskSlug || '').trim()
+  const change = input.change || null
+  const runId = String(change?.runId || '').trim()
+  const status = String(change?.status || '').trim()
+  const currentUnreadMap = input.unreadMap || {}
+  const currentNotifiedMap = input.notifiedMap || {}
+
+  if (!normalizedTaskSlug || !runId || !isTerminalRunStatus(status)) {
+    return {
+      unreadMap: currentUnreadMap,
+      notifiedMap: currentNotifiedMap,
+      didMark: false,
+      didDedupe: false,
+    }
+  }
+
+  const previousEntry = normalizeNotifiedTerminalRunEntry(currentNotifiedMap[runId])
+  if (previousEntry.status === status) {
+    return {
+      unreadMap: currentUnreadMap,
+      notifiedMap: currentNotifiedMap,
+      didMark: false,
+      didDedupe: true,
+    }
+  }
+
+  const nextNotifiedMap = capNotifiedTerminalRunMap({
+    ...currentNotifiedMap,
+    [runId]: {
+      taskSlug: normalizedTaskSlug,
+      status,
+    },
+  }, input.maxNotifiedRuns)
+  const marked = markTaskUnreadUpdateInMap(currentUnreadMap, normalizedTaskSlug, {
+    currentTaskSlug: input.currentTaskSlug,
+    pageFocused: input.pageFocused,
+  })
+
+  return {
+    unreadMap: marked.unreadMap,
+    notifiedMap: nextNotifiedMap,
+    didMark: marked.didMark,
+    didDedupe: false,
+  }
 }
 
 export function buildPromptPreview(prompt = '', max = 72) {
@@ -411,6 +581,8 @@ export function useWorkbenchTasks(options = {}) {
   const taskDraftMap = ref({})
   const selectedSessionMap = ref({})
   const sendingTaskMap = ref({})
+  const unreadTaskUpdateMap = ref({})
+  const notifiedTerminalRunMap = ref({})
   const currentTaskSlug = ref('')
   const draft = ref({
     title: '',
@@ -478,6 +650,8 @@ export function useWorkbenchTasks(options = {}) {
     tasks.value.some((task) => isTaskRunning(task))
     || Object.values(sendingTaskMap.value).some(Boolean)
   ))
+  const hasUnreadTaskUpdates = computed(() => Object.values(unreadTaskUpdateMap.value).some(Boolean))
+  const unreadNotificationVersion = ref(0)
   const hasCurrentDraftContent = computed(() => hasMeaningfulBlocks(draft.value.blocks))
   const currentTodoItems = computed(() => cloneTodoItems(draft.value.todoItems))
   const pageTitle = computed(() => currentTaskDisplayTitle.value || translate('workbench.untitledTask'))
@@ -621,6 +795,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
         : '',
       displayTitle: resolveTaskDisplayTitle({ title, autoTitle, preview }, blocks),
       sending: isTaskRunning(task),
+      hasUnreadUpdate: Boolean(unreadTaskUpdateMap.value[task.slug]),
     }
   }
 
@@ -686,6 +861,67 @@ function normalizeTodoItemsForSnapshot(items = []) {
       ...currentSummary,
       running: nextRunning,
     })
+  }
+
+  function isPageFocused() {
+    if (typeof document === 'undefined') {
+      return true
+    }
+
+    return document.visibilityState === 'visible' && document.hasFocus()
+  }
+
+  function isTaskActuallyFocused(taskSlug = '') {
+    return isTaskUnreadFocused(taskSlug, currentTaskSlug.value, isPageFocused())
+  }
+
+  function clearTaskUnreadUpdate(taskSlug = '') {
+    unreadTaskUpdateMap.value = clearTaskUnreadUpdateInMap(unreadTaskUpdateMap.value, taskSlug)
+  }
+
+  function clearCurrentTaskUnreadUpdateIfFocused() {
+    unreadTaskUpdateMap.value = clearFocusedTaskUnreadUpdateInMap(unreadTaskUpdateMap.value, {
+      currentTaskSlug: currentTaskSlug.value,
+      pageFocused: isPageFocused(),
+    })
+  }
+
+  function markTaskUnreadUpdate(taskSlug = '') {
+    const nextState = markTaskUnreadUpdateInMap(unreadTaskUpdateMap.value, taskSlug, {
+      currentTaskSlug: currentTaskSlug.value,
+      pageFocused: isPageFocused(),
+    })
+    unreadTaskUpdateMap.value = nextState.unreadMap
+    if (nextState.didMark) {
+      unreadNotificationVersion.value += 1
+    }
+  }
+
+  function pruneUnreadTaskUpdates(nextTasks = []) {
+    unreadTaskUpdateMap.value = pruneUnreadTaskUpdateMap(unreadTaskUpdateMap.value, nextTasks)
+    notifiedTerminalRunMap.value = pruneNotifiedTerminalRunMap(notifiedTerminalRunMap.value, nextTasks)
+  }
+
+  function markUnreadUpdateFromRealtime(taskSlug = '') {
+    const normalizedTaskSlug = String(taskSlug || '').trim()
+    if (!normalizedTaskSlug) {
+      return
+    }
+
+    const nextState = applyTerminalRunUnreadUpdate({
+      unreadMap: unreadTaskUpdateMap.value,
+      notifiedMap: notifiedTerminalRunMap.value,
+      taskSlug: normalizedTaskSlug,
+      change: realtime.getTaskRunChange(normalizedTaskSlug),
+      currentTaskSlug: currentTaskSlug.value,
+      pageFocused: isPageFocused(),
+      maxNotifiedRuns: MAX_NOTIFIED_TERMINAL_RUNS,
+    })
+    unreadTaskUpdateMap.value = nextState.unreadMap
+    notifiedTerminalRunMap.value = nextState.notifiedMap
+    if (nextState.didMark) {
+      unreadNotificationVersion.value += 1
+    }
   }
 
   function handleTaskSendingChange(slug, value) {
@@ -935,6 +1171,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
         (payload.items || []).map(toTaskSummary)
       )
       tasks.value = nextTasks
+      pruneUnreadTaskUpdates(nextTasks)
       syncSendingTaskMapWithTasks(nextTasks)
       if (shouldRefreshWorkspaceDiffSummaries(previousTasks, nextTasks)) {
         refreshTaskWorkspaceDiffSummaries(nextTasks)
@@ -970,6 +1207,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
         (payload.items || []).map(toTaskSummary)
       )
       tasks.value = mergedTasks
+      pruneUnreadTaskUpdates(mergedTasks)
       syncSendingTaskMapWithTasks(mergedTasks)
       return true
     } catch (err) {
@@ -1128,6 +1366,9 @@ function normalizeTodoItemsForSnapshot(items = []) {
 
       currentTaskSlug.value = targetSlug
       persistActiveTaskSlug(targetSlug)
+      if (isTaskActuallyFocused(targetSlug)) {
+        clearTaskUnreadUpdate(targetSlug)
+      }
       draft.value = cloneDraftState(state)
       setTaskDraftState(targetSlug, state)
       if (summary) {
@@ -1332,6 +1573,8 @@ function normalizeTodoItemsForSnapshot(items = []) {
       const nextSendingMap = { ...sendingTaskMap.value }
       delete nextSendingMap[targetSlug]
       sendingTaskMap.value = nextSendingMap
+
+      clearTaskUnreadUpdate(targetSlug)
 
       if (tasks.value.length) {
         await loadTask(tasks.value[0].slug, { focusEditor: true })
@@ -1695,12 +1938,26 @@ function normalizeTodoItemsForSnapshot(items = []) {
   watch(currentTaskSlug, (slug) => {
     if (slug) {
       persistActiveTaskSlug(slug)
+      clearCurrentTaskUnreadUpdateIfFocused()
     }
+  })
+
+  onMounted(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.addEventListener('focus', clearCurrentTaskUnreadUpdateIfFocused)
+    document.addEventListener('visibilitychange', clearCurrentTaskUnreadUpdateIfFocused)
   })
 
   onBeforeUnmount(() => {
     clearAutoSaveTimer()
     clearServerSyncTimer()
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('focus', clearCurrentTaskUnreadUpdateIfFocused)
+      document.removeEventListener('visibilitychange', clearCurrentTaskUnreadUpdateIfFocused)
+    }
   })
 
   watch(
@@ -1712,6 +1969,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
       ) {
         return
       }
+      markUnreadUpdateFromRealtime(realtime.listSyncTaskSlug.value)
       applyTaskRunningStateFromRealtime(realtime.listSyncTaskSlug.value)
       scheduleServerRefresh(realtime.listSyncTaskSlug.value)
     }
@@ -1741,6 +1999,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
     hasCurrentDraftContent,
     hasAnyTaskSending,
     hasUnsavedChanges,
+    hasUnreadTaskUpdates,
     initializeWorkbench,
     isCurrentTaskSending,
     loadingTask,
@@ -1761,6 +2020,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
     sendingTaskMap,
     taskDraftMap,
     tasks,
+    unreadNotificationVersion,
     useTodoItem,
     updateLastPromptPreview,
     uploading,
