@@ -32,6 +32,7 @@ export {
   getCodexSessionFileContent,
   searchCodexSessionFileContent,
   getTaskGitDiff,
+  buildTaskGitDiffBlobUrl,
   listCodexRunEvents,
   listCodexDirectoryTree,
   searchCodexDirectories,

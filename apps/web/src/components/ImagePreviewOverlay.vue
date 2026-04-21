@@ -81,6 +81,9 @@ function handleWindowKeydown(event) {
     return
   }
 
+  event.stopPropagation?.()
+  event.stopImmediatePropagation?.()
+
   if (event.key === 'Escape') {
     event.preventDefault()
     closePreview()
@@ -147,11 +150,11 @@ watch(
 )
 
 onMounted(() => {
-  window.addEventListener('keydown', handleWindowKeydown)
+  window.addEventListener('keydown', handleWindowKeydown, { capture: true })
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleWindowKeydown)
+  window.removeEventListener('keydown', handleWindowKeydown, { capture: true })
 })
 </script>
 
@@ -159,7 +162,7 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <div
       v-if="currentPreviewImageUrl"
-      class="theme-modal-backdrop image-preview-overlay fixed inset-0 z-50 flex items-center justify-center p-6"
+      class="theme-modal-backdrop image-preview-overlay fixed inset-0 z-[120] flex items-center justify-center p-6"
       @click="closePreview"
       @wheel="handlePreviewWheel"
     >

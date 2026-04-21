@@ -670,3 +670,57 @@ test('task routes reject invalid reorder payload', async () => {
     await app.close()
   }
 })
+
+test('task routes serve binary diff blobs', async () => {
+  const app = Fastify()
+  registerTaskRoutes(app, {
+    broadcastServerEvent: () => {},
+    buildTaskExports: () => ({ raw: '' }),
+    canEditTask: () => true,
+    createTask: () => null,
+    decorateTask: (task) => task,
+    decorateTaskList: (items) => items,
+    deleteTask: () => ({ error: 'not_found' }),
+    deleteTaskCodexRuns: () => {},
+    getPromptxCodexSessionById: () => null,
+    getRunningCodexRunByTaskSlug: () => null,
+    getTaskBySlug: (slug) => ({ slug, expired: false }),
+    getTaskGitDiffBlob: () => ({
+      supported: true,
+      statusCode: 200,
+      mimeType: 'image/png',
+      size: 4,
+      hash: 'abcd1234',
+      body: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+    }),
+    getTaskGitDiffReviewInSubprocess: async () => ({}),
+    listTaskCodexRunsWithOptions: () => [],
+    listTaskWorkspaceDiffSummaries: () => [],
+    listTasks: () => [],
+    reorderTasks: () => ({ changed: false, items: [] }),
+    purgeExpiredContent: () => {},
+    removeAssetFiles: () => {},
+    runDispatchService: {
+      async startTaskRunForTask() {
+        return null
+      },
+    },
+    updateTask: () => null,
+    updateTaskCodexSession: () => null,
+  })
+  await app.ready()
+
+  try {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/tasks/task-1/git-diff/blob?scope=task&filePath=assets/logo.png&side=after',
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.headers['content-type'], 'image/png')
+    assert.equal(response.headers['x-promptx-file-size'], '4')
+    assert.equal(response.body.length > 0, true)
+  } finally {
+    await app.close()
+  }
+})

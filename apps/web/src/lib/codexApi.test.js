@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { listTaskCodexRuns } from './codexApi.js'
+import { buildTaskGitDiffBlobUrl, listTaskCodexRuns } from './codexApi.js'
 
 function createJsonResponse(payload) {
   return {
@@ -51,4 +51,19 @@ test('listTaskCodexRuns 使用 events 查询语义，并兼容旧布尔参数', 
   } finally {
     global.fetch = originalFetch
   }
+})
+
+test('buildTaskGitDiffBlobUrl 构造二进制 diff 预览地址', () => {
+  const url = buildTaskGitDiffBlobUrl('task-1', {
+    scope: 'run',
+    runId: 'run-1',
+    filePath: 'assets/logo.png',
+    side: 'before',
+  })
+
+  assert.match(url, /\/api\/tasks\/task-1\/git-diff\/blob\?/)
+  assert.match(url, /scope=run/)
+  assert.match(url, /runId=run-1/)
+  assert.match(url, /filePath=assets%2Flogo\.png/)
+  assert.match(url, /side=before/)
 })

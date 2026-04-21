@@ -279,6 +279,26 @@ export function getTaskGitDiff(taskSlug, options = {}) {
   })
 }
 
+export function buildTaskGitDiffBlobUrl(taskSlug, options = {}) {
+  const params = new URLSearchParams()
+  const scope = options.scope === 'run' ? 'run' : options.scope === 'task' ? 'task' : 'workspace'
+  const runId = String(options.runId || '').trim()
+  const filePath = String(options.filePath || '').trim()
+  const side = String(options.side || '').trim() === 'before' ? 'before' : 'after'
+
+  params.set('scope', scope)
+  params.set('side', side)
+  if (runId) {
+    params.set('runId', runId)
+  }
+  if (filePath) {
+    params.set('filePath', filePath)
+  }
+
+  const query = params.toString()
+  return `${API_BASE}/api/tasks/${encodeURIComponent(taskSlug)}/git-diff/blob${query ? `?${query}` : ''}`
+}
+
 export function createTaskCodexRun(taskSlug, payload) {
   return request(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-runs`, {
     method: 'POST',

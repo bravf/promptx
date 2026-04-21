@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronDown, ChevronUp } from 'lucide-vue-next'
 import SelectionInsertButton from './SelectionInsertButton.vue'
+import TaskDiffBinaryPreview from './TaskDiffBinaryPreview.vue'
 import { useCodeSelectionAction } from '../composables/useCodeSelectionAction.js'
 import { useI18n } from '../composables/useI18n.js'
 import { useTheme } from '../composables/useTheme.js'
@@ -19,6 +20,10 @@ const props = defineProps({
     default: 0,
   },
   getPatchLineClass: {
+    type: Function,
+    default: () => '',
+  },
+  getFileBlobUrl: {
     type: Function,
     default: () => '',
   },
@@ -66,6 +71,7 @@ const renderedPatchLines = ref([])
 const selectedLanguage = computed(() => inferPreviewLanguageFromPath(props.selectedFile?.path || ''))
 const patchViewportElement = ref(null)
 const patchRowElements = new Map()
+const isBinaryPreview = computed(() => Boolean(props.selectedFile?.binary && props.selectedFile?.binaryPreview))
 
 function isSelectableLine(line = {}) {
   return ['add', 'delete', 'context'].includes(String(line?.kind || '').trim())
@@ -337,7 +343,7 @@ onBeforeUnmount(() => {
             <div class="opacity-75">
               {{ selectedFile.statsLoaded ? `+${selectedFile.additions} / -${selectedFile.deletions}` : t('diffReview.statsOnDemand') }}
             </div>
-            <div class="theme-muted-text mt-1 text-[11px]">{{ t('diffReview.selectCodeLineHint') }}</div>
+            <div v-if="!isBinaryPreview" class="theme-muted-text mt-1 text-[11px]">{{ t('diffReview.selectCodeLineHint') }}</div>
           </div>
           <div
             class="inline-flex h-8 shrink-0 items-center gap-1 rounded-sm border px-1.5 py-1"
@@ -377,7 +383,7 @@ onBeforeUnmount(() => {
           <span class="opacity-75">
             {{ selectedFile.statsLoaded ? `+${selectedFile.additions} / -${selectedFile.deletions}` : t('diffReview.statsOnDemand') }}
           </span>
-          <span class="theme-muted-text text-[11px]">{{ t('diffReview.selectCodeLineHint') }}</span>
+          <span v-if="!isBinaryPreview" class="theme-muted-text text-[11px]">{{ t('diffReview.selectCodeLineHint') }}</span>
         </div>
         <div
           class="inline-flex h-8 w-[132px] shrink-0 items-center gap-1 rounded-sm border px-1.5 py-1"
@@ -408,7 +414,12 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="selectedFile.message && !selectedPatchLines.length" class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">
+    <TaskDiffBinaryPreview
+      v-if="selectedFile.binary && selectedFile.binaryPreview"
+      :get-file-blob-url="getFileBlobUrl"
+      :selected-file="selectedFile"
+    />
+    <div v-else-if="selectedFile.message && !selectedPatchLines.length" class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">
       <div class="theme-empty-state px-4 py-4">
         {{ selectedFile.message }}
       </div>

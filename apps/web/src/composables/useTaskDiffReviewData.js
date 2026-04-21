@@ -1,5 +1,5 @@
 import { computed, nextTick, ref, watch } from 'vue'
-import { getTaskGitDiff, listTaskCodexRuns } from '../lib/api.js'
+import { buildTaskGitDiffBlobUrl, getTaskGitDiff, listTaskCodexRuns } from '../lib/api.js'
 import { formatDateTime, getCurrentLocale, translate } from './useI18n.js'
 import { useWorkbenchRealtime } from './useWorkbenchRealtime.js'
 
@@ -519,6 +519,21 @@ export function useTaskDiffReviewData(props) {
       runId,
       signature,
     }
+  }
+
+  function getFileBlobUrl(file, side = 'after') {
+    const normalizedFilePath = String(file?.path || '').trim()
+    if (!props.taskSlug || !normalizedFilePath) {
+      return ''
+    }
+
+    const context = getCurrentDiffContext()
+    return buildTaskGitDiffBlobUrl(props.taskSlug, {
+      scope: context.scope,
+      runId: context.runId,
+      filePath: normalizedFilePath,
+      side,
+    })
   }
 
   function getFileEntryByPath(filePath = '') {
@@ -1041,6 +1056,7 @@ export function useTaskDiffReviewData(props) {
     filteredFiles,
     getFilterButtonClass,
     getFilterLabel,
+    getFileBlobUrl,
     getPatchLineClass,
     getRunStatusLabel,
     getStatusClass,
