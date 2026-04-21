@@ -18,6 +18,25 @@ const DIFF_REVIEW_CACHE_TTL_MS = 4000
 const DIFF_REVIEW_CACHE_MAX_ENTRIES = 80
 const FILE_DIFF_CACHE_TTL_MS = 8000
 const FILE_DIFF_CACHE_MAX_ENTRIES = 400
+const MAX_BINARY_DIFF_BLOB_BYTES = Math.max(64 * 1024, Number(process.env.PROMPTX_GIT_DIFF_MAX_BINARY_BLOB_BYTES) || 8 * 1024 * 1024)
+
+const BINARY_PREVIEW_MIME_TYPES = new Map([
+  ['.avif', 'image/avif'],
+  ['.bmp', 'image/bmp'],
+  ['.gif', 'image/gif'],
+  ['.ico', 'image/x-icon'],
+  ['.jpeg', 'image/jpeg'],
+  ['.jpg', 'image/jpeg'],
+  ['.mp3', 'audio/mpeg'],
+  ['.mp4', 'video/mp4'],
+  ['.ogg', 'audio/ogg'],
+  ['.ogv', 'video/ogg'],
+  ['.pdf', 'application/pdf'],
+  ['.png', 'image/png'],
+  ['.wav', 'audio/wav'],
+  ['.webm', 'video/webm'],
+  ['.webp', 'image/webp'],
+])
 
 const diffReviewCache = new Map()
 const fileDiffCache = new Map()
@@ -101,6 +120,38 @@ function splitNullText(value = '') {
 
 function createHash(value) {
   return crypto.createHash('sha1').update(value).digest('hex')
+}
+
+function inferBinaryMimeType(filePath = '') {
+  return BINARY_PREVIEW_MIME_TYPES.get(path.extname(String(filePath || '').trim()).toLowerCase()) || 'application/octet-stream'
+}
+
+function inferBinaryPreviewKind(mimeType = '') {
+  const normalizedMimeType = String(mimeType || '').trim().toLowerCase()
+  if (normalizedMimeType.startsWith('image/')) {
+    return 'image'
+  }
+  if (normalizedMimeType.startsWith('audio/')) {
+    return 'audio'
+  }
+  if (normalizedMimeType.startsWith('video/')) {
+    return 'video'
+  }
+  if (normalizedMimeType === 'application/pdf') {
+    return 'pdf'
+  }
+  return 'binary'
+}
+
+function isKnownBinaryPreviewPath(filePath = '') {
+  return BINARY_PREVIEW_MIME_TYPES.has(path.extname(String(filePath || '').trim()).toLowerCase())
+}
+
+function createApiError(message = '', statusCode = 400, messageKey = 'errors.requestFailed') {
+  const error = new Error(message)
+  error.statusCode = statusCode
+  error.messageKey = messageKey
+  return error
 }
 
 function countTextLines(value = '') {
@@ -419,7 +470,7 @@ function readFileState(repoRoot = '', filePath = '') {
     }
 
     const buffer = fs.readFileSync(absolutePath)
-    const isBinary = buffer.includes(0)
+    const isBinary = isKnownBinaryPreviewPath(filePath) || buffer.includes(0)
     const tooLarge = !isBinary && buffer.length > MAX_SNAPSHOT_TEXT_BYTES
 
     return {
@@ -489,7 +540,7 @@ function readHeadFileState(repoRoot = '', headOid = '', filePath = '') {
   }
 
   const buffer = result.stdout
-  const isBinary = buffer.includes(0)
+  const isBinary = isKnownBinaryPreviewPath(normalizedPath) || buffer.includes(0)
   const tooLarge = !isBinary && buffer.length > MAX_SNAPSHOT_TEXT_BYTES
 
   return {
@@ -500,6 +551,126 @@ function readHeadFileState(repoRoot = '', headOid = '', filePath = '') {
     hash: createHash(buffer),
     text: !isBinary && !tooLarge ? buffer.toString('utf8') : '',
   }
+}
+
+function normalizeRepoFilePath(filePath = '') {
+  const rawPath = String(filePath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!rawPath || rawPath.includes('\0')) {
+    return ''
+  }
+
+  const normalizedPath = path.posix.normalize(rawPath)
+  if (!normalizedPath || normalizedPath === '.' || normalizedPath === '..' || normalizedPath.startsWith('../')) {
+    return ''
+  }
+
+  return normalizedPath
+}
+
+function createBlobPayload(filePath = '', side = '', buffer = Buffer.alloc(0)) {
+  const mimeType = inferBinaryMimeType(filePath)
+  return {
+    supported: true,
+    filePath,
+    side,
+    mimeType,
+    previewKind: inferBinaryPreviewKind(mimeType),
+    size: buffer.length,
+    hash: createHash(buffer),
+    body: buffer,
+  }
+}
+
+function createUnsupportedBlobPayload(message = '', statusCode = 404, messageKey = 'errors.gitDiffFailed') {
+  return {
+    supported: false,
+    statusCode,
+    messageKey,
+    message: String(message || '无法读取该文件内容。'),
+    filePath: '',
+    side: '',
+    mimeType: '',
+    previewKind: 'binary',
+    size: 0,
+    hash: '',
+    body: Buffer.alloc(0),
+  }
+}
+
+function enforceBlobSize(buffer = Buffer.alloc(0)) {
+  if (buffer.length > MAX_BINARY_DIFF_BLOB_BYTES) {
+    throw createApiError('文件较大，暂不支持在线预览。', 413, 'diffReview.binaryPreviewTooLarge')
+  }
+}
+
+function readHeadBlob(repoRoot = '', headOid = '', filePath = '', side = '') {
+  const normalizedHeadOid = String(headOid || '').trim()
+  const normalizedPath = normalizeRepoFilePath(filePath)
+  if (!repoRoot || !normalizedHeadOid || !normalizedPath) {
+    return createUnsupportedBlobPayload('文件不存在。', 404, 'errors.fileNotFound')
+  }
+
+  const result = runGitBuffer(repoRoot, ['show', `${normalizedHeadOid}:${normalizedPath}`], {
+    maxBuffer: MAX_BINARY_DIFF_BLOB_BYTES + 1024,
+  })
+  if (result.status !== 0) {
+    return createUnsupportedBlobPayload('文件不存在。', 404, 'errors.fileNotFound')
+  }
+
+  enforceBlobSize(result.stdout)
+  return createBlobPayload(normalizedPath, side, result.stdout)
+}
+
+function readWorkingTreeBlob(repoRoot = '', filePath = '', side = '') {
+  const normalizedPath = normalizeRepoFilePath(filePath)
+  if (!repoRoot || !normalizedPath) {
+    return createUnsupportedBlobPayload('文件不存在。', 404, 'errors.fileNotFound')
+  }
+
+  const root = path.resolve(repoRoot)
+  const absolutePath = path.resolve(root, normalizedPath)
+  if (absolutePath !== root && !absolutePath.startsWith(`${root}${path.sep}`)) {
+    return createUnsupportedBlobPayload('文件不存在。', 404, 'errors.fileNotFound')
+  }
+
+  try {
+    const stats = fs.statSync(absolutePath)
+    if (!stats.isFile()) {
+      return createUnsupportedBlobPayload('文件不存在。', 404, 'errors.fileNotFound')
+    }
+    if (stats.size > MAX_BINARY_DIFF_BLOB_BYTES) {
+      throw createApiError('文件较大，暂不支持在线预览。', 413, 'diffReview.binaryPreviewTooLarge')
+    }
+
+    return createBlobPayload(normalizedPath, side, fs.readFileSync(absolutePath))
+  } catch (error) {
+    if (error?.statusCode) {
+      throw error
+    }
+    return createUnsupportedBlobPayload('文件不存在。', 404, 'errors.fileNotFound')
+  }
+}
+
+function readSnapshotStateBlob(repoRoot = '', filePath = '', state = null, side = '') {
+  if (!state?.exists) {
+    return createUnsupportedBlobPayload('文件不存在。', 404, 'errors.fileNotFound')
+  }
+
+  if (!state.isBinary && !state.tooLarge) {
+    const buffer = Buffer.from(String(state.text || ''), 'utf8')
+    return createBlobPayload(filePath, side, buffer)
+  }
+
+  const livePayload = readWorkingTreeBlob(repoRoot, filePath, side)
+  if (livePayload.supported && String(livePayload.hash || '') === String(state.hash || '')) {
+    return livePayload
+  }
+
+  return createUnsupportedBlobPayload(
+    '历史快照中没有保存该二进制文件内容。',
+    404,
+    'diffReview.binarySnapshotUnavailable'
+  )
 }
 
 function createBaselineStateResolver(repoRoot = '', baseline = null) {
@@ -1379,6 +1550,40 @@ function sortDiffFiles(items = []) {
   })
 }
 
+function buildDiffFileSideMeta(filePath = '', state = null) {
+  const exists = Boolean(state?.exists)
+  const mimeType = exists ? inferBinaryMimeType(filePath) : ''
+  return {
+    exists,
+    size: exists ? Math.max(0, Number(state?.size) || 0) : 0,
+    hash: exists ? String(state?.hash || '') : '',
+    hashShort: exists ? String(state?.hash || '').slice(0, 7) : '',
+    mimeType,
+    previewKind: exists ? inferBinaryPreviewKind(mimeType) : 'none',
+    tooLarge: exists ? Math.max(0, Number(state?.size) || 0) > MAX_BINARY_DIFF_BLOB_BYTES : false,
+  }
+}
+
+function buildBinaryPreviewMeta(filePath = '', previousState = null, nextState = null, patchPayload = {}) {
+  const hasBinarySide = Boolean(previousState?.isBinary || nextState?.isBinary || patchPayload.binary)
+  if (!hasBinarySide) {
+    return null
+  }
+
+  const before = buildDiffFileSideMeta(filePath, previousState)
+  const after = buildDiffFileSideMeta(filePath, nextState)
+  const previewKind = after.exists ? after.previewKind : before.previewKind
+  const mimeType = after.exists ? after.mimeType : before.mimeType
+
+  return {
+    kind: previewKind,
+    mimeType,
+    maxPreviewBytes: MAX_BINARY_DIFF_BLOB_BYTES,
+    before,
+    after,
+  }
+}
+
 function createDiffFileEntry(filePath = '', previousState = null, nextState = null, options = {}) {
   if (areFileStatesEqual(previousState, nextState)) {
     return null
@@ -1413,6 +1618,7 @@ function createDiffFileEntry(filePath = '', previousState = null, nextState = nu
     patch: patchPayload.patch,
     patchLoaded: patchPayload.patchLoaded,
     message: patchPayload.message,
+    binaryPreview: buildBinaryPreviewMeta(filePath, previousState, nextState, patchPayload),
   }
 }
 
@@ -1919,6 +2125,100 @@ export function getTaskGitDiffReview(taskSlug = '', options = {}) {
     },
   })
   return payload
+}
+
+export function getTaskGitDiffBlob(taskSlug = '', options = {}) {
+  const normalizedTaskSlug = String(taskSlug || '').trim()
+  const filePath = normalizeRepoFilePath(options.filePath)
+  const side = String(options.side || '').trim() === 'before' ? 'before' : 'after'
+  const rawScope = String(options.scope || 'workspace').trim()
+  const scope = rawScope === 'run'
+    ? 'run'
+    : rawScope === 'task'
+      ? 'task'
+      : 'workspace'
+  const runId = String(options.runId || '').trim()
+
+  if (!normalizedTaskSlug || !filePath) {
+    return createUnsupportedBlobPayload('文件不存在。', 404, 'errors.fileNotFound')
+  }
+
+  const diffPayload = getTaskGitDiffReview(normalizedTaskSlug, {
+    scope,
+    runId,
+    filePath,
+    includeStats: false,
+  })
+  const fileInDiff = Boolean(
+    diffPayload?.supported
+    && Array.isArray(diffPayload.files)
+    && diffPayload.files.some((item) => String(item?.path || '').trim() === filePath)
+  )
+  if (!fileInDiff) {
+    return createUnsupportedBlobPayload('当前文件不在本次 diff 范围内。', 404, 'diffReview.fileNotInDiff')
+  }
+
+  if (scope === 'workspace') {
+    const repoRoot = resolveTaskRepoRoot(normalizedTaskSlug)
+    if (!repoRoot) {
+      return createUnsupportedBlobPayload('当前工作目录不是 Git 仓库，暂不支持代码变更审查。')
+    }
+    if (side === 'before') {
+      return readHeadBlob(repoRoot, resolveGitHeadOid(repoRoot), filePath, side)
+    }
+    return readWorkingTreeBlob(repoRoot, filePath, side)
+  }
+
+  let baseline = null
+  let comparisonSnapshot = null
+  if (scope === 'run') {
+    if (!runId || getRunTaskSlug(runId) !== normalizedTaskSlug) {
+      return createUnsupportedBlobPayload('没有找到对应的执行记录。', 404, 'diffReview.runNotFound')
+    }
+    baseline = loadRunBaseline(runId)
+    comparisonSnapshot = loadRunFinalSnapshot(runId)
+  } else {
+    baseline = loadTaskBaseline(normalizedTaskSlug)
+  }
+
+  if (!baseline) {
+    return createUnsupportedBlobPayload(
+      scope === 'run'
+        ? '这轮执行还没有建立代码变更基线，暂时无法查看本轮 diff。'
+        : '当前任务还没有建立代码变更基线，请先让 Codex 执行一轮。',
+      404,
+      scope === 'run' ? 'diffReview.runBaselineMissing' : 'diffReview.taskBaselineMissing'
+    )
+  }
+
+  if (scope === 'run' && !comparisonSnapshot) {
+    return createUnsupportedBlobPayload(
+      '这轮执行缺少结束快照，暂时无法准确还原本轮代码变更。',
+      404,
+      'diffReview.runSnapshotMissing'
+    )
+  }
+
+  const repoRoot = resolveGitRepoRoot(baseline.repoRoot)
+  if (!repoRoot) {
+    return createUnsupportedBlobPayload('原工作目录已不是有效的 Git 仓库，暂时无法读取代码变更。')
+  }
+
+  if (side === 'before') {
+    if (baseline.entries.has(filePath)) {
+      return readSnapshotStateBlob(repoRoot, filePath, baseline.entries.get(filePath), side)
+    }
+    return readHeadBlob(repoRoot, baseline.headOid, filePath, side)
+  }
+
+  if (scope === 'run') {
+    if (comparisonSnapshot.entries.has(filePath)) {
+      return readSnapshotStateBlob(repoRoot, filePath, comparisonSnapshot.entries.get(filePath), side)
+    }
+    return readHeadBlob(repoRoot, comparisonSnapshot.headOid, filePath, side)
+  }
+
+  return readWorkingTreeBlob(repoRoot, filePath, side)
 }
 
 export function __resetGitDiffCachesForTest() {

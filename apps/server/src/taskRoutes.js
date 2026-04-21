@@ -204,6 +204,13 @@ function registerTaskRoutes(app, options = {}) {
     getSystemConfig = getSystemConfigForRuntime,
     getRunningCodexRunByTaskSlug,
     getTaskBySlug,
+    getTaskGitDiffBlob = () => ({
+      supported: false,
+      statusCode: 404,
+      messageKey: 'errors.gitDiffFailed',
+      message: '无法读取该文件内容。',
+      body: Buffer.alloc(0),
+    }),
     getTaskGitDiffReviewInSubprocess,
     listTaskCodexRunsWithOptions,
     listTaskWorkspaceDiffSummaries,
@@ -438,6 +445,51 @@ function registerTaskRoutes(app, options = {}) {
         return reply.code(error.statusCode).send(getApiErrorPayload(error, {
           messageKey: 'errors.gitDiffFailed',
           message: String(error?.message || 'git diff 计算失败。'),
+        }))
+      }
+      throw error
+    }
+  })
+
+  app.get('/api/tasks/:slug/git-diff/blob', async (request, reply) => {
+    purgeExpiredContent()
+    const task = getTaskBySlug(request.params.slug)
+    if (!task || task.expired) {
+      return reply.code(404).send({ messageKey: 'errors.taskNotFound', message: '任务不存在。' })
+    }
+
+    const scope = String(request.query?.scope || 'workspace').trim()
+    if (scope !== 'workspace' && scope !== 'task' && scope !== 'run') {
+      return reply.code(400).send({ messageKey: 'errors.invalidDiffScope', message: '无效的 diff 范围。' })
+    }
+
+    try {
+      const payload = getTaskGitDiffBlob(request.params.slug, {
+        scope,
+        runId: request.query?.runId,
+        filePath: request.query?.filePath,
+        side: request.query?.side,
+      })
+      if (!payload?.supported) {
+        return reply
+          .code(payload?.statusCode || 404)
+          .send({
+            messageKey: payload?.messageKey || 'errors.gitDiffFailed',
+            message: payload?.message || '无法读取该文件内容。',
+          })
+      }
+
+      return reply
+        .header('cache-control', 'no-store')
+        .header('x-promptx-file-size', String(payload.size || 0))
+        .header('x-promptx-file-hash', String(payload.hash || ''))
+        .type(payload.mimeType || 'application/octet-stream')
+        .send(payload.body)
+    } catch (error) {
+      if (error?.statusCode) {
+        return reply.code(error.statusCode).send(getApiErrorPayload(error, {
+          messageKey: error.messageKey || 'errors.gitDiffFailed',
+          message: String(error?.message || '无法读取该文件内容。'),
         }))
       }
       throw error

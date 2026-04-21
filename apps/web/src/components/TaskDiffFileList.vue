@@ -219,9 +219,19 @@ watch(
         {{ getStatusLabel(file.status) }}
       </span>
       <div class="min-w-0 flex-1">
-        <div class="theme-list-item-title break-all">{{ file.path }}</div>
+        <div class="flex items-start gap-2">
+          <div class="theme-list-item-title min-w-0 flex-1 break-all">{{ file.path }}</div>
+          <span
+            v-if="file.binary"
+            class="theme-status-info inline-flex shrink-0 items-center rounded-sm border border-dashed px-1.5 py-0.5 text-[10px]"
+          >
+            {{ t('diffReview.binaryTag') }}
+          </span>
+        </div>
         <div class="theme-list-item-meta mt-1">
-          {{ file.statsLoaded ? `+${file.additions} / -${file.deletions}` : t('diffReview.statsOnDemand') }}
+          {{ file.binary
+            ? (file.binaryPreview?.mimeType || t('diffReview.binaryPreviewTitle'))
+            : (file.statsLoaded ? `+${file.additions} / -${file.deletions}` : t('diffReview.statsOnDemand')) }}
         </div>
       </div>
     </button>

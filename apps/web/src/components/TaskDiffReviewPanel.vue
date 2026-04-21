@@ -43,6 +43,7 @@ const {
   formatRunOptionLabel,
   getFilterButtonClass,
   getFilterLabel,
+  getFileBlobUrl,
   getPatchLineClass,
   getRunStatusLabel,
   getStatusClass,
@@ -320,6 +321,7 @@ watch(diffScope, () => {
         <div v-show="mobilePanelTab === 'patch'" class="min-h-0 flex-1 overflow-hidden bg-[var(--theme-appPanelStrong)]">
           <TaskDiffPatchView
             :active-hunk-index="activeHunkIndex"
+            :get-file-blob-url="getFileBlobUrl"
             :get-patch-line-class="getPatchLineClass"
             :get-status-class="getStatusClass"
             :get-status-label="getStatusLabel"
@@ -360,6 +362,7 @@ watch(diffScope, () => {
         <div class="min-h-0 overflow-hidden bg-[var(--theme-appPanelStrong)]">
           <TaskDiffPatchView
             :active-hunk-index="activeHunkIndex"
+            :get-file-blob-url="getFileBlobUrl"
             :get-patch-line-class="getPatchLineClass"
             :get-status-class="getStatusClass"
             :get-status-label="getStatusLabel"

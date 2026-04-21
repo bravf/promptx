@@ -275,6 +275,98 @@ test('single file diff falls back to message when patch exceeds inline line budg
   }
 })
 
+test('binary diff review exposes preview metadata and blob payloads', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-git-diff-binary-'))
+  const repoDir = path.join(tempDir, 'repo')
+  fs.mkdirSync(repoDir, { recursive: true })
+
+  git(repoDir, ['init'])
+  git(repoDir, ['config', 'user.email', 'promptx@example.com'])
+  git(repoDir, ['config', 'user.name', 'PromptX'])
+
+  const beforeBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03])
+  const afterBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x04, 0x05, 0x06, 0x07])
+  const unchangedBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x09, 0x0a, 0x0b])
+  fs.mkdirSync(path.join(repoDir, 'assets'), { recursive: true })
+  fs.writeFileSync(path.join(repoDir, 'assets', 'logo.png'), beforeBuffer)
+  fs.writeFileSync(path.join(repoDir, 'assets', 'unchanged.png'), unchangedBuffer)
+  git(repoDir, ['add', 'assets/logo.png', 'assets/unchanged.png'])
+  git(repoDir, ['commit', '-m', 'add logo'])
+
+  const originalCwd = process.cwd()
+  const originalDataDir = process.env.PROMPTX_DATA_DIR
+  const dataDir = path.join(tempDir, 'data')
+  fs.mkdirSync(dataDir, { recursive: true })
+  process.chdir(tempDir)
+  process.env.PROMPTX_DATA_DIR = dataDir
+
+  try {
+    const { run } = await import('./db.js')
+    const {
+      captureTaskGitBaseline,
+      getTaskGitDiffBlob,
+      getTaskGitDiffReview,
+    } = await import(`./gitDiff.js?binary-test=${Date.now()}`)
+
+    const now = new Date().toISOString()
+    run(
+      `INSERT INTO tasks (slug, edit_token, title, auto_title, last_prompt_preview, codex_session_id, visibility, expires_at, created_at, updated_at)
+       VALUES (?, ?, '', '', '', ?, 'private', NULL, ?, ?)`,
+      ['task-binary', 'token-binary', 'session-binary', now, now]
+    )
+    run(
+      `INSERT INTO codex_sessions (id, title, cwd, codex_thread_id, created_at, updated_at)
+       VALUES (?, ?, ?, '', ?, ?)`,
+      ['session-binary', 'Binary Repo', repoDir, now, now]
+    )
+
+    captureTaskGitBaseline('task-binary', repoDir)
+    fs.writeFileSync(path.join(repoDir, 'assets', 'logo.png'), afterBuffer)
+
+    const detail = getTaskGitDiffReview('task-binary', {
+      scope: 'task',
+      filePath: 'assets/logo.png',
+    })
+    const file = detail.files[0]
+    assert.equal(file.binary, true)
+    assert.equal(file.binaryPreview.kind, 'image')
+    assert.equal(file.binaryPreview.mimeType, 'image/png')
+    assert.equal(file.binaryPreview.before.exists, true)
+    assert.equal(file.binaryPreview.after.exists, true)
+    assert.equal(file.binaryPreview.before.size, beforeBuffer.length)
+    assert.equal(file.binaryPreview.after.size, afterBuffer.length)
+
+    const beforePayload = getTaskGitDiffBlob('task-binary', {
+      scope: 'task',
+      filePath: 'assets/logo.png',
+      side: 'before',
+    })
+    const afterPayload = getTaskGitDiffBlob('task-binary', {
+      scope: 'task',
+      filePath: 'assets/logo.png',
+      side: 'after',
+    })
+    const blockedPayload = getTaskGitDiffBlob('task-binary', {
+      scope: 'task',
+      filePath: 'assets/unchanged.png',
+      side: 'after',
+    })
+    assert.equal(beforePayload.supported, true)
+    assert.equal(afterPayload.supported, true)
+    assert.deepEqual(beforePayload.body, beforeBuffer)
+    assert.deepEqual(afterPayload.body, afterBuffer)
+    assert.equal(blockedPayload.supported, false)
+    assert.equal(blockedPayload.messageKey, 'diffReview.fileNotInDiff')
+  } finally {
+    process.chdir(originalCwd)
+    if (typeof originalDataDir === 'string') {
+      process.env.PROMPTX_DATA_DIR = originalDataDir
+    } else {
+      delete process.env.PROMPTX_DATA_DIR
+    }
+  }
+})
+
 test('run scoped diff stays pinned to each round snapshot', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-git-diff-rounds-'))
   const repoDir = path.join(tempDir, 'repo')

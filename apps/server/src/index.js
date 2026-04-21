@@ -22,6 +22,7 @@ import {
   updateTask,
 } from './repository.js'
 import {
+  getTaskGitDiffBlob,
   getWorkspaceGitDiffStatusSummaryByCwd,
 } from './gitDiff.js'
 import {
@@ -389,6 +390,7 @@ registerTaskRoutes(app, {
   getPromptxCodexSessionById,
   getRunningCodexRunByTaskSlug,
   getTaskBySlug,
+  getTaskGitDiffBlob,
   getTaskGitDiffReviewInSubprocess,
   listTaskCodexRunsWithOptions,
   listTaskWorkspaceDiffSummaries: taskWorkspaceDiffSummaryService.listTaskWorkspaceDiffSummaries,
