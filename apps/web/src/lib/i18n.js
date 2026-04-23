@@ -123,6 +123,7 @@ export const MESSAGES = {
       description: {
         'promptx-stone-light': '温和石色，适合长时间白天工作。',
         'promptx-glass-light': '雾面玻璃质感，保留石色与绿调。',
+        'promptx-aqua-classic': '复古 macOS Aqua / Snow Leopard 拟物工具台。',
         'promptx-stone-dark': '延续当前工作台气质的深色主题。',
         'github-light': '清爽、克制，适合评审和协作场景。',
         'github-dark': '熟悉的深色代码托管风格。',
@@ -912,6 +913,7 @@ export const MESSAGES = {
       description: {
         'promptx-stone-light': 'Soft stone tones for long daytime sessions.',
         'promptx-glass-light': 'A frosted glass look with stone and green accents.',
+        'promptx-aqua-classic': 'A retro macOS Aqua / Snow Leopard skeuomorphic workbench.',
         'promptx-stone-dark': 'A dark theme that keeps the current PromptX feel.',
         'github-light': 'Clean and restrained, good for review and collaboration.',
         'github-dark': 'A familiar dark code-hosting style.',

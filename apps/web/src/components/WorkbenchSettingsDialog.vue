@@ -4,7 +4,6 @@ import { Check, Cpu, Eye, EyeOff, Info, Keyboard, LoaderCircle, Palette, Setting
 import DialogShell from './DialogShell.vue'
 import DialogSideNav from './DialogSideNav.vue'
 import ThemeToggle from './ThemeToggle.vue'
-import WorkbenchSelect from './WorkbenchSelect.vue'
 import { formatDateTime as formatLocaleDateTime, useI18n } from '../composables/useI18n.js'
 import {
   WORKBENCH_PREFERENCE_KEYS,
@@ -793,20 +792,21 @@ onBeforeUnmount(() => {
                   <label
                     v-for="option in sendBehaviorOptions"
                     :key="option.value"
-                    class="settings-form-card flex items-start gap-3 px-3 py-3"
+                    class="settings-form-card flex cursor-pointer items-start justify-between gap-3 px-3 py-3"
+                    :class="generalForm.sendBehavior === option.value ? 'ring-1 ring-[var(--theme-accent)]' : ''"
                   >
+                    <div class="min-w-0">
+                      <div class="text-sm font-medium text-[var(--theme-textPrimary)]">{{ option.label }}</div>
+                      <p class="theme-muted-text mt-1 text-xs leading-5">{{ option.description }}</p>
+                    </div>
                     <input
                       v-model="generalForm.sendBehavior"
                       :value="option.value"
                       type="radio"
                       name="workbench-send-behavior"
-                      class="mt-0.5 h-4 w-4"
+                      class="mt-0.5 h-4 w-4 shrink-0"
                       @change="setPreference(WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR, option.value)"
                     >
-                    <div class="min-w-0">
-                      <div class="text-sm font-medium text-[var(--theme-textPrimary)]">{{ option.label }}</div>
-                      <p class="theme-muted-text mt-1 text-xs leading-5">{{ option.description }}</p>
-                    </div>
                   </label>
                 </div>
               </section>
@@ -837,36 +837,30 @@ onBeforeUnmount(() => {
                   <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('locale.description') }}</p>
                 </div>
 
-                <label class="block space-y-1.5">
+                <div class="space-y-1.5">
                   <span class="theme-muted-text text-xs">{{ t('locale.field') }}</span>
-                  <WorkbenchSelect
-                    :model-value="locale"
-                    :options="localeFieldOptions"
-                    :get-option-value="(option) => option.value"
-                    @update:model-value="handleLocaleChange"
-                  >
-                    <template #trigger="{ selectedOption }">
-                      <div class="truncate text-sm text-[var(--theme-textPrimary)]">
-                        {{ selectedOption?.label || t('common.select') }}
+                  <div class="space-y-2">
+                    <label
+                      v-for="option in localeFieldOptions"
+                      :key="option.value"
+                      class="settings-form-card flex cursor-pointer items-center justify-between gap-3 px-3 py-3"
+                      :class="locale === option.value ? 'ring-1 ring-[var(--theme-accent)]' : ''"
+                    >
+                      <div class="min-w-0">
+                        <div class="truncate text-sm font-medium text-[var(--theme-textPrimary)]">{{ option.label }}</div>
+                        <div class="theme-muted-text mt-1 truncate text-xs">{{ option.englishLabel }}</div>
                       </div>
-                    </template>
-                    <template #option="{ option, selected, select }">
-                      <button
-                        type="button"
-                        class="workbench-select-option theme-filter-idle w-full rounded-sm border border-dashed px-3 py-2 text-left text-sm"
-                        @click="select()"
+                      <input
+                        :checked="locale === option.value"
+                        :value="option.value"
+                        name="promptx-locale"
+                        type="radio"
+                        class="h-4 w-4 shrink-0"
+                        @change="handleLocaleChange(option.value)"
                       >
-                        <div class="flex items-center justify-between gap-3">
-                          <div class="min-w-0">
-                            <div class="truncate text-[var(--theme-textPrimary)]">{{ option.label }}</div>
-                            <div class="theme-muted-text mt-1 truncate text-xs">{{ option.englishLabel }}</div>
-                          </div>
-                          <span v-if="selected" class="theme-status-success rounded-sm border border-dashed px-2 py-0.5 text-[10px]">{{ t('common.enabled') }}</span>
-                        </div>
-                      </button>
-                    </template>
-                  </WorkbenchSelect>
-                </label>
+                    </label>
+                  </div>
+                </div>
 
                 <p class="theme-muted-text theme-note-text">{{ t('locale.immediateHint') }}</p>
               </section>

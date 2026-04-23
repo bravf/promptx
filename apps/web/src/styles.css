@@ -1357,6 +1357,7 @@ body {
   :root[data-theme='promptx-glass-light'] .theme-popover,
   :root[data-theme='promptx-glass-light'] .tool-button,
   :root[data-theme='promptx-glass-light'] .tool-input,
+  :root[data-theme='promptx-glass-light'] .theme-agent-selector-button,
   :root[data-theme='promptx-glass-light'] .theme-empty-state,
   :root[data-theme='promptx-glass-light'] .theme-option,
   :root[data-theme='promptx-glass-light'] .theme-filter-idle,
@@ -1411,6 +1412,26 @@ body {
       var(--theme-buttonHover);
     box-shadow:
       0 14px 30px rgba(91, 113, 102, 0.14),
+      inset 0 1px 0 color-mix(in srgb, white 78%, transparent);
+  }
+
+  :root[data-theme='promptx-glass-light'] .theme-agent-selector-button {
+    border-color: color-mix(in srgb, var(--theme-buttonBorder) 72%, white 28%);
+    border-radius: 0.55rem;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-buttonHighlight) 100%, transparent), color-mix(in srgb, var(--theme-buttonBg) 96%, transparent)),
+      var(--theme-buttonBg);
+    box-shadow:
+      0 10px 24px rgba(91, 113, 102, 0.08),
+      inset 0 1px 0 var(--theme-buttonHighlight);
+  }
+
+  :root[data-theme='promptx-glass-light'] .theme-agent-selector-button.theme-filter-idle:hover {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-buttonHighlight) 100%, transparent), color-mix(in srgb, var(--theme-buttonHover) 96%, transparent)),
+      var(--theme-buttonHover);
+    box-shadow:
+      0 12px 26px rgba(91, 113, 102, 0.12),
       inset 0 1px 0 color-mix(in srgb, white 78%, transparent);
   }
 
@@ -1974,6 +1995,306 @@ body {
       inset 0 1px 0 var(--theme-inputHighlight),
       0 0 0 1px color-mix(in srgb, var(--theme-accent) 22%, transparent),
       0 14px 30px rgba(91, 113, 102, 0.1);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] {
+    --theme-fontSans: "Lucida Grande", "Helvetica Neue", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", Arial, system-ui, sans-serif;
+    --theme-fontMono: Menlo, Monaco, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    --theme-processDetailRadius: 0.4rem;
+    --theme-processDetailBadgeRadius: 0.35rem;
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .app-shell {
+    background: var(--theme-shellGradient);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .app-stage::before {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: 0.75rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 10%, transparent 88%, rgba(72, 88, 108, 0.04));
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .app-stage > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .panel,
+  :root[data-theme='promptx-aqua-classic'] .theme-popover,
+  :root[data-theme='promptx-aqua-classic'] .workbench-select-panel {
+    border-color: color-mix(in srgb, var(--theme-borderDefault) 82%, white 18%);
+    border-radius: 0.45rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(231, 236, 242, 0.9) 54%, rgba(220, 228, 237, 0.94)),
+      var(--theme-appPanel);
+    box-shadow:
+      var(--theme-shadowPanel),
+      inset 0 1px 0 var(--theme-panelHighlight),
+      inset 0 -1px 0 var(--theme-panelChrome);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .dashed-panel,
+  :root[data-theme='promptx-aqua-classic'] .theme-empty-state,
+  :root[data-theme='promptx-aqua-classic'] .settings-section-card,
+  :root[data-theme='promptx-aqua-classic'] .settings-form-card,
+  :root[data-theme='promptx-aqua-classic'] .theme-content-panel,
+  :root[data-theme='promptx-aqua-classic'] .theme-inline-panel {
+    border-color: color-mix(in srgb, var(--theme-borderDefault) 88%, white 12%);
+    border-radius: 0.45rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(226, 232, 239, 0.9)),
+      var(--theme-appPanelMuted);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.54),
+      inset 0 -1px 0 rgba(118, 134, 150, 0.08);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .workbench-panel-header,
+  :root[data-theme='promptx-aqua-classic'] .settings-dialog-header,
+  :root[data-theme='promptx-aqua-classic'] .settings-dialog-nav,
+  :root[data-theme='promptx-aqua-classic'] .workbench-mobile-header,
+  :root[data-theme='promptx-aqua-classic'] .workbench-mobile-tabs {
+    border-color: color-mix(in srgb, var(--theme-borderStrong) 62%, white 38%);
+    background:
+      linear-gradient(180deg, #f7f9fb 0%, #e2e7ed 52%, #d5dde6 100%),
+      var(--theme-appPanelMuted);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.82),
+      inset 0 -1px 0 rgba(92, 106, 122, 0.14);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .tool-button,
+  :root[data-theme='promptx-aqua-classic'] .theme-agent-selector-button,
+  :root[data-theme='promptx-aqua-classic'] .theme-input-shell,
+  :root[data-theme='promptx-aqua-classic'] .workbench-select-trigger {
+    border-color: color-mix(in srgb, var(--theme-buttonBorder) 88%, white 12%);
+    border-radius: 0.4rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(234, 239, 244, 0.94) 58%, rgba(220, 228, 237, 0.96) 100%),
+      var(--theme-buttonBg);
+    box-shadow:
+      0 1px 2px rgba(48, 62, 78, 0.12),
+      inset 0 1px 0 var(--theme-buttonHighlight),
+      inset 0 -1px 0 rgba(89, 104, 120, 0.14);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .tool-button:hover,
+  :root[data-theme='promptx-aqua-classic'] .theme-agent-selector-button.theme-filter-idle:hover,
+  :root[data-theme='promptx-aqua-classic'] .workbench-select-trigger:hover {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.82) 0%, rgba(241, 245, 249, 0.96) 58%, rgba(229, 236, 243, 0.98) 100%),
+      var(--theme-buttonHover);
+    box-shadow:
+      0 1px 3px rgba(47, 120, 196, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.82),
+      inset 0 -1px 0 rgba(83, 111, 139, 0.12);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .tool-button-primary {
+    border-color: color-mix(in srgb, var(--theme-primaryBorder) 86%, white 14%);
+    background:
+      linear-gradient(180deg, #8fc7ff 0%, #4d96df 48%, #1f70bf 49%, #3b88d1 100%),
+      var(--theme-primaryBg);
+    color: var(--theme-primaryText);
+    text-shadow: 0 -1px 0 rgba(13, 54, 98, 0.48);
+    box-shadow:
+      0 1px 4px rgba(38, 100, 170, 0.34),
+      inset 0 1px 0 rgba(255, 255, 255, 0.54),
+      inset 0 -1px 0 rgba(9, 55, 109, 0.28);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .tool-button-primary:hover {
+    background:
+      linear-gradient(180deg, #a2d2ff 0%, #5ba3e7 48%, #2479ca 49%, #4694db 100%),
+      var(--theme-primaryHover);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .tool-button-danger {
+    border-color: color-mix(in srgb, var(--theme-danger) 86%, white 14%);
+    background:
+      linear-gradient(180deg, #e99595 0%, #c95c5c 54%, #a83f3f 100%),
+      var(--theme-danger);
+    color: var(--theme-textInverse);
+    text-shadow: 0 -1px 0 rgba(92, 28, 28, 0.46);
+    box-shadow:
+      0 1px 4px rgba(169, 63, 63, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.42),
+      inset 0 -1px 0 rgba(92, 28, 28, 0.22);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .tool-button-danger:hover {
+    background:
+      linear-gradient(180deg, #efa3a3 0%, #d36a6a 54%, #b34a4a 100%),
+      color-mix(in srgb, white 8%, var(--theme-danger));
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .tool-button-danger-subtle {
+    border-color: color-mix(in srgb, var(--theme-danger) 44%, var(--theme-buttonBorder));
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.6), color-mix(in srgb, var(--theme-dangerSoft) 84%, var(--theme-appPanelStrong) 16%)),
+      var(--theme-dangerSoft);
+    color: var(--theme-dangerText);
+    box-shadow:
+      0 1px 2px rgba(169, 63, 63, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.62);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .tool-button-danger-subtle:hover {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.52), color-mix(in srgb, var(--theme-dangerSoft) 74%, var(--theme-danger) 26%)),
+      color-mix(in srgb, var(--theme-dangerSoft) 82%, var(--theme-danger) 18%);
+    color: var(--theme-dangerText);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .tool-input {
+    border-color: var(--theme-inputBorder);
+    border-radius: 0.35rem;
+    background:
+      linear-gradient(180deg, rgba(219, 228, 237, 0.62), rgba(255, 255, 255, 0.92) 28%),
+      var(--theme-inputBg);
+    box-shadow:
+      inset 0 1px 3px rgba(63, 78, 94, 0.18),
+      inset 0 1px 0 var(--theme-inputHighlight);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .tool-input:focus,
+  :root[data-theme='promptx-aqua-classic'] .theme-input-shell:focus-within {
+    border-color: var(--theme-accent);
+    box-shadow:
+      inset 0 1px 3px rgba(63, 78, 94, 0.16),
+      0 0 0 2px color-mix(in srgb, var(--theme-accent) 24%, transparent);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .theme-toggle-current,
+  :root[data-theme='promptx-aqua-classic'] .theme-toggle-card,
+  :root[data-theme='promptx-aqua-classic'] .settings-nav__item,
+  :root[data-theme='promptx-aqua-classic'] .workbench-task-card,
+  :root[data-theme='promptx-aqua-classic'] .transcript-card {
+    box-shadow:
+      0 6px 16px rgba(54, 68, 82, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .theme-option-active,
+  :root[data-theme='promptx-aqua-classic'] .theme-list-item-active {
+    border-color: color-mix(in srgb, var(--theme-accent) 72%, var(--theme-borderStrong));
+    background:
+      linear-gradient(180deg, #edf6ff 0%, #d8e9fb 58%, #cfe2f7 100%),
+      var(--theme-accentSoft);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.58),
+      inset 3px 0 0 var(--theme-accent),
+      0 4px 12px rgba(47, 120, 196, 0.1);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .theme-card-selected {
+    border-color: color-mix(in srgb, var(--theme-accent) 72%, var(--theme-borderStrong));
+    background:
+      linear-gradient(180deg, #edf6ff 0%, #d8e9fb 58%, #cfe2f7 100%),
+      var(--theme-accentSoft);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.58),
+      0 4px 12px rgba(47, 120, 196, 0.1);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .theme-filter-active {
+    border-color: color-mix(in srgb, var(--theme-accent) 72%, var(--theme-borderStrong));
+    background:
+      linear-gradient(180deg, #edf6ff 0%, #d8e9fb 58%, #cfe2f7 100%),
+      var(--theme-accentSoft);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.58),
+      0 4px 12px rgba(47, 120, 196, 0.1);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .theme-card-idle-muted,
+  :root[data-theme='promptx-aqua-classic'] .theme-card-idle-strong,
+  :root[data-theme='promptx-aqua-classic'] .theme-card-warning,
+  :root[data-theme='promptx-aqua-classic'] .workbench-task-card {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(226, 232, 239, 0.92)),
+      var(--theme-appPanelMuted);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .theme-card-idle-muted:hover,
+  :root[data-theme='promptx-aqua-classic'] .theme-card-idle-strong:hover,
+  :root[data-theme='promptx-aqua-classic'] .theme-card-warning:hover,
+  :root[data-theme='promptx-aqua-classic'] .workbench-task-card:hover,
+  :root[data-theme='promptx-aqua-classic'] .theme-option-idle:hover,
+  :root[data-theme='promptx-aqua-classic'] .theme-filter-idle:hover,
+  :root[data-theme='promptx-aqua-classic'] .theme-list-item-hover:hover,
+  :root[data-theme='promptx-aqua-classic'] .theme-list-item-expanded:hover {
+    border-color: color-mix(in srgb, var(--theme-borderStrong) 72%, white 28%);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(231, 237, 244, 0.92)),
+      var(--theme-appPanelHover);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .transcript-card {
+    border-radius: 0.5rem;
+    border-color: color-mix(in srgb, var(--theme-borderDefault) 82%, white 18%);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .transcript-card--prompt {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(247, 239, 228, 0.96)),
+      var(--theme-promptBg);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .transcript-card--process {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(238, 242, 246, 0.96)),
+      var(--theme-processBg);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .transcript-card--response {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(225, 239, 251, 0.96)),
+      var(--theme-responseBg);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .transcript-card__toggle,
+  :root[data-theme='promptx-aqua-classic'] .transcript-card__pill,
+  :root[data-theme='promptx-aqua-classic'] .theme-badge-strong,
+  :root[data-theme='promptx-aqua-classic'] .theme-badge-muted,
+  :root[data-theme='promptx-aqua-classic'] .theme-list-item-badge {
+    border-radius: 0.35rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(226, 234, 242, 0.88)),
+      var(--theme-appPanelStrong);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.64);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .transcript-card__subtle,
+  :root[data-theme='promptx-aqua-classic'] .transcript-card__media,
+  :root[data-theme='promptx-aqua-classic'] .transcript-event-card,
+  :root[data-theme='promptx-aqua-classic'] .codex-markdown pre,
+  :root[data-theme='promptx-aqua-classic'] .codex-table-wrap {
+    border-color: var(--theme-codeBorder);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(246, 248, 251, 0.96)),
+      var(--theme-codeBg);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.52),
+      0 1px 2px rgba(54, 68, 82, 0.05);
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .image-preview-overlay__button {
+    border-color: rgba(255, 255, 255, 0.26);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(42, 54, 68, 0.72)),
+      rgba(42, 54, 68, 0.78);
+    color: #ffffff;
+  }
+
+  :root[data-theme='promptx-aqua-classic'] .theme-modal-backdrop {
+    background: var(--theme-modalBackdrop);
+    backdrop-filter: blur(8px) saturate(120%);
   }
 }
 
