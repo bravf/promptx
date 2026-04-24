@@ -179,3 +179,101 @@ test('runner claudeCodeRunner maps task_completed and ignores duplicate tool_res
     []
   )
 })
+
+test('runner claudeCodeRunner maps TodoWrite into todo_list events', () => {
+  const state = createClaudeNormalizationState()
+
+  assert.deepEqual(
+    normalizeClaudeEvents({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'todo-tool-1',
+            name: 'TodoWrite',
+            input: {
+              todos: [
+                {
+                  content: 'Inspect relevant backend and admin codepaths',
+                  activeForm: 'Inspecting relevant backend and admin codepaths',
+                  status: 'in_progress',
+                },
+                {
+                  content: 'Implement hospital database model and admin APIs',
+                  status: 'pending',
+                },
+                {
+                  content: 'Add tests',
+                  status: 'completed',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    }, state),
+    [{
+      type: 'item.started',
+      item: {
+        type: 'todo_list',
+        items: [
+          {
+            text: 'Inspecting relevant backend and admin codepaths',
+            status: 'in_progress',
+            completed: false,
+          },
+          {
+            text: 'Implement hospital database model and admin APIs',
+            status: 'pending',
+            completed: false,
+          },
+          {
+            text: 'Add tests',
+            status: 'completed',
+            completed: true,
+          },
+        ],
+      },
+    }]
+  )
+
+  assert.deepEqual(
+    normalizeClaudeEvents({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'todo-tool-1',
+            content: 'Todos have been modified successfully.',
+            is_error: false,
+          },
+        ],
+      },
+    }, state),
+    [{
+      type: 'item.completed',
+      item: {
+        type: 'todo_list',
+        items: [
+          {
+            text: 'Inspecting relevant backend and admin codepaths',
+            status: 'in_progress',
+            completed: false,
+          },
+          {
+            text: 'Implement hospital database model and admin APIs',
+            status: 'pending',
+            completed: false,
+          },
+          {
+            text: 'Add tests',
+            status: 'completed',
+            completed: true,
+          },
+        ],
+      },
+    }]
+  )
+})

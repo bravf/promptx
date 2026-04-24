@@ -171,6 +171,52 @@ function isClaudeCollabToolName(name = '') {
   return ['agent', 'task'].includes(String(name || '').trim().toLowerCase())
 }
 
+function isClaudeTodoToolName(name = '') {
+  return String(name || '').trim().toLowerCase() === 'todowrite'
+}
+
+function normalizeClaudeTodoStatus(status = '') {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (['completed', 'complete', 'done', 'checked'].includes(normalized)) {
+    return 'completed'
+  }
+  if (['in_progress', 'in-progress', 'active', 'doing', 'running'].includes(normalized)) {
+    return 'in_progress'
+  }
+  return 'pending'
+}
+
+function normalizeClaudeTodoText(entry = {}, status = 'pending') {
+  const content = String(entry?.content || entry?.text || entry?.title || entry?.label || '').trim()
+  const activeForm = String(entry?.activeForm || '').trim()
+  if (status === 'in_progress' && activeForm) {
+    return activeForm
+  }
+  return content || activeForm
+}
+
+function normalizeClaudeTodoItems(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return null
+      }
+
+      const status = normalizeClaudeTodoStatus(entry.status)
+      const text = normalizeClaudeTodoText(entry, status)
+      if (!text) {
+        return null
+      }
+
+      return {
+        text,
+        status,
+        completed: status === 'completed',
+      }
+    })
+    .filter(Boolean)
+}
+
 function collectTextParts(value, parts = []) {
   if (!value) {
     return parts
@@ -333,23 +379,26 @@ function createClaudeToolUseEvent(block = {}, state = createClaudeNormalizationS
   const input = block?.input && typeof block.input === 'object' ? block.input : {}
   const command = buildClaudeToolCommand(name, input)
   const isCollabTool = isClaudeCollabToolName(name)
+  const isTodoTool = isClaudeTodoToolName(name)
   const collabPrompt = String(input.prompt || '').trim()
   const collabDescription = String(input.description || '').trim()
   const collabRole = String(input.subagent_type || input.agent || '').trim()
   const collabModel = String(input.model || '').trim()
   const collabTarget = extractAgentTargetFromTexts(collabDescription, collabPrompt)
+  const todoItems = normalizeClaudeTodoItems(input.todos)
 
   if (toolUseId) {
     state.toolUses.set(toolUseId, {
       name,
       command,
-      kind: isCollabTool ? 'collab' : 'command',
+      kind: isCollabTool ? 'collab' : (isTodoTool ? 'todo' : 'command'),
       prompt: collabPrompt || collabDescription,
       description: collabDescription,
       role: collabRole,
       model: collabModel,
       target: collabTarget,
       taskIds: [],
+      todoItems,
     })
   }
 
@@ -361,6 +410,15 @@ function createClaudeToolUseEvent(block = {}, state = createClaudeNormalizationS
         receiver_thread_ids: [],
         prompt: collabPrompt || collabDescription,
         agents_states: {},
+      }),
+    }
+  }
+
+  if (isTodoTool) {
+    return {
+      ...createItemStartedEvent({
+        type: AGENT_RUN_ITEM_TYPES.TODO_LIST,
+        items: todoItems,
       }),
     }
   }
@@ -381,6 +439,7 @@ function createClaudeToolResultEvent(block = {}, state = createClaudeNormalizati
   const isError = Boolean(block?.is_error)
   const taskIds = Array.isArray(remembered?.taskIds) ? remembered.taskIds.filter(Boolean) : []
   const collabTool = remembered?.kind === 'collab'
+  const todoTool = remembered?.kind === 'todo'
 
   if (toolUseId && state.completedCollabToolUseIds.has(toolUseId)) {
     return null
@@ -415,6 +474,15 @@ function createClaudeToolResultEvent(block = {}, state = createClaudeNormalizati
         receiver_thread_ids: receiverThreadIds,
         prompt: remembered?.prompt || remembered?.description || '',
         agents_states: agentsStates,
+      }),
+    }
+  }
+
+  if (todoTool) {
+    return {
+      ...createItemCompletedEvent({
+        type: AGENT_RUN_ITEM_TYPES.TODO_LIST,
+        items: Array.isArray(remembered?.todoItems) ? remembered.todoItems : [],
       }),
     }
   }
