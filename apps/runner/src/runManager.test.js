@@ -461,7 +461,7 @@ test('runManager 会为长时间静默的 running run 补发可见进度事件',
     .filter((payload) => payload.type === 'status')
 
   assert.equal(
-    statusEvents.some((payload) => String(payload.message || '').includes('最近暂无新的过程输出')),
+    statusEvents.some((payload) => payload.messageKey === 'runner.status.thinking'),
     true
   )
 
