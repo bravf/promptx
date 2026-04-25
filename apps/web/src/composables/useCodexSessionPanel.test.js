@@ -391,6 +391,13 @@ test('classifyCodexIssue recognizes OpenCode cli missing errors', () => {
   assert.equal(issue?.title, 'OpenCode CLI 不可用')
 })
 
+test('classifyCodexIssue recognizes Kimi Code cli missing errors', () => {
+  const issue = classifyCodexIssue('找不到 Kimi Code CLI，请先确认终端里可以运行 kimi --version', 'kimi-code')
+
+  assert.equal(issue?.type, 'cli_missing')
+  assert.equal(issue?.title, 'Kimi Code CLI 不可用')
+})
+
 test('extractCodexEventErrorText reads nested codex event errors', () => {
   const text = extractCodexEventErrorText({
     type: 'turn.failed',

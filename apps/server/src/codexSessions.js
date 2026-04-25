@@ -6,7 +6,7 @@ import { all, get, run, transaction } from './db.js'
 import { assertAgentRunner } from './agents/index.js'
 import { createApiError } from './apiErrors.js'
 
-const AGENT_ENGINE_ORDER = ['codex', 'claude-code', 'opencode']
+const AGENT_ENGINE_ORDER = ['codex', 'claude-code', 'opencode', 'kimi-code']
 
 function createHttpError(message, statusCode = 400) {
   return createApiError('', message, statusCode)

@@ -457,6 +457,9 @@ function normalizeActionAgentEngine(value = '') {
   if (normalized === 'opencode' || normalized === 'open-code') {
     return 'opencode'
   }
+  if (normalized === 'kimi' || normalized === 'kimicode' || normalized === 'kimi-code') {
+    return 'kimi-code'
+  }
   if (normalized === 'claude-code') {
     return 'claude-code'
   }

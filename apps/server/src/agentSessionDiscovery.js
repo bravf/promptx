@@ -602,3 +602,139 @@ export function listKnownOpenCodeSessions(options = {}) {
 
   return sortAndLimitCandidates(items, options)
 }
+
+function getKimiHomeDir(options = {}) {
+  return normalizeText(options.kimiHome || process.env.KIMI_HOME)
+    || path.join(os.homedir(), '.kimi')
+}
+
+function readKimiJson(options = {}) {
+  const kimiJsonPath = path.join(getKimiHomeDir(options), 'kimi.json')
+  return parseJson(safeReadFile(kimiJsonPath)) || {}
+}
+
+function readKimiContextPreview(contextPath = '') {
+  const content = safeReadFile(contextPath, 256 * 1024)
+  if (!content) {
+    return ''
+  }
+
+  const lines = content.replace(/\r\n/g, '\n').split('\n').slice(0, 30)
+  for (const line of lines) {
+    const event = parseJson(line)
+    if (!event) {
+      continue
+    }
+
+    const role = normalizeText(event.role).toLowerCase()
+    if (role !== 'user') {
+      continue
+    }
+
+    const text = extractMessageText(event)
+    if (text) {
+      return text.replace(/\s+/g, ' ').slice(0, MAX_PREVIEW_LENGTH)
+    }
+  }
+
+  return ''
+}
+
+export function listKnownKimiCodeSessions(options = {}) {
+  const kimiHome = getKimiHomeDir(options)
+  const items = []
+
+  const kimiJson = readKimiJson(options)
+  const cwdBySessionId = new Map()
+
+  if (kimiJson?.work_dirs && Array.isArray(kimiJson.work_dirs)) {
+    kimiJson.work_dirs.forEach((entry) => {
+      const id = normalizeText(entry?.last_session_id)
+      const cwd = normalizeText(entry?.path)
+      if (!id || !cwd) {
+        return
+      }
+
+      cwdBySessionId.set(id, cwd)
+      items.push({
+        id,
+        engine: AGENT_ENGINES.KIMI_CODE,
+        label: path.basename(cwd) || id,
+        cwd,
+        updatedAt: safeStat(path.join(kimiHome, 'kimi.json'))?.mtime,
+        source: 'kimi_json',
+      })
+    })
+  }
+
+  const sessionsDir = path.join(kimiHome, 'sessions')
+  if (safeStat(sessionsDir)?.isDirectory()) {
+    let hashDirs = []
+    try {
+      hashDirs = fs.readdirSync(sessionsDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+    } catch {
+      hashDirs = []
+    }
+
+    for (const hashDir of hashDirs) {
+      const hashDirPath = path.join(sessionsDir, hashDir)
+      let sessionDirs = []
+      try {
+        sessionDirs = fs.readdirSync(hashDirPath, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name)
+      } catch {
+        continue
+      }
+
+      for (const sessionId of sessionDirs) {
+        if (cwdBySessionId.has(sessionId)) {
+          const statePath = path.join(hashDirPath, sessionId, 'state.json')
+          const state = parseJson(safeReadFile(statePath))
+          if (state?.archived) {
+            const index = items.findIndex((item) => item.id === sessionId)
+            if (index >= 0) {
+              items.splice(index, 1)
+            }
+            continue
+          }
+
+          const contextPath = path.join(hashDirPath, sessionId, 'context.jsonl')
+          const preview = readKimiContextPreview(contextPath)
+          const stateStat = safeStat(statePath)
+          const existing = items.find((item) => item.id === sessionId)
+          if (existing) {
+            existing.label = normalizeText(state?.custom_title) || preview || existing.label
+            if (stateStat?.mtime && getSortTime(stateStat.mtime) > getSortTime(existing.updatedAt)) {
+              existing.updatedAt = toIsoDate(stateStat.mtime)
+              existing.updatedAtSource = 'explicit'
+            }
+          }
+          continue
+        }
+
+        const statePath = path.join(hashDirPath, sessionId, 'state.json')
+        const state = parseJson(safeReadFile(statePath))
+        if (state?.archived) {
+          continue
+        }
+
+        const contextPath = path.join(hashDirPath, sessionId, 'context.jsonl')
+        const preview = readKimiContextPreview(contextPath)
+
+        items.push({
+          id: sessionId,
+          engine: AGENT_ENGINES.KIMI_CODE,
+          label: normalizeText(state?.custom_title) || preview || sessionId,
+          cwd: '',
+          updatedAt: safeStat(statePath)?.mtime,
+          source: 'kimi_sessions',
+        })
+      }
+    }
+  }
+
+  return sortAndLimitCandidates(items, options)
+}

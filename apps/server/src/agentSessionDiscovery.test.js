@@ -7,6 +7,7 @@ import test from 'node:test'
 import {
   decodeClaudeProjectPath,
   listKnownClaudeCodeSessions,
+  listKnownKimiCodeSessions,
   listKnownOpenCodeSessions,
 } from './agentSessionDiscovery.js'
 
@@ -121,6 +122,64 @@ test('listKnownOpenCodeSessions discovers sessions from desktop dat files', () =
       ]
     )
     assert.match(items[1].label, /前端主题/)
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('listKnownKimiCodeSessions merges kimi.json work dirs with session state', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-kimi-discovery-'))
+  const kimiHome = path.join(tempRoot, '.kimi')
+  const sessionDir = path.join(kimiHome, 'sessions', 'hash-1', 'kimi-session-1')
+  fs.mkdirSync(sessionDir, { recursive: true })
+
+  const kimiJsonPath = path.join(kimiHome, 'kimi.json')
+  const statePath = path.join(sessionDir, 'state.json')
+  const contextPath = path.join(sessionDir, 'context.jsonl')
+  const kimiJsonTime = new Date('2026-04-13T08:00:00.000Z')
+  const stateTime = new Date('2026-04-13T09:00:00.000Z')
+
+  fs.writeFileSync(kimiJsonPath, JSON.stringify({
+    work_dirs: [
+      {
+        path: '/Users/bravf/code/promptx',
+        last_session_id: 'kimi-session-1',
+      },
+    ],
+  }))
+  fs.writeFileSync(statePath, JSON.stringify({
+    custom_title: '继续 Kimi 项目',
+  }))
+  fs.writeFileSync(contextPath, `${JSON.stringify({ role: 'user', content: '帮我修复 Kimi 接入' })}\n`)
+  fs.utimesSync(kimiJsonPath, kimiJsonTime, kimiJsonTime)
+  fs.utimesSync(statePath, stateTime, stateTime)
+
+  try {
+    const items = listKnownKimiCodeSessions({
+      kimiHome,
+      limit: 10,
+      cwd: '/Users/bravf/code/promptx',
+    })
+
+    assert.equal(items.length, 1)
+    assert.deepEqual(
+      {
+        id: items[0].id,
+        label: items[0].label,
+        cwd: items[0].cwd,
+        updatedAt: items[0].updatedAt,
+        updatedAtSource: items[0].updatedAtSource,
+        matchedCwd: items[0].matchedCwd,
+      },
+      {
+        id: 'kimi-session-1',
+        label: '继续 Kimi 项目',
+        cwd: '/Users/bravf/code/promptx',
+        updatedAt: stateTime.toISOString(),
+        updatedAtSource: 'explicit',
+        matchedCwd: true,
+      }
+    )
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true })
   }

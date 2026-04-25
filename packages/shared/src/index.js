@@ -18,6 +18,7 @@ export const AGENT_ENGINES = {
   CODEX: 'codex',
   CLAUDE_CODE: 'claude-code',
   OPENCODE: 'opencode',
+  KIMI_CODE: 'kimi-code',
 }
 
 export const AGENT_ENGINE_OPTIONS = [
@@ -34,6 +35,11 @@ export const AGENT_ENGINE_OPTIONS = [
   {
     value: AGENT_ENGINES.OPENCODE,
     label: 'OpenCode',
+    enabled: true,
+  },
+  {
+    value: AGENT_ENGINES.KIMI_CODE,
+    label: 'Kimi Code',
     enabled: true,
   },
 ]

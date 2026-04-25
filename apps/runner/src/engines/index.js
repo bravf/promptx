@@ -7,12 +7,14 @@ import {
 import { codexRunner } from './codexRunner.js'
 import { claudeCodeRunner } from './claudeCodeRunner.js'
 import { openCodeRunner } from './openCodeRunner.js'
+import { kimiCodeRunner } from './kimiCodeRunner.js'
 import { shellRunner } from './shellRunner.js'
 
 const runnerRegistry = new Map([
   [codexRunner.engine, codexRunner],
   [claudeCodeRunner.engine, claudeCodeRunner],
   [openCodeRunner.engine, openCodeRunner],
+  [kimiCodeRunner.engine, kimiCodeRunner],
   [shellRunner.engine, shellRunner],
 ])
 
