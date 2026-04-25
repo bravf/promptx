@@ -658,11 +658,24 @@ export function useWorkbenchTasks(options = {}) {
   const renderedTasks = computed(() => tasks.value.map((task) => buildRenderedTask(task)))
 
   function normalizeImageContent(content = '') {
-    if (!content || !content.startsWith(apiBase)) {
-      return content
+    const value = String(content || '').trim()
+    if (!value || value.startsWith('/uploads/')) {
+      return value
     }
 
-    return content.slice(apiBase.length)
+    const base = getApiBase()
+    if (base && value.startsWith(base)) {
+      return value.slice(base.length)
+    }
+
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/uploads\//.test(value)) {
+      const match = value.match(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/uploads\/.*)$/)
+      if (match) {
+        return match[3]
+      }
+    }
+
+    return value
   }
 
 function trimBoundaryBlankLines(value = '') {
@@ -1291,7 +1304,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
     const task = await getTask(slug)
     const normalizedBlocks = (task.blocks || []).map((block) => ({
       ...block,
-      content: block.type === 'image' ? resolveAssetUrl(block.content) : block.content,
+      content: block.type === 'image' ? normalizeImageContent(block.content) : block.content,
     }))
 
     const state = {
@@ -1736,7 +1749,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
         const asset = await uploadImage(file)
         uploadedBlocks.push({
           type: 'image',
-          content: resolveAssetUrl(asset.url),
+          content: normalizeImageContent(asset.url),
           meta: {},
         })
       }
@@ -1811,7 +1824,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
         const payload = await importPdf(file)
         const blocks = (payload.blocks || []).map((block) => ({
           ...block,
-          content: block.type === 'image' ? resolveAssetUrl(block.content) : block.content,
+          content: block.type === 'image' ? normalizeImageContent(block.content) : block.content,
         }))
 
         if (!blocks.length) {

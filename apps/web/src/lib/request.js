@@ -24,7 +24,9 @@ function resolveDefaultApiBase() {
   return url.toString().replace(/\/$/, '')
 }
 
-const API_BASE = (importMetaEnv.VITE_API_BASE_URL || resolveDefaultApiBase()).replace(/\/$/, '')
+function getApiBaseInternal() {
+  return (importMetaEnv.VITE_API_BASE_URL || resolveDefaultApiBase()).replace(/\/$/, '')
+}
 
 export function resolveRequestErrorMessage(payload = {}, fallbackKey = 'errors.requestFailed') {
   const messageKey = String(payload?.messageKey || '').trim()
@@ -40,7 +42,7 @@ export function resolveRequestErrorMessage(payload = {}, fallbackKey = 'errors.r
 
 export async function request(path, options = {}) {
   const hasJsonBody = typeof options.body !== 'undefined' && !(options.body instanceof FormData)
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${getApiBaseInternal()}${path}`, {
     headers: {
       ...(hasJsonBody ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {}),
@@ -65,12 +67,29 @@ export async function request(path, options = {}) {
 }
 
 export function getApiBase() {
-  return API_BASE
+  return getApiBaseInternal()
 }
 
 export function resolveAssetUrl(url) {
   if (!url) {
     return ''
   }
-  return url.startsWith('http') ? url : `${API_BASE}${url}`
+
+  if (url.startsWith('http')) {
+    try {
+      const parsed = new URL(url)
+      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+        const current = new URL(window.location.origin)
+        parsed.hostname = current.hostname
+        parsed.port = current.port
+        parsed.protocol = current.protocol
+        return parsed.toString()
+      }
+    } catch {
+      // ignore
+    }
+    return url
+  }
+
+  return `${getApiBaseInternal()}${url}`
 }

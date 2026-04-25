@@ -49,15 +49,27 @@ function rewritePromptUploadsToLocal(prompt = '', options = {}) {
     return text
   }
 
-  const candidates = text.match(/https?:\/\/[^\s"'`<>]+/g) || []
-
   let nextPrompt = text
+
+  const candidates = text.match(/https?:\/\/[^\s"'`<>]+/g) || []
   candidates.forEach((candidate) => {
     const localUrl = buildLocalUploadUrl(candidate, localServerBaseUrl)
     if (normalizeUploadPath(candidate) && localUrl && candidate !== localUrl) {
       nextPrompt = nextPrompt.split(candidate).join(localUrl)
     }
   })
+
+  const relativeCandidates = nextPrompt.match(/(^|\s|["'`<>])\/uploads\/[^\s"'`<>]+/g) || []
+  relativeCandidates.forEach((candidate) => {
+    const prefixMatch = candidate.match(/^(\s|["'`<>])/)
+    const prefix = prefixMatch ? prefixMatch[1] : ''
+    const trimmed = candidate.slice(prefix.length)
+    const localUrl = buildLocalUploadUrl(trimmed, localServerBaseUrl)
+    if (normalizeUploadPath(trimmed) && localUrl && trimmed !== localUrl) {
+      nextPrompt = nextPrompt.split(candidate).join(prefix + localUrl)
+    }
+  })
+
   return nextPrompt
 }
 

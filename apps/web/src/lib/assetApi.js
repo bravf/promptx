@@ -1,12 +1,10 @@
 import { getApiBase, resolveRequestErrorMessage } from './request.js'
 
-const API_BASE = getApiBase()
-
 export async function uploadImage(file) {
   const body = new FormData()
   body.append('file', file)
 
-  const response = await fetch(`${API_BASE}/api/uploads`, {
+  const response = await fetch(`${getApiBase()}/api/uploads`, {
     method: 'POST',
     body,
   })
@@ -23,7 +21,7 @@ export async function importPdf(file) {
   const body = new FormData()
   body.append('file', file)
 
-  const response = await fetch(`${API_BASE}/api/imports/pdf`, {
+  const response = await fetch(`${getApiBase()}/api/imports/pdf`, {
     method: 'POST',
     body,
   })
