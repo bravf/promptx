@@ -78,7 +78,10 @@ export function resolveAssetUrl(url) {
   if (url.startsWith('http')) {
     try {
       const parsed = new URL(url)
-      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+      if (
+        typeof window !== 'undefined'
+        && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
+      ) {
         const current = new URL(window.location.origin)
         parsed.hostname = current.hostname
         parsed.port = current.port

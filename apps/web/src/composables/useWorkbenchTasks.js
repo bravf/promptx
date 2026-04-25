@@ -1304,7 +1304,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
     const task = await getTask(slug)
     const normalizedBlocks = (task.blocks || []).map((block) => ({
       ...block,
-      content: block.type === 'image' ? normalizeImageContent(block.content) : block.content,
+      content: block.type === 'image' ? resolveAssetUrl(block.content) : block.content,
     }))
 
     const state = {
@@ -1749,7 +1749,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
         const asset = await uploadImage(file)
         uploadedBlocks.push({
           type: 'image',
-          content: normalizeImageContent(asset.url),
+          content: resolveAssetUrl(asset.url),
           meta: {},
         })
       }
@@ -1824,7 +1824,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
         const payload = await importPdf(file)
         const blocks = (payload.blocks || []).map((block) => ({
           ...block,
-          content: block.type === 'image' ? normalizeImageContent(block.content) : block.content,
+          content: block.type === 'image' ? resolveAssetUrl(block.content) : block.content,
         }))
 
         if (!blocks.length) {

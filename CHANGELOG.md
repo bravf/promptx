@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.9
+
+- 接入 `Kimi Code CLI` 执行引擎：工作台 Agent 选择器新增 Kimi Code 选项，支持本地会话发现、线程复用、TodoList 过程展示与停止控制，与现有 Codex / Claude Code / OpenCode 并列为第四类 Agent。
+- 工作台 Agent 选择器与过滤状态持久化：切换任务后会自动恢复上次选中的 Agent 引擎和中栏过滤条件，不再每次回到默认值。
+- runner 状态提示支持多语言：idle 进度提示（排队中、运行中、停止中）通过 `messageKey` 机制走前端 i18n 翻译，英文环境下显示对应英文文案。
+- 修复图片上传地址在云主机部署下失效的问题：前端 `API_BASE` 改为运行时按 `window.location.origin` 计算，数据库中只存相对路径；同时兼容已存的老数据（`localhost` / `127.0.0.1` 绝对路径在显示时自动替换为当前 host），runner 收到的 prompt 仍会正确转换为本地地址。
+
 ## 0.2.8
 
 - 修复 `Claude Code` 的 `TodoWrite` 过程映射：待办列表会被归一为结构化 `todo_list` 事件，正确展示待办内容、进行中与已完成状态，不再只暴露原始工具输入。
