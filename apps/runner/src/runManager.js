@@ -1,7 +1,9 @@
 import {
   createSessionEnvelopeEvent,
   createSessionUpdatedEnvelopeEvent,
+  createStatusEnvelopeEvent,
   createStoppedEnvelopeEvent,
+  getAgentEngineLabel,
 } from '../../../packages/shared/src/index.js'
 import { assertAgentRunner } from './engines/index.js'
 import { getChildStopDiagnostics } from './processControl.js'
@@ -22,6 +24,14 @@ const DEFAULT_MAX_CONCURRENT_RUNS = Math.max(1, Number(process.env.PROMPTX_RUNNE
 const DEFAULT_EVENT_BATCH_BYTES = Math.max(
   64 * 1024,
   Number(process.env.PROMPTX_RUNNER_EVENT_BATCH_BYTES) || 512 * 1024
+)
+const DEFAULT_IDLE_PROGRESS_EVENT_MS = Math.max(
+  5000,
+  Number(process.env.PROMPTX_RUNNER_IDLE_PROGRESS_EVENT_MS) || 15000
+)
+const DEFAULT_IDLE_PROGRESS_EVENT_REPEAT_MS = Math.max(
+  DEFAULT_IDLE_PROGRESS_EVENT_MS,
+  Number(process.env.PROMPTX_RUNNER_IDLE_PROGRESS_EVENT_REPEAT_MS) || DEFAULT_IDLE_PROGRESS_EVENT_MS
 )
 const RUNNER_ID = String(process.env.PROMPTX_RUNNER_ID || 'local-runner').trim() || 'local-runner'
 const DISPOSE_POLL_INTERVAL_MS = Math.max(50, Number(process.env.PROMPTX_RUNNER_DISPOSE_POLL_MS) || 100)
@@ -195,10 +205,57 @@ function sleep(ms) {
   })
 }
 
+function isProgressPayload(payload = {}) {
+  const type = String(payload?.type || '').trim()
+  return !['status', 'session', 'session.updated'].includes(type)
+}
+
+function createIdleProgressEvent(context = {}) {
+  const status = String(context.status || '').trim()
+  if (status === 'queued') {
+    return createStatusEnvelopeEvent({
+      stage: 'queued',
+      message: '当前仍在排队，等待 runner 空闲后开始执行。',
+    })
+  }
+
+  if (status === 'stopping') {
+    return createStatusEnvelopeEvent({
+      stage: 'stopping',
+      message: '正在停止执行，等待引擎退出...',
+    })
+  }
+
+  return createStatusEnvelopeEvent({
+    stage: 'running',
+    message: `${getAgentEngineLabel(context.engine || 'codex')} 仍在执行中，最近暂无新的过程输出。`,
+  })
+}
+
 export function createRunManager(options = {}) {
   const serverClient = options.serverClient
   const logger = options.logger || console
   const resolveRunner = typeof options.resolveRunner === 'function' ? options.resolveRunner : assertAgentRunner
+  const eventFlushIntervalMs = Math.max(20, Number(options.eventFlushIntervalMs) || EVENT_FLUSH_INTERVAL_MS)
+  const heartbeatIntervalMs = Math.max(100, Number(options.heartbeatIntervalMs) || HEARTBEAT_INTERVAL_MS)
+  const stoppingHeartbeatIntervalMs = Math.max(
+    100,
+    Number(options.stoppingHeartbeatIntervalMs) || STOPPING_HEARTBEAT_INTERVAL_MS
+  )
+  const queuedHeartbeatIntervalMs = Math.max(
+    100,
+    Number(options.queuedHeartbeatIntervalMs) || QUEUED_HEARTBEAT_INTERVAL_MS
+  )
+  const defaultStopTimeoutMs = Math.max(1000, Number(options.defaultStopTimeoutMs) || DEFAULT_STOP_TIMEOUT_MS)
+  const stopTimeoutBufferMs = Math.max(200, Number(options.stopTimeoutBufferMs) || STOP_TIMEOUT_BUFFER_MS)
+  const idleProgressEventMs = Math.max(
+    heartbeatIntervalMs,
+    Number(options.idleProgressEventMs) || DEFAULT_IDLE_PROGRESS_EVENT_MS
+  )
+  const idleProgressEventRepeatMs = Math.max(
+    idleProgressEventMs,
+    Number(options.idleProgressEventRepeatMs) || DEFAULT_IDLE_PROGRESS_EVENT_REPEAT_MS
+  )
   const runtimeConfig = {
     maxConcurrentRuns: normalizeMaxConcurrentRuns(options.maxConcurrentRuns, DEFAULT_MAX_CONCURRENT_RUNS),
   }
@@ -267,6 +324,11 @@ export function createRunManager(options = {}) {
     const normalizedPayload = payload && typeof payload === 'object'
       ? payload
       : { type: 'status', message: String(payload || '') }
+
+    if (isProgressPayload(normalizedPayload)) {
+      context.lastProgressEventAt = Date.now()
+      context.lastIdleProgressEventAt = 0
+    }
 
     context.lastSeq += 1
     context.eventBuffer.push({
@@ -371,8 +433,38 @@ export function createRunManager(options = {}) {
     context.flushTimer = setTimeout(() => {
       context.flushTimer = null
       flushEvents(context).catch(() => {})
-    }, EVENT_FLUSH_INTERVAL_MS)
+    }, eventFlushIntervalMs)
     context.flushTimer.unref?.()
+  }
+
+  function maybeQueueIdleProgressEvent(context) {
+    if (!context || context.finalized) {
+      return
+    }
+
+    const status = String(context.status || '').trim()
+    if (!['queued', 'starting', 'running', 'stopping'].includes(status)) {
+      return
+    }
+
+    const now = Date.now()
+    const lastProgressAt = Math.max(
+      0,
+      Number(context.lastProgressEventAt) || 0,
+      Date.parse(String(context.startedAt || '')) || 0
+    )
+    const lastIdleProgressEventAt = Math.max(0, Number(context.lastIdleProgressEventAt) || 0)
+
+    if (!lastProgressAt || now - lastProgressAt < idleProgressEventMs) {
+      return
+    }
+
+    if (lastIdleProgressEventAt && now - lastIdleProgressEventAt < idleProgressEventRepeatMs) {
+      return
+    }
+
+    queueEvent(context, createIdleProgressEvent(context))
+    context.lastIdleProgressEventAt = now
   }
 
   function startHeartbeat(context) {
@@ -384,8 +476,9 @@ export function createRunManager(options = {}) {
       if (context.finalized) {
         return
       }
+      maybeQueueIdleProgressEvent(context)
       postStatus(context).catch(() => {})
-    }, HEARTBEAT_INTERVAL_MS)
+    }, heartbeatIntervalMs)
     context.heartbeatTimer.unref?.()
   }
 
@@ -405,8 +498,9 @@ export function createRunManager(options = {}) {
       if (context.finalized || !isQueuedRunStatus(context.status)) {
         return
       }
+      maybeQueueIdleProgressEvent(context)
       postStatus(context).catch(() => {})
-    }, QUEUED_HEARTBEAT_INTERVAL_MS)
+    }, queuedHeartbeatIntervalMs)
     context.queueHeartbeatTimer.unref?.()
   }
 
@@ -426,10 +520,11 @@ export function createRunManager(options = {}) {
       if (context.finalized || !context.stopRequestedAt) {
         return
       }
+      maybeQueueIdleProgressEvent(context)
       postStatus(context, {
         stopRequestedAt: context.stopRequestedAt,
       }).catch(() => {})
-    }, STOPPING_HEARTBEAT_INTERVAL_MS)
+    }, stoppingHeartbeatIntervalMs)
     context.stopProgressTimer.unref?.()
   }
 
@@ -706,11 +801,13 @@ export function createRunManager(options = {}) {
         },
         config: {
           maxConcurrentRuns: runtimeConfig.maxConcurrentRuns,
-          eventFlushIntervalMs: EVENT_FLUSH_INTERVAL_MS,
-          heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
-          queuedHeartbeatIntervalMs: QUEUED_HEARTBEAT_INTERVAL_MS,
-          stoppingHeartbeatIntervalMs: STOPPING_HEARTBEAT_INTERVAL_MS,
-          defaultStopTimeoutMs: DEFAULT_STOP_TIMEOUT_MS,
+          eventFlushIntervalMs,
+          heartbeatIntervalMs,
+          queuedHeartbeatIntervalMs,
+          stoppingHeartbeatIntervalMs,
+          idleProgressEventMs,
+          idleProgressEventRepeatMs,
+          defaultStopTimeoutMs,
         },
       }
     },
@@ -752,6 +849,8 @@ export function createRunManager(options = {}) {
         finishedAt: '',
         stopRequestedAt: '',
         lastHeartbeatAt: '',
+        lastProgressEventAt: Date.now(),
+        lastIdleProgressEventAt: 0,
         lastSeq: 0,
         eventBuffer: [],
         flushTimer: null,
@@ -818,7 +917,7 @@ export function createRunManager(options = {}) {
 
       const stopGraceMs = Math.max(200, Number(options.forceAfterMs) || 1500)
       context.stopGraceMs = stopGraceMs
-      const stopTimeoutMs = Math.max(DEFAULT_STOP_TIMEOUT_MS, stopGraceMs + STOP_TIMEOUT_BUFFER_MS)
+      const stopTimeoutMs = Math.max(defaultStopTimeoutMs, stopGraceMs + stopTimeoutBufferMs)
       ensureStopTimeout(context, stopTimeoutMs)
 
       try {
@@ -841,7 +940,7 @@ export function createRunManager(options = {}) {
         )
       )
 
-      const deadline = Date.now() + DEFAULT_STOP_TIMEOUT_MS + STOP_TIMEOUT_BUFFER_MS
+      const deadline = Date.now() + defaultStopTimeoutMs + stopTimeoutBufferMs
       while (activeRuns.size && Date.now() < deadline) {
         await sleep(DISPOSE_POLL_INTERVAL_MS)
       }

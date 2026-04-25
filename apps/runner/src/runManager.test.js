@@ -417,6 +417,62 @@ test('runManager 会为 queued run 持续发送心跳，避免被误判为失联
   await delay(60)
 })
 
+test('runManager 会为长时间静默的 running run 补发可见进度事件', async () => {
+  const serverClient = createFakeServerClient()
+  const completion = createDeferred()
+
+  const runManager = createRunManager({
+    serverClient,
+    heartbeatIntervalMs: 120,
+    idleProgressEventMs: 180,
+    idleProgressEventRepeatMs: 180,
+    eventFlushIntervalMs: 30,
+    resolveRunner() {
+      return {
+        streamSessionPrompt() {
+          return {
+            child: {
+              pid: 7301,
+              exitCode: 0,
+              signalCode: null,
+            },
+            result: completion.promise,
+            cancel() {},
+          }
+        },
+      }
+    },
+  })
+
+  await runManager.startRun({
+    runId: 'run-idle-progress-1',
+    taskSlug: 'task-idle-progress',
+    sessionId: 'session-idle-progress-1',
+    title: 'Idle Progress 1',
+    engine: 'claude-code',
+    cwd: process.cwd(),
+    prompt: 'silent run',
+  })
+
+  await delay(420)
+
+  const statusEvents = serverClient.events
+    .map((item) => item.payload || {})
+    .filter((payload) => payload.type === 'status')
+
+  assert.equal(
+    statusEvents.some((payload) => String(payload.message || '').includes('最近暂无新的过程输出')),
+    true
+  )
+
+  completion.resolve({
+    sessionId: 'session-idle-progress-1',
+    threadId: 'thread-idle-progress-1',
+    message: 'done',
+  })
+  await delay(80)
+})
+
 test('runManager 可以直接停止尚未启动的 queued run', async () => {
   const serverClient = createFakeServerClient()
   const firstCompletion = createDeferred()
