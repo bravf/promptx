@@ -216,6 +216,7 @@ function createIdleProgressEvent(context = {}) {
     return createStatusEnvelopeEvent({
       stage: 'queued',
       message: '当前仍在排队，等待 runner 空闲后开始执行。',
+      messageKey: 'runner.status.queued',
     })
   }
 
@@ -223,12 +224,16 @@ function createIdleProgressEvent(context = {}) {
     return createStatusEnvelopeEvent({
       stage: 'stopping',
       message: '正在停止执行，等待引擎退出...',
+      messageKey: 'runner.status.stopping',
     })
   }
 
+  const agentLabel = getAgentEngineLabel(context.engine || 'codex')
   return createStatusEnvelopeEvent({
     stage: 'running',
-    message: `${getAgentEngineLabel(context.engine || 'codex')} 仍在执行中，最近暂无新的过程输出。`,
+    message: `${agentLabel} 正在思考中...`,
+    messageKey: 'runner.status.thinking',
+    messageParams: { agentLabel },
   })
 }
 

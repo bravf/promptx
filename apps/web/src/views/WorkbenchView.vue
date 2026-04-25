@@ -43,7 +43,25 @@ const NOTIFICATION_SOUND_THROTTLE_MS = 3000
 
 const codexPanelRef = ref(null)
 const currentProjectAgentBindings = ref([])
-const selectedAgentEngineMap = ref({})
+const SELECTED_AGENT_ENGINE_STORAGE_KEY = 'promptx:selected-agent-engine-map'
+
+function getPersistedAgentEngineMap() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SELECTED_AGENT_ENGINE_STORAGE_KEY) || '{}')
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed
+    }
+  } catch {
+    // ignore
+  }
+  return {}
+}
+
+function persistAgentEngineMap(map) {
+  window.localStorage.setItem(SELECTED_AGENT_ENGINE_STORAGE_KEY, JSON.stringify(map))
+}
+
+const selectedAgentEngineMap = ref(getPersistedAgentEngineMap())
 let notificationAudio = null
 let notificationAudioPrimed = false
 let lastNotificationSoundAt = 0
@@ -63,25 +81,30 @@ function getDefaultAgentEngine(bindings = currentProjectAgentBindings.value) {
 
 const currentSelectedAgentEngine = computed({
   get() {
-    const projectId = String(currentProjectSessionId.value || '').trim()
-    if (!projectId) {
+    const taskSlug = String(currentTaskSlug.value || '').trim()
+    if (!taskSlug) {
       return ''
     }
 
-    return normalizeSelectedAgentEngine(selectedAgentEngineMap.value[projectId])
-      || getDefaultAgentEngine()
+    const saved = String(selectedAgentEngineMap.value[taskSlug] || '').trim()
+    if (saved) {
+      return saved
+    }
+
+    return getDefaultAgentEngine()
   },
   set(value) {
-    const projectId = String(currentProjectSessionId.value || '').trim()
-    const normalized = normalizeSelectedAgentEngine(value)
-    if (!projectId || !normalized) {
+    const taskSlug = String(currentTaskSlug.value || '').trim()
+    const normalized = String(value || '').trim()
+    if (!taskSlug || !normalized) {
       return
     }
 
     selectedAgentEngineMap.value = {
       ...selectedAgentEngineMap.value,
-      [projectId]: normalized,
+      [taskSlug]: normalized,
     }
+    persistAgentEngineMap(selectedAgentEngineMap.value)
   },
 })
 
@@ -460,11 +483,23 @@ function handleCurrentAgentBindingsChange(payload = {}) {
   const bindings = Array.isArray(payload?.bindings) ? payload.bindings : []
   currentProjectAgentBindings.value = bindings
 
-  const nextEngine = normalizeSelectedAgentEngine(
-    selectedAgentEngineMap.value[activeProjectSessionId],
-    bindings
-  ) || normalizeSelectedAgentEngine(payload?.selectedEngine, bindings) || getDefaultAgentEngine(bindings)
-  if (nextEngine) {
+  const taskSlug = String(currentTaskSlug.value || '').trim()
+  if (!taskSlug) {
+    return
+  }
+
+  // 优先恢复该任务之前保存的选择
+  const saved = String(selectedAgentEngineMap.value[taskSlug] || '').trim()
+  if (saved && bindings.some((item) => item?.engine === saved)) {
+    if (currentSelectedAgentEngine.value !== saved) {
+      currentSelectedAgentEngine.value = saved
+    }
+    return
+  }
+
+  const nextEngine = normalizeSelectedAgentEngine(payload?.selectedEngine, bindings)
+    || getDefaultAgentEngine(bindings)
+  if (nextEngine && currentSelectedAgentEngine.value !== nextEngine) {
     currentSelectedAgentEngine.value = nextEngine
   }
 }

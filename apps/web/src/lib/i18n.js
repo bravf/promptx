@@ -695,6 +695,13 @@ export const MESSAGES = {
       stop: '停止',
       stopping: '正在停止...',
     },
+    runner: {
+      status: {
+        queued: '当前仍在排队，等待 runner 空闲后开始执行。',
+        stopping: '正在停止执行，等待引擎退出...',
+        thinking: ({ agentLabel }) => `${agentLabel} 正在思考中...`,
+      },
+    },
     processDetail: {
       changeCreate: '新增',
       changeDelete: '删除',
@@ -1484,6 +1491,13 @@ export const MESSAGES = {
       jumpToLatest: 'New messages, jump to bottom',
       stop: 'Stop',
       stopping: 'Stopping...',
+    },
+    runner: {
+      status: {
+        queued: 'Still queued, waiting for runner to become idle.',
+        stopping: 'Stopping execution, waiting for engine to exit...',
+        thinking: ({ agentLabel }) => `${agentLabel} is thinking...`,
+      },
     },
     processDetail: {
       changeCreate: 'Added',

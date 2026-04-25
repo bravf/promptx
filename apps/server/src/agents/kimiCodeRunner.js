@@ -190,6 +190,43 @@ function buildKimiToolCommand(name = '', input = {}) {
   }
 }
 
+function isKimiTodoToolName(name = '') {
+  return String(name || '').trim().toLowerCase() === 'settodolist'
+}
+
+function normalizeKimiTodoStatus(status = '') {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (normalized === 'done') {
+    return 'completed'
+  }
+  if (normalized === 'in_progress') {
+    return 'in_progress'
+  }
+  return 'pending'
+}
+
+function normalizeKimiTodoItems(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return null
+      }
+
+      const status = normalizeKimiTodoStatus(entry.status)
+      const text = String(entry.title || entry.text || '').trim()
+      if (!text) {
+        return null
+      }
+
+      return {
+        text,
+        status,
+        completed: status === 'completed',
+      }
+    })
+    .filter(Boolean)
+}
+
 function extractKimiSessionIdFromStderrLine(line = '') {
   const match = String(line || '').match(/To resume this session:\s*kimi\s+(?:-r|--session|--resume)\s+([a-f0-9-]+)/i)
   return match?.[1] ? String(match[1]).trim() : ''
@@ -268,9 +305,26 @@ export function normalizeKimiEvents(event = {}, state = createKimiNormalizationS
         parsedArgs = {}
       }
       const command = buildKimiToolCommand(name, parsedArgs)
+      const isTodoTool = isKimiTodoToolName(name)
+      const todoItems = normalizeKimiTodoItems(parsedArgs.todos)
 
       if (toolUseId) {
-        state.toolUses.set(toolUseId, { name, command })
+        state.toolUses.set(toolUseId, {
+          name,
+          command,
+          kind: isTodoTool ? 'todo' : 'command',
+          todoItems,
+        })
+      }
+
+      if (isTodoTool) {
+        normalizedEvents.push({
+          ...createItemStartedEvent({
+            type: AGENT_RUN_ITEM_TYPES.TODO_LIST,
+            items: todoItems,
+          }),
+        })
+        return
       }
 
       normalizedEvents.push({
@@ -289,9 +343,20 @@ export function normalizeKimiEvents(event = {}, state = createKimiNormalizationS
     const toolCallId = String(event?.tool_call_id || '').trim()
     const remembered = toolCallId ? state.toolUses.get(toolCallId) : null
     const output = stringifyKimiToolResultContent(event?.content)
+    const todoTool = remembered?.kind === 'todo'
 
     if (toolCallId) {
       state.toolUses.delete(toolCallId)
+    }
+
+    if (todoTool) {
+      normalizedEvents.push({
+        ...createItemCompletedEvent({
+          type: AGENT_RUN_ITEM_TYPES.TODO_LIST,
+          items: Array.isArray(remembered?.todoItems) ? remembered.todoItems : [],
+        }),
+      })
+      return normalizedEvents
     }
 
     normalizedEvents.push({

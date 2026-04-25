@@ -150,7 +150,36 @@ const managerDialogRef = ref(null)
 const showSourceBrowser = ref(false)
 const sourceBrowserSessionId = ref('')
 const previewPromptImageUrl = ref('')
+const SELECTED_AGENT_FILTER_STORAGE_KEY = 'promptx:selected-agent-filter-map'
+
+function getPersistedAgentFilterMap() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SELECTED_AGENT_FILTER_STORAGE_KEY) || '{}')
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed
+    }
+  } catch {
+    // ignore
+  }
+  return {}
+}
+
+function persistAgentFilterMap(map) {
+  window.localStorage.setItem(SELECTED_AGENT_FILTER_STORAGE_KEY, JSON.stringify(map))
+}
+
 const selectedAgentFilter = ref('all')
+
+// 持久化到 localStorage
+watch(selectedAgentFilter, (value) => {
+  const taskSlug = String(props.taskSlug || '').trim()
+  if (!taskSlug) {
+    return
+  }
+  const map = getPersistedAgentFilterMap()
+  map[taskSlug] = value
+  persistAgentFilterMap(map)
+})
 const { t } = useI18n()
 const { isDark } = useTheme()
 const responseThemeKey = computed(() => (isDark.value ? 'dark' : 'light'))
@@ -195,6 +224,9 @@ watch(
     if (selectedAgentFilter.value === 'all') {
       return
     }
+    if (!agentFilterOptions.value.length) {
+      return
+    }
     if (agentFilterOptions.value.some((item) => item.engine === selectedAgentFilter.value)) {
       return
     }
@@ -218,8 +250,11 @@ watch(
       return
     }
 
-    selectedAgentFilter.value = 'all'
-  }
+    const map = getPersistedAgentFilterMap()
+    const saved = map[nextTaskSlug]
+    selectedAgentFilter.value = saved || 'all'
+  },
+  { immediate: true }
 )
 
 function shouldHideSystemEvent(item = {}) {

@@ -4,7 +4,7 @@ import {
   AGENT_RUN_ITEM_TYPES,
   normalizeAgentRunEnvelopeEventType,
 } from '@promptx/shared'
-import { getCurrentLocale } from './useI18n.js'
+import { getCurrentLocale, translate } from './useI18n.js'
 import { resolveAssetUrl } from '../lib/api.js'
 import { getAgentEngineLabel, normalizeAgentEngine } from '../lib/agentEngines.js'
 import { parseProcessDetailTextBlocks, sanitizeProcessDetailText } from '../lib/processDetailBlocks.js'
@@ -17,6 +17,20 @@ function isEnglishLocale() {
 
 function text(zh, en) {
   return isEnglishLocale() ? en : zh
+}
+
+function resolveRunnerMessage(payload = {}) {
+  const messageKey = String(payload?.messageKey || '').trim()
+  if (messageKey) {
+    const params = payload?.messageParams && typeof payload.messageParams === 'object'
+      ? payload.messageParams
+      : {}
+    const translated = translate(messageKey, params)
+    if (translated && translated !== messageKey) {
+      return translated
+    }
+  }
+  return String(payload?.message || '').trim()
 }
 
 function getDateOrderValue(value = '') {
@@ -1593,7 +1607,7 @@ export function applyRunPayloadToTurn(turn, payload = {}, nextLogId, mergeSessio
     }
 
     appendTurnEvent(turn, {
-      title: payload.message || text('状态已更新', 'Status updated'),
+      title: resolveRunnerMessage(payload) || text('状态已更新', 'Status updated'),
       detail: '',
     }, nextLogId)
     return
@@ -1648,26 +1662,28 @@ export function applyRunPayloadToTurn(turn, payload = {}, nextLogId, mergeSessio
       title: text('本轮执行结束', 'Run finished'),
       detail: '',
     }, nextLogId)
-    if (payload.message) {
-      turn.responseMessage = payload.message
+    const completedMessage = resolveRunnerMessage(payload)
+    if (completedMessage) {
+      turn.responseMessage = completedMessage
     }
     return
   }
 
   if (envelopeType === AGENT_RUN_ENVELOPE_EVENT_TYPES.STOPPED) {
     appendTurnEvent(turn, {
-      title: payload.message || text('执行已手动停止', 'Execution stopped manually'),
+      title: resolveRunnerMessage(payload) || text('执行已手动停止', 'Execution stopped manually'),
       detail: '',
     }, nextLogId)
     return
   }
 
   if (envelopeType === AGENT_RUN_ENVELOPE_EVENT_TYPES.ERROR) {
-    const issue = classifyCodexIssue(payload.message, turn.engine)
+    const errorMessage = resolveRunnerMessage(payload)
+    const issue = classifyCodexIssue(errorMessage, turn.engine)
     appendTurnEvent(turn, {
       kind: 'error',
       title: issue?.title || text('执行失败', 'Execution failed'),
-      detail: formatCodexIssueMessage(payload.message || text(`${getTurnAgentLabel(turn)} 执行失败`, `${getTurnAgentLabel(turn)} failed`), turn.engine),
+      detail: formatCodexIssueMessage(errorMessage || text(`${getTurnAgentLabel(turn)} 执行失败`, `${getTurnAgentLabel(turn)} failed`), turn.engine),
     }, nextLogId)
   }
 }
@@ -1735,7 +1751,7 @@ export function applyRunEventToTurn(turn, event = {}, nextLogId, mergeSession = 
     turn.finishedAt = new Date().toISOString()
   } else if (envelopeType === AGENT_RUN_ENVELOPE_EVENT_TYPES.ERROR) {
     turn.status = 'error'
-    turn.errorMessage = formatCodexIssueMessage(String(payload.message || turn.errorMessage || text(`${getTurnAgentLabel(turn)} 执行失败`, `${getTurnAgentLabel(turn)} failed`)), turn.engine)
+    turn.errorMessage = formatCodexIssueMessage(String(resolveRunnerMessage(payload) || turn.errorMessage || text(`${getTurnAgentLabel(turn)} 执行失败`, `${getTurnAgentLabel(turn)} failed`)), turn.engine)
     turn.finishedAt = new Date().toISOString()
   }
 
