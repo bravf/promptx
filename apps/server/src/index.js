@@ -88,8 +88,9 @@ import { getApiErrorPayload } from './apiErrors.js'
 import { registerWebAppRoutes } from './webAppRoutes.js'
 import { createTempFilePath, normalizeUploadFileName } from './upload.js'
 import { importPdfBlocks } from './pdf.js'
+import { createFastifyLoggerOptions } from '@promptx/shared/dailyLogStream'
 
-const app = Fastify({ logger: true })
+const app = Fastify({ logger: createFastifyLoggerOptions({ logName: 'server' }) })
 const port = Number(process.env.PORT || 3000)
 const host = process.env.HOST || '127.0.0.1'
 const { tmpDir, uploadsDir } = ensurePromptxStorageReady()

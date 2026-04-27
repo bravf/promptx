@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
 import { resolvePromptxPaths } from '../apps/server/src/appPaths.js'
+import { formatLocalLogDate } from '../packages/shared/src/dailyLogStream.js'
 
 const DEFAULT_RELAY_PORT = 3030
 const DEFAULT_RELAY_HOST = '127.0.0.1'
@@ -27,11 +28,15 @@ function ensureRuntimeDir() {
 
 function getRuntimePaths() {
   const runtimeDir = ensureRuntimeDir()
+  const logDir = path.join(runtimeDir, 'logs')
+  fs.mkdirSync(logDir, { recursive: true })
+  const logDate = formatLocalLogDate()
   return {
     runtimeDir,
+    logDir,
     pidFile: path.join(runtimeDir, 'relay.pid'),
     stateFile: path.join(runtimeDir, 'relay.json'),
-    logFile: path.join(runtimeDir, 'relay.log'),
+    logFile: path.join(logDir, `relay-${logDate}.log`),
   }
 }
 
@@ -167,6 +172,8 @@ async function startRelayService() {
       ...process.env,
       PROMPTX_RELAY_HOST: host,
       PROMPTX_RELAY_PORT: String(port),
+      PROMPTX_LOG_DIR: logDir,
+      PROMPTX_LOG_NAME: 'relay',
     },
   })
 

@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
 import { resolvePromptxPaths } from '../apps/server/src/appPaths.js'
+import { formatLocalLogDate } from '../packages/shared/src/dailyLogStream.js'
 
 const DEFAULT_SERVER_PORT = 3000
 const DEFAULT_RUNNER_PORT = 3002
@@ -29,11 +30,15 @@ function ensureRuntimeDir() {
 
 function getRuntimePaths() {
   const runtimeDir = ensureRuntimeDir()
+  const logDir = path.join(runtimeDir, 'logs')
+  fs.mkdirSync(logDir, { recursive: true })
+  const logDate = formatLocalLogDate()
   return {
     runtimeDir,
+    logDir,
     stateFile: path.join(runtimeDir, 'service.json'),
-    serverLogFile: path.join(runtimeDir, 'server.log'),
-    runnerLogFile: path.join(runtimeDir, 'runner.log'),
+    serverLogFile: path.join(logDir, `server-${logDate}.log`),
+    runnerLogFile: path.join(logDir, `runner-${logDate}.log`),
   }
 }
 
@@ -275,7 +280,7 @@ async function startService() {
     await stopService()
   }
 
-  const { stateFile, serverLogFile, runnerLogFile } = getRuntimePaths()
+  const { stateFile, logDir, serverLogFile, runnerLogFile } = getRuntimePaths()
   const host = String(process.env.HOST || DEFAULT_HOST).trim() || DEFAULT_HOST
   const serverPort = Math.max(1, Number(process.env.PORT || process.env.PROMPTX_SERVER_PORT) || DEFAULT_SERVER_PORT)
   const runnerPort = Math.max(1, Number(process.env.RUNNER_PORT || process.env.PROMPTX_RUNNER_PORT) || DEFAULT_RUNNER_PORT)
@@ -296,6 +301,8 @@ async function startService() {
     PROMPTX_RUNNER_PORT: String(runnerPort),
     PROMPTX_SERVER_PORT: String(serverPort),
     PROMPTX_SERVER_BASE_URL: serverBaseUrl,
+    PROMPTX_LOG_DIR: logDir,
+    PROMPTX_LOG_NAME: 'runner',
   }, runnerLogFile)
 
   try {
@@ -316,6 +323,8 @@ async function startService() {
     PROMPTX_SERVER_PORT: String(serverPort),
     PROMPTX_RUNNER_PORT: String(runnerPort),
     PROMPTX_RUNNER_BASE_URL: runnerBaseUrl,
+    PROMPTX_LOG_DIR: logDir,
+    PROMPTX_LOG_NAME: 'server',
   }, serverLogFile)
 
   try {

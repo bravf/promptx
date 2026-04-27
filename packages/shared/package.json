@@ -4,7 +4,8 @@
   "type": "module",
   "main": "./src/index.js",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./dailyLogStream": "./src/dailyLogStream.js"
   },
   "scripts": {
     "build": "node -e \"console.log('shared: nothing to build')\"",
