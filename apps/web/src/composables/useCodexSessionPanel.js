@@ -442,6 +442,12 @@ export function useCodexSessionPanel(props, emit) {
     { immediate: true }
   )
 
+  watch(sendingElapsedSeconds, (newVal, oldVal) => {
+    if (props.active && oldVal === 0 && newVal > 0) {
+      scheduleScrollToBottom()
+    }
+  })
+
   watch(
     () => Boolean(props.taskRunning),
     (taskRunning) => {
