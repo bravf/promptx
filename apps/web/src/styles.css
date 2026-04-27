@@ -602,9 +602,8 @@ body {
 
   .process-detail-markdown--reasoning {
     margin: 0;
-    border-left: 2px solid var(--theme-borderDefault);
     background: var(--theme-appPanelStrong);
-    padding: 0.1rem 0 0.1rem 0.75rem;
+    padding: 0;
   }
 
   .process-detail-markdown--reasoning > * + * {
