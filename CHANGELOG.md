@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.11
+
+- 优化任务文件更改数的刷新策略：Agent turn 进入终态后延迟 800ms 自动刷新对应任务的 workspace diff summary，避免每次全量查询所有任务；多任务同时结束时合并为一次请求，降低后端 git diff 计算开销。
+- 优化 Windows 目录选择器根节点展示：空路径请求时返回 home 目录 + 可用盘符（C 盘 / D 盘等）作为快捷入口；前端解除 homePath 导航边界限制，允许自由退到任意父目录；修复 `parentPath` 始终为空字符串的问题。
+- 新增按日期分割的后台服务日志：server、runner、relay 的日志统一写入 `runtime/logs/` 目录，文件名按天切分（`server-YYYY-MM-DD.log`），支持 14 天自动清理；降级为未配置日志目录时继续使用控制台输出。
+- WeChat Light 主题对比度微调：`appPanelMuted`、`borderDefault`、`borderMuted`、`textMuted` 色值调深，提升文字与边界的可读性；去掉 reasoning 区块的左侧边框线，让过程日志更紧凑。
+- 修复运行计时首次出现时未触发自动滚动的问题：`sendingElapsedSeconds` 从零变为正数时补发一次 `scheduleScrollToBottom`，确保“耗时 X 秒”文案出现时视图跟随到底部。
+
 ## 0.2.10
 
 - 修复 Claude Code 结果完成时偶发卡死的问题：当 Claude CLI 在 result 事件后延迟退出时，runner 会进入优雅退出等待，避免强制 kill 导致消息丢失。
