@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.10
+
+- 修复 Claude Code 结果完成时偶发卡死的问题：当 Claude CLI 在 result 事件后延迟退出时，runner 会进入优雅退出等待，避免强制 kill 导致消息丢失。
+- 完善 Kimi Code 执行过程展示：思考过程（thinking）不再被隐藏，可直接在执行面板中查看；工具调用（ReadFile / WriteFile / Shell 等）正确映射到前端分类（读取/写入/命令），便于分组展示。
+- 补齐 Kimi Code 事件流完整性：新增 thread.started 事件发送，修复会话创建元信息泄漏到过程日志的问题。
+- 健壮化 Kimi Code 参数解析：支持 arguments 既为字符串也可为对象，避免空参数展示为 `{}`。
+- 代码变更弹窗轮次选择器日期精确到秒：select option 中显示完整时分秒，方便在密集 run 中快速定位目标轮次。
+
 ## 0.2.9
 
 - 接入 `Kimi Code CLI` 执行引擎：工作台 Agent 选择器新增 Kimi Code 选项，支持本地会话发现、线程复用、TodoList 过程展示与停止控制，与现有 Codex / Claude Code / OpenCode 并列为第四类 Agent。
