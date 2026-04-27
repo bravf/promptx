@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.13
+
+- 修复 `promptx relay start/restart` 启动失败并提示 `logDir is not defined` 的问题，Relay 后台进程现在会正确拿到日志目录。
+- 修复任务列表点击标题进入编辑时标题文字上移、任务卡片高度抖动的问题，标题浏览态与编辑态保持一致行高。
+
 ## 0.2.12
 
 - 修复全局 npm 安装后 `promptx start` 启动失败的问题：server / runner 运行时代码不再通过 workspace 裸包名加载 `@promptx/shared`，改为使用发布包内可解析的相对路径，避免 `ERR_MODULE_NOT_FOUND`。

@@ -152,7 +152,7 @@ async function startRelayService() {
     return
   }
 
-  const { pidFile, stateFile, logFile } = getRuntimePaths()
+  const { pidFile, stateFile, logDir, logFile } = getRuntimePaths()
   const host = String(process.env.PROMPTX_RELAY_HOST || process.env.HOST || DEFAULT_RELAY_HOST).trim() || DEFAULT_RELAY_HOST
   const port = Math.max(1, Number(process.env.PROMPTX_RELAY_PORT || process.env.PORT) || DEFAULT_RELAY_PORT)
   const baseUrl = getBaseUrl(host, port)

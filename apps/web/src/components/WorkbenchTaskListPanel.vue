@@ -220,35 +220,35 @@ function handleDragEnd(event) {
               >
                 <GripVertical class="h-3.5 w-3.5" />
               </button>
-              <div class="min-w-0 h-5 flex-1 overflow-hidden">
-              <input
-                v-if="task.slug === currentTaskSlug && editingTaskTitleSlug === task.slug"
-                :value="draftTitle"
-                type="text"
-                maxlength="140"
-                data-task-title-input="current"
-                class="block h-5 min-h-0 w-full appearance-none border-0 bg-transparent p-0 text-left text-sm font-semibold leading-5 outline-none placeholder:text-[var(--theme-textMuted)]"
-                :placeholder="currentTaskAutoTitle || t('workbench.untitledTask')"
-                @click.stop
-                @input="emit('update:draftTitle', $event.target.value)"
-                @keydown.enter.prevent="$event.target.blur()"
-                @keydown.esc.prevent="emit('cancel-title-edit')"
-                @blur="emit('title-blur')"
-              >
-              <button
-                v-else
-                type="button"
-                class="inline-flex h-5 w-full items-center gap-1.5 truncate bg-transparent p-0 text-left text-sm leading-5"
-                :class="task.slug === currentTaskSlug ? 'font-semibold' : 'font-medium'"
-                :title="task.displayTitle"
-                @click.stop="emit('title-click', task.slug)"
-              >
-                <Clock3
-                  v-if="task.automation?.enabled"
-                  class="h-3.5 w-3.5 shrink-0 opacity-70"
-                />
-                <span class="min-w-0 truncate">{{ task.displayTitle }}</span>
-              </button>
+              <div class="flex h-5 min-w-0 flex-1 items-center">
+                <input
+                  v-if="task.slug === currentTaskSlug && editingTaskTitleSlug === task.slug"
+                  :value="draftTitle"
+                  type="text"
+                  maxlength="140"
+                  data-task-title-input="current"
+                  class="flex h-5 w-full items-center appearance-none border-0 bg-transparent p-0 text-left text-sm font-semibold leading-5 outline-none placeholder:text-[var(--theme-textMuted)]"
+                  :placeholder="currentTaskAutoTitle || t('workbench.untitledTask')"
+                  @click.stop
+                  @input="emit('update:draftTitle', $event.target.value)"
+                  @keydown.enter.prevent="$event.target.blur()"
+                  @keydown.esc.prevent="emit('cancel-title-edit')"
+                  @blur="emit('title-blur')"
+                >
+                <button
+                  v-else
+                  type="button"
+                  class="inline-flex h-5 w-full items-center gap-1.5 truncate bg-transparent p-0 text-left text-sm leading-5"
+                  :class="task.slug === currentTaskSlug ? 'font-semibold' : 'font-medium'"
+                  :title="task.displayTitle"
+                  @click.stop="emit('title-click', task.slug)"
+                >
+                  <Clock3
+                    v-if="task.automation?.enabled"
+                    class="h-3.5 w-3.5 shrink-0 opacity-70"
+                  />
+                  <span class="min-w-0 truncate">{{ task.displayTitle }}</span>
+                </button>
               </div>
             </div>
             <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] opacity-80">
