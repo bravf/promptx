@@ -368,6 +368,7 @@ registerRealtimeRoutes(app, {
 
 const taskWorkspaceDiffSummaryService = createTaskWorkspaceDiffSummaryService({
   getPromptxCodexSessionById,
+  getTaskBySlug,
   getWorkspaceGitDiffStatusSummaryByCwd,
   listTasks,
 })

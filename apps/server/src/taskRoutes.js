@@ -115,6 +115,7 @@ function toWorkspaceDiffSummary(payload = null) {
 function createTaskWorkspaceDiffSummaryService(options = {}) {
   const getPromptxCodexSessionById = options.getPromptxCodexSessionById || (() => null)
   const getWorkspaceGitDiffStatusSummaryByCwd = options.getWorkspaceGitDiffStatusSummaryByCwd || (() => null)
+  const getTaskBySlug = options.getTaskBySlug || (() => null)
   const listTasks = options.listTasks || (() => [])
 
   function attachTaskWorkspaceDiffSummaries(items = []) {
@@ -144,8 +145,19 @@ function createTaskWorkspaceDiffSummaryService(options = {}) {
     })
   }
 
-  function listTaskWorkspaceDiffSummaries(limit = 30) {
-    return attachTaskWorkspaceDiffSummaries(listTasks(limit)).map((task) => ({
+  function listTaskWorkspaceDiffSummaries(limit = 30, slugs = []) {
+    const requestedSlugs = [
+      ...new Set(
+        (Array.isArray(slugs) ? slugs : [slugs])
+          .map((slug) => String(slug || '').trim())
+          .filter(Boolean)
+      ),
+    ]
+    const tasks = requestedSlugs.length
+      ? requestedSlugs.map((slug) => getTaskBySlug(slug)).filter(Boolean)
+      : listTasks(limit)
+
+    return attachTaskWorkspaceDiffSummaries(tasks).map((task) => ({
       slug: String(task?.slug || '').trim(),
       workspaceDiffSummary: task?.workspaceDiffSummary || createEmptyWorkspaceDiffSummary(),
     }))
@@ -232,8 +244,13 @@ function registerTaskRoutes(app, options = {}) {
 
   app.get('/api/tasks/workspace-diff-summaries', async (request) => {
     purgeExpiredContent()
+    const requestedSlugs = Array.isArray(request.query?.slug)
+      ? request.query.slug
+      : String(request.query?.slug || '').trim()
+        ? [request.query.slug]
+        : []
     return {
-      items: listTaskWorkspaceDiffSummaries(request.query?.limit),
+      items: listTaskWorkspaceDiffSummaries(request.query?.limit, requestedSlugs),
     }
   })
 

@@ -21,6 +21,7 @@ import { useWorkbenchRealtime } from './useWorkbenchRealtime.js'
 const ACTIVE_TASK_STORAGE_KEY = 'promptx:active-task-slug'
 const SERVER_SYNC_DELAY = 150
 const LOCAL_REORDER_SSE_SUPPRESS_MS = 1500
+const WORKSPACE_DIFF_TERMINAL_RUN_REFRESH_DELAY = 800
 export const MAX_NOTIFIED_TERMINAL_RUNS = 500
 const TERMINAL_RUN_STATUSES = new Set([
   'completed',
@@ -173,6 +174,13 @@ export function isActiveRunStatus(status = '') {
 
 export function isTerminalRunStatus(status = '') {
   return TERMINAL_RUN_STATUSES.has(String(status || '').trim())
+}
+
+export function shouldRefreshWorkspaceDiffSummaryAfterRunChange(task = {}, change = {}) {
+  return Boolean(
+    String(task?.codexSessionId || '').trim()
+    && isTerminalRunStatus(change?.status)
+  )
 }
 
 export function isTaskUnreadFocused(taskSlug = '', currentTaskSlug = '', pageFocused = false) {
@@ -607,6 +615,8 @@ export function useWorkbenchTasks(options = {}) {
   let loadRequestId = 0
   let serverSyncTimer = null
   let workspaceDiffSummaryRequestId = 0
+  let workspaceDiffTerminalRunRefreshTimer = null
+  const pendingWorkspaceDiffTerminalRunTaskSlugs = new Set()
   let pendingServerSyncTaskSlug = null
   let suppressLocalReorderSseUntil = 0
   let hydratedTaskUpdatedAtMap = {}
@@ -1158,7 +1168,10 @@ function normalizeTodoItemsForSnapshot(items = []) {
     }
 
     try {
-      const payload = await listTaskWorkspaceDiffSummaries(nextTaskItems.length || 30)
+      const payload = await listTaskWorkspaceDiffSummaries({
+        limit: nextTaskItems.length || 30,
+        slugs: tasksWithSessions.map((task) => task.slug),
+      })
       if (requestId !== workspaceDiffSummaryRequestId) {
         return
       }
@@ -1167,6 +1180,34 @@ function normalizeTodoItemsForSnapshot(items = []) {
     } catch {
       // Ignore summary fetch failures so the main task list stays responsive.
     }
+  }
+
+  function scheduleWorkspaceDiffSummaryRefreshAfterTerminalRun(taskSlug = '') {
+    const normalizedTaskSlug = String(taskSlug || '').trim()
+    if (!normalizedTaskSlug) {
+      return
+    }
+
+    const change = realtime.getTaskRunChange(normalizedTaskSlug)
+    const taskItems = tasks.value
+    const task = taskItems.find((item) => item.slug === normalizedTaskSlug)
+    if (!shouldRefreshWorkspaceDiffSummaryAfterRunChange(task, change)) {
+      return
+    }
+
+    pendingWorkspaceDiffTerminalRunTaskSlugs.add(normalizedTaskSlug)
+
+    if (workspaceDiffTerminalRunRefreshTimer) {
+      window.clearTimeout(workspaceDiffTerminalRunRefreshTimer)
+    }
+
+    workspaceDiffTerminalRunRefreshTimer = window.setTimeout(() => {
+      workspaceDiffTerminalRunRefreshTimer = null
+      const pendingSlugs = new Set(pendingWorkspaceDiffTerminalRunTaskSlugs)
+      pendingWorkspaceDiffTerminalRunTaskSlugs.clear()
+      const pendingTasks = tasks.value.filter((item) => pendingSlugs.has(item.slug))
+      refreshTaskWorkspaceDiffSummaries(pendingTasks)
+    }, WORKSPACE_DIFF_TERMINAL_RUN_REFRESH_DELAY)
   }
 
   async function refreshTaskList(options = {}) {
@@ -1967,6 +2008,11 @@ function normalizeTodoItemsForSnapshot(items = []) {
   onBeforeUnmount(() => {
     clearAutoSaveTimer()
     clearServerSyncTimer()
+    if (workspaceDiffTerminalRunRefreshTimer) {
+      window.clearTimeout(workspaceDiffTerminalRunRefreshTimer)
+      workspaceDiffTerminalRunRefreshTimer = null
+    }
+    pendingWorkspaceDiffTerminalRunTaskSlugs.clear()
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', clearCurrentTaskUnreadUpdateIfFocused)
       document.removeEventListener('visibilitychange', clearCurrentTaskUnreadUpdateIfFocused)
@@ -1984,6 +2030,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
       }
       markUnreadUpdateFromRealtime(realtime.listSyncTaskSlug.value)
       applyTaskRunningStateFromRealtime(realtime.listSyncTaskSlug.value)
+      scheduleWorkspaceDiffSummaryRefreshAfterTerminalRun(realtime.listSyncTaskSlug.value)
       scheduleServerRefresh(realtime.listSyncTaskSlug.value)
     }
   )

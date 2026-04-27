@@ -69,6 +69,55 @@ test('task workspace diff summary service normalizes and reuses workspace summar
   ])
 })
 
+test('task workspace diff summary service can refresh requested task slugs only', () => {
+  const lookups = []
+  const tasksBySlug = {
+    a: { slug: 'a', codexSessionId: 's1' },
+    b: { slug: 'b', codexSessionId: 's2' },
+  }
+  const service = createTaskWorkspaceDiffSummaryService({
+    getPromptxCodexSessionById(sessionId) {
+      return {
+        s1: { id: 's1', cwd: '/repo/a' },
+        s2: { id: 's2', cwd: '/repo/b' },
+      }[sessionId] || null
+    },
+    getTaskBySlug(slug) {
+      return tasksBySlug[slug] || null
+    },
+    getWorkspaceGitDiffStatusSummaryByCwd(cwd) {
+      lookups.push(cwd)
+      return {
+        supported: true,
+        summary: {
+          fileCount: cwd === '/repo/b' ? 2 : 1,
+          additions: 0,
+          deletions: 0,
+          statsComplete: true,
+        },
+      }
+    },
+    listTasks() {
+      return Object.values(tasksBySlug)
+    },
+  })
+
+  const items = service.listTaskWorkspaceDiffSummaries(30, ['b'])
+  assert.deepEqual(lookups, ['/repo/b'])
+  assert.deepEqual(items, [
+    {
+      slug: 'b',
+      workspaceDiffSummary: {
+        supported: true,
+        fileCount: 2,
+        additions: 0,
+        deletions: 0,
+        statsComplete: true,
+      },
+    },
+  ])
+})
+
 test('task routes return 202 when runner dispatch remains pending', async () => {
   const app = Fastify()
   registerTaskRoutes(app, {

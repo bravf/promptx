@@ -15,6 +15,7 @@ import {
   pruneNotifiedTerminalRunMap,
   reorderTaskSummaries,
   resolveTaskDisplayTitle,
+  shouldRefreshWorkspaceDiffSummaryAfterRunChange,
   shouldRefreshWorkspaceDiffSummaries,
 } from './useWorkbenchTasks.js'
 
@@ -82,6 +83,30 @@ test('isTerminalRunStatus matches all terminal outcomes used by notifications', 
   assert.equal(isTerminalRunStatus('cancelled'), true)
   assert.equal(isTerminalRunStatus('timeout'), true)
   assert.equal(isTerminalRunStatus('running'), false)
+})
+
+test('shouldRefreshWorkspaceDiffSummaryAfterRunChange only refreshes terminal runs with session', () => {
+  assert.equal(
+    shouldRefreshWorkspaceDiffSummaryAfterRunChange(
+      { slug: 'task-a', codexSessionId: 'session-a' },
+      { status: 'completed' }
+    ),
+    true
+  )
+  assert.equal(
+    shouldRefreshWorkspaceDiffSummaryAfterRunChange(
+      { slug: 'task-a', codexSessionId: 'session-a' },
+      { status: 'running' }
+    ),
+    false
+  )
+  assert.equal(
+    shouldRefreshWorkspaceDiffSummaryAfterRunChange(
+      { slug: 'task-a', codexSessionId: '' },
+      { status: 'completed' }
+    ),
+    false
+  )
 })
 
 test('markTaskUnreadUpdateInMap skips focused current task', () => {
@@ -281,6 +306,42 @@ test('mergeTaskSummariesWithWorkspaceDiff clears summary when session changes', 
   ])
 
   assert.equal(merged[0].workspaceDiffSummary, null)
+})
+
+test('mergeTaskSummariesWithWorkspaceDiff lets zero file summary replace stale count', () => {
+  const merged = mergeTaskSummariesWithWorkspaceDiff([
+    {
+      slug: 'task-1',
+      codexSessionId: 'session-a',
+      workspaceDiffSummary: {
+        supported: true,
+        fileCount: 3,
+        additions: 10,
+        deletions: 2,
+        statsComplete: true,
+      },
+    },
+  ], [
+    {
+      slug: 'task-1',
+      codexSessionId: 'session-a',
+      workspaceDiffSummary: {
+        supported: true,
+        fileCount: 0,
+        additions: 0,
+        deletions: 0,
+        statsComplete: true,
+      },
+    },
+  ])
+
+  assert.deepEqual(merged[0].workspaceDiffSummary, {
+    supported: true,
+    fileCount: 0,
+    additions: 0,
+    deletions: 0,
+    statsComplete: true,
+  })
 })
 
 test('mergeTaskSummariesWithWorkspaceDiff clears summary when session is removed', () => {

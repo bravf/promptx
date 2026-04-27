@@ -10,10 +10,19 @@ export function listTasks() {
   return request('/api/tasks')
 }
 
-export function listTaskWorkspaceDiffSummaries(limit = 30) {
+export function listTaskWorkspaceDiffSummaries(input = 30) {
+  const options = typeof input === 'object' && input !== null
+    ? input
+    : { limit: input }
   const params = new URLSearchParams()
-  const normalizedLimit = Math.max(1, Number(limit) || 30)
+  const normalizedLimit = Math.max(1, Number(options.limit) || 30)
   params.set('limit', String(normalizedLimit))
+  ;(options.slugs || []).forEach((slug) => {
+    const normalizedSlug = String(slug || '').trim()
+    if (normalizedSlug) {
+      params.append('slug', normalizedSlug)
+    }
+  })
 
   return request(`/api/tasks/workspace-diff-summaries?${params.toString()}`, {
     cache: 'no-store',
