@@ -154,6 +154,43 @@ process.stdout.write(JSON.stringify({
   return cmdPath
 }
 
+function createHangingFakeClaudeBinary(tempDir) {
+  const scriptPath = path.join(tempDir, process.platform === 'win32' ? 'fake-claude-hang.js' : 'fake-claude-hang')
+  const script = `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({
+  type: 'system',
+  subtype: 'init',
+  session_id: 'thread-contract-1',
+}) + '\\n')
+
+process.stdout.write(JSON.stringify({
+  type: 'assistant',
+  message: {
+    content: [
+      { type: 'text', text: '已完成修改' },
+    ],
+  },
+}) + '\\n')
+
+process.stdout.write(JSON.stringify({
+  type: 'result',
+  result: '最终回复',
+}) + '\\n')
+
+setInterval(() => {}, 1000)
+`
+
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 })
+
+  if (process.platform !== 'win32') {
+    return scriptPath
+  }
+
+  const cmdPath = path.join(tempDir, 'fake-claude-hang.cmd')
+  fs.writeFileSync(cmdPath, '@echo off\r\nnode "%~dp0fake-claude-hang.js" %*\r\n')
+  return cmdPath
+}
+
 function createFakeOpenCodeBinary(tempDir) {
   const scriptPath = path.join(tempDir, process.platform === 'win32' ? 'fake-opencode.js' : 'fake-opencode')
   const script = `#!/usr/bin/env node
@@ -377,6 +414,36 @@ test('Codex / Claude Code / OpenCode runner 会产出兼容的核心事件结构
       assertRunnerContract(codexResult, 'thread-contract-1')
       assertRunnerContract(claudeResult, 'thread-contract-1')
       assertRunnerContract(openCodeResult, 'thread-contract-1')
+    }
+  )
+})
+
+test('Claude Code runner 在 result 后进程不退出时会按 grace timeout 完成', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-runner-claude-hang-'))
+  const fakeClaudeBin = createHangingFakeClaudeBinary(tempDir)
+
+  await withEnv(
+    {
+      CLAUDE_CODE_BIN: fakeClaudeBin,
+      PROMPTX_CLAUDE_RESULT_EXIT_GRACE_MS: '30',
+      PROMPTX_CLAUDE_RESULT_FORCE_STOP_GRACE_MS: '30',
+    },
+    async () => {
+      const { streamPromptToClaudeCodeSession } = await importFreshRunnerModules()
+      const result = await collectRunnerContractEvents(streamPromptToClaudeCodeSession)
+
+      assert.deepEqual(result.result, {
+        sessionId: 'session-1',
+        threadId: 'thread-contract-1',
+        message: '最终回复',
+      })
+      assertOrderedSubsequence(projectRunnerContractPhases(result.events), [
+        'status',
+        'thread.started',
+        'agent_message',
+        'turn.completed',
+        'completed',
+      ])
     }
   )
 })

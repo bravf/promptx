@@ -21,6 +21,14 @@ import { createManagedSpawnOptions, forceStopChildProcess } from '../processCont
 const CLAUDE_CODE_BIN = process.env.CLAUDE_CODE_BIN || 'claude'
 const CLAUDE_DEFAULT_ARGS = ['--dangerously-skip-permissions']
 const RESOLVED_CLAUDE_CODE_BIN = resolveClaudeCodeBinary()
+const CLAUDE_RESULT_EXIT_GRACE_MS = Math.max(
+  0,
+  Number(process.env.PROMPTX_CLAUDE_RESULT_EXIT_GRACE_MS) || 3000
+)
+const CLAUDE_RESULT_FORCE_STOP_GRACE_MS = Math.max(
+  200,
+  Number(process.env.PROMPTX_CLAUDE_RESULT_FORCE_STOP_GRACE_MS) || 1000
+)
 
 function resolveClaudeCodeBinary() {
   if (process.platform !== 'win32') {
@@ -798,7 +806,59 @@ export function streamPromptToClaudeCodeSession(sessionInput, prompt, callbacks 
   let finalSessionId = String(session.engineSessionId || session.engineThreadId || session.codexThreadId || '').trim()
   let fatalClaudeErrorMessage = ''
   let fatalClaudeErrorTriggered = false
+  let resultExitGraceTimer = null
+  let settled = false
+  let resolveResult = null
+  let rejectResult = null
   const normalizationState = createClaudeNormalizationState()
+
+  const clearResultExitGraceTimer = () => {
+    if (resultExitGraceTimer) {
+      clearTimeout(resultExitGraceTimer)
+      resultExitGraceTimer = null
+    }
+  }
+
+  const settleCompleted = (options = {}) => {
+    if (settled) {
+      return
+    }
+
+    settled = true
+    clearResultExitGraceTimer()
+    onEvent(createCompletedEnvelopeEvent(finalMessage))
+    resolveResult?.({
+      sessionId: session.id,
+      threadId: finalSessionId,
+      message: finalMessage,
+    })
+
+    if (options.stopChild && child.exitCode === null && child.signalCode === null) {
+      forceStopChildProcess(child, { graceMs: CLAUDE_RESULT_FORCE_STOP_GRACE_MS })
+    }
+  }
+
+  const settleError = (error) => {
+    if (settled) {
+      return
+    }
+
+    settled = true
+    clearResultExitGraceTimer()
+    rejectResult?.(error)
+  }
+
+  const scheduleResultExitGrace = () => {
+    if (settled || resultExitGraceTimer || CLAUDE_RESULT_EXIT_GRACE_MS <= 0) {
+      return
+    }
+
+    resultExitGraceTimer = setTimeout(() => {
+      resultExitGraceTimer = null
+      settleCompleted({ stopChild: true })
+    }, CLAUDE_RESULT_EXIT_GRACE_MS)
+    resultExitGraceTimer.unref?.()
+  }
 
   const rememberSessionId = (sessionId) => {
     const value = String(sessionId || '').trim()
@@ -836,6 +896,7 @@ export function streamPromptToClaudeCodeSession(sessionInput, prompt, callbacks 
 
     if (String(event?.type || '').trim().toLowerCase() === 'result') {
       finalMessage = extractClaudeResultText(event) || finalMessage
+      scheduleResultExitGrace()
     }
   }
 
@@ -857,11 +918,18 @@ export function streamPromptToClaudeCodeSession(sessionInput, prompt, callbacks 
   })
 
   const result = new Promise((resolve, reject) => {
+    resolveResult = resolve
+    rejectResult = reject
+
     child.on('error', (error) => {
-      reject(normalizeSpawnError(error))
+      settleError(normalizeSpawnError(error))
     })
 
     child.on('close', (code) => {
+      if (settled) {
+        return
+      }
+
       flushBufferedText(stdoutBuffer).forEach(emitClaudeJsonLine)
       flushBufferedText(stderrBuffer).forEach((line) => {
         lastStderrLine = line
@@ -870,17 +938,11 @@ export function streamPromptToClaudeCodeSession(sessionInput, prompt, callbacks 
 
       if (code !== 0) {
         const detail = fatalClaudeErrorMessage || lastStderrLine || 'Claude Code 执行失败。'
-        reject(new Error(detail))
+        settleError(new Error(detail))
         return
       }
 
-      onEvent(createCompletedEnvelopeEvent(finalMessage))
-
-      resolve({
-        sessionId: session.id,
-        threadId: finalSessionId,
-        message: finalMessage,
-      })
+      settleCompleted()
     })
   })
 
