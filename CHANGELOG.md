@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.12
+
+- 修复全局 npm 安装后 `promptx start` 启动失败的问题：server / runner 运行时代码不再通过 workspace 裸包名加载 `@promptx/shared`，改为使用发布包内可解析的相对路径，避免 `ERR_MODULE_NOT_FOUND`。
+- 发布前检查新增运行时 import 扫描，防止 server / runner 再次引入只在 workspace 内可解析的内部包名；同时从发布包中排除 shared 测试文件。
+
 ## 0.2.11
 
 - 优化任务文件更改数的刷新策略：Agent turn 进入终态后延迟 800ms 自动刷新对应任务的 workspace diff summary，避免每次全量查询所有任务；多任务同时结束时合并为一次请求，降低后端 git diff 计算开销。

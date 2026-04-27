@@ -3,7 +3,7 @@ import cors from '@fastify/cors'
 import { createRunManager } from './runManager.js'
 import { assertInternalRequest } from './internalAuth.js'
 import { createServerClient } from './serverClient.js'
-import { createFastifyLoggerOptions } from '@promptx/shared/dailyLogStream'
+import { createFastifyLoggerOptions } from '../../../packages/shared/src/dailyLogStream.js'
 
 const app = Fastify({ logger: createFastifyLoggerOptions({ logName: 'runner' }) })
 const port = Math.max(1, Number(process.env.PROMPTX_RUNNER_PORT || process.env.RUNNER_PORT || 3002))

@@ -88,7 +88,7 @@ import { getApiErrorPayload } from './apiErrors.js'
 import { registerWebAppRoutes } from './webAppRoutes.js'
 import { createTempFilePath, normalizeUploadFileName } from './upload.js'
 import { importPdfBlocks } from './pdf.js'
-import { createFastifyLoggerOptions } from '@promptx/shared/dailyLogStream'
+import { createFastifyLoggerOptions } from '../../../packages/shared/src/dailyLogStream.js'
 
 const app = Fastify({ logger: createFastifyLoggerOptions({ logName: 'server' }) })
 const port = Number(process.env.PORT || 3000)

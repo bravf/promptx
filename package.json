@@ -1,6 +1,6 @@
 {
   "name": "@muyichengshayu/promptx",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "PromptX 本机 AI 协作工作台",
   "license": "Apache-2.0",
   "type": "module",
@@ -15,6 +15,7 @@
     "!apps/runner/src/**/*.test.js",
     "apps/web/dist",
     "packages/shared/src",
+    "!packages/shared/src/**/*.test.js",
     "scripts/doctor.mjs",
     "scripts/relay.mjs",
     "scripts/relay-service.mjs",
@@ -45,6 +46,7 @@
     "doctor": "node scripts/doctor.mjs",
     "relay:start": "node scripts/relay.mjs",
     "release:check": "node scripts/release.mjs check",
+    "release:check:imports": "node scripts/check-package-runtime-imports.mjs",
     "release": "node scripts/release.mjs publish",
     "prepack": "pnpm build",
     "pack:dry": "npm pack --dry-run",
