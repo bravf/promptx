@@ -38,7 +38,7 @@ const emit = defineEmits(['close', 'select'])
 const { t } = useI18n()
 
 const homePath = ref('')
-const rootNode = ref(null)
+const rootNodes = ref([])
 const treeLoading = ref(false)
 const treeError = ref('')
 const searchLoading = ref(false)
@@ -54,10 +54,11 @@ let searchRequestId = 0
 let searchAbortController = null
 const itemRefs = new Map()
 
-const treeItems = computed(() => flattenTreeNodes(rootNode.value ? [rootNode.value] : []))
+const treeItems = computed(() => flattenTreeNodes(rootNodes.value))
 const normalizedQuery = computed(() => String(query.value || '').trim())
 const isQueryReady = computed(() => normalizedQuery.value.length >= WORKSPACE_SEARCH_MIN_QUERY_LENGTH)
 const isSearchMode = computed(() => Boolean(normalizedQuery.value))
+const activeSearchRootPath = computed(() => findContainingRootPath(selectedPath.value) || homePath.value)
 const visibleItems = computed(() => (isSearchMode.value ? searchResults.value : treeItems.value))
 const visibleItemsSignature = computed(() => visibleItems.value
   .map((item) => {
@@ -99,7 +100,12 @@ function pathStartsWith(targetPath = '', basePath = '') {
     return false
   }
 
-  return target === base || target.startsWith(`${base}/`)
+  if (base === '/' && target !== '/') {
+    return false
+  }
+
+  const basePrefix = base.endsWith('/') ? base : `${base}/`
+  return target === base || target.startsWith(basePrefix)
 }
 
 function joinPath(basePath = '', segment = '') {
@@ -139,7 +145,8 @@ function getRelativeSegments(basePath = '', targetPath = '') {
 
 function getParentPath(pathValue = '') {
   const raw = String(pathValue || '').trim()
-  if (!raw || normalizePathForCompare(raw) === normalizePathForCompare(homePath.value)) {
+  const rootPath = findContainingRootPath(raw)
+  if (!raw || !rootPath || normalizePathForCompare(raw) === normalizePathForCompare(rootPath)) {
     return ''
   }
 
@@ -153,7 +160,7 @@ function getParentPath(pathValue = '') {
       return ''
     }
     const parent = trimmed.slice(0, index).replace(/\//g, '\\')
-    return pathStartsWith(parent, homePath.value) ? parent : ''
+    return pathStartsWith(parent, rootPath) ? parent : ''
   }
 
   const trimmed = normalized.replace(/\/+$/, '')
@@ -162,7 +169,21 @@ function getParentPath(pathValue = '') {
     return ''
   }
   const parent = trimmed.slice(0, index) || '/'
-  return pathStartsWith(parent, homePath.value) ? parent : ''
+  return pathStartsWith(parent, rootPath) ? parent : ''
+}
+
+function findContainingRootPath(pathValue = '') {
+  const value = String(pathValue || '').trim()
+  if (!value) {
+    return ''
+  }
+
+  const matches = rootNodes.value
+    .map((node) => String(node?.path || '').trim())
+    .filter((rootPath) => rootPath && pathStartsWith(value, rootPath))
+    .sort((left, right) => normalizePathForCompare(right).length - normalizePathForCompare(left).length)
+
+  return matches[0] || ''
 }
 
 function getDisplayName(item) {
@@ -260,9 +281,7 @@ function flattenTreeNodes(nodes = [], output = []) {
 }
 
 function refreshTree() {
-  if (rootNode.value) {
-    rootNode.value = { ...rootNode.value }
-  }
+  rootNodes.value = [...rootNodes.value]
 }
 
 function clearSearchRequest() {
@@ -276,7 +295,7 @@ function clearSearchRequest() {
   }
 }
 
-function findTreeNode(targetPath, nodes = rootNode.value ? [rootNode.value] : []) {
+function findTreeNode(targetPath, nodes = rootNodes.value) {
   const compareKey = normalizePathForCompare(targetPath)
   if (!compareKey) {
     return null
@@ -547,20 +566,36 @@ async function loadHomeRoot() {
       limit: 240,
     })
     homePath.value = String(payload.path || '')
-    rootNode.value = createTreeNode({
-      name: getRootDisplayName(payload.path || ''),
-      path: String(payload.path || ''),
-      type: 'directory',
-      hasChildren: true,
-      isHomeRoot: true,
-    }, 0)
-    rootNode.value.children = (payload.items || []).map((item) => createTreeNode(item, 1))
-    rootNode.value.loaded = true
-    rootNode.value.expanded = true
-    updateSelectedDirectory(rootNode.value)
+    const rootEntries = Array.isArray(payload.roots) && payload.roots.length
+      ? payload.roots
+      : [{
+          name: getRootDisplayName(payload.path || ''),
+          path: String(payload.path || ''),
+          type: 'directory',
+          hasChildren: true,
+          isRoot: true,
+        }]
+    const homeKey = normalizePathForCompare(payload.path || '')
+    const nextRootNodes = rootEntries.map((entry) => {
+      const node = createTreeNode({
+        ...entry,
+        isHomeRoot: normalizePathForCompare(entry.path || '') === homeKey,
+      }, 0)
+
+      if (node.isHomeRoot) {
+        node.children = (payload.items || []).map((item) => createTreeNode(item, 1))
+        node.loaded = true
+        node.expanded = true
+      }
+
+      return node
+    })
+
+    rootNodes.value = nextRootNodes
+    updateSelectedDirectory(nextRootNodes.find((node) => node.isHomeRoot) || nextRootNodes[0])
   } catch (err) {
     treeError.value = err.message || t('directoryPicker.treeLoadFailed')
-    rootNode.value = null
+    rootNodes.value = []
     homePath.value = ''
   } finally {
     treeLoading.value = false
@@ -569,18 +604,19 @@ async function loadHomeRoot() {
 
 async function expandToPath(targetPath = '') {
   const normalizedTarget = String(targetPath || '').trim()
-  if (!normalizedTarget || !homePath.value || !pathStartsWith(normalizedTarget, homePath.value)) {
+  const rootPath = findContainingRootPath(normalizedTarget)
+  if (!normalizedTarget || !rootPath) {
     return
   }
 
-  let node = rootNode.value
+  let node = findTreeNode(rootPath)
   if (!node) {
     return
   }
 
   updateSelectedDirectory(node)
 
-  const segments = getRelativeSegments(homePath.value, normalizedTarget)
+  const segments = getRelativeSegments(rootPath, normalizedTarget)
   for (const segment of segments) {
     await loadDirectoryNode(node)
     node.expanded = true
@@ -604,7 +640,7 @@ async function initializePicker() {
   await loadHomeRoot()
 
   const targetPath = String(props.initialPath || '').trim()
-  if (targetPath && pathStartsWith(targetPath, homePath.value)) {
+  if (targetPath && findContainingRootPath(targetPath)) {
     await expandToPath(targetPath)
   }
 }
@@ -645,7 +681,7 @@ async function refreshSearch() {
   const requestId = searchRequestId
   clearSearchRequest()
 
-  if (!props.open || !keyword || !homePath.value || !isQueryReady.value) {
+  if (!props.open || !keyword || !activeSearchRootPath.value || !isQueryReady.value) {
     searchLoading.value = false
     searchError.value = ''
     searchResults.value = []
@@ -659,7 +695,7 @@ async function refreshSearch() {
 
   try {
     const payload = await searchCodexDirectories(keyword, {
-      path: homePath.value,
+      path: activeSearchRootPath.value,
       limit: 80,
       signal: searchAbortController.signal,
     })

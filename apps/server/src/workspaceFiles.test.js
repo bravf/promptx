@@ -17,10 +17,27 @@ test('listDirectoryPickerTree returns filesystem roots when path is empty', () =
   const payload = listDirectoryPickerTree()
 
   assert.equal(payload.path, path.resolve(os.homedir()))
-  assert.equal(payload.parentPath, '')
+  assert.equal(payload.parentPath, path.dirname(path.resolve(os.homedir())))
   assert.equal(Array.isArray(payload.items), true)
+  assert.equal(Array.isArray(payload.roots), true)
+  assert.equal(payload.roots[0]?.path, path.resolve(os.homedir()))
+  assert.equal(payload.roots[0]?.type, 'directory')
+  assert.equal(typeof payload.roots[0]?.name, 'string')
+  assert.equal(Boolean(payload.roots[0]?.name), true)
   assert.equal(payload.items.length > 0, true)
   assert.equal(payload.items.every((item) => item.type === 'directory'), true)
+})
+
+test('listDirectoryPickerTree returns parentPath for nested paths', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-dir-picker-parent-'))
+  const childDir = path.join(tempDir, 'project-a')
+
+  fs.mkdirSync(childDir)
+
+  const payload = listDirectoryPickerTree({ path: childDir })
+
+  assert.equal(payload.path, childDir)
+  assert.equal(payload.parentPath, tempDir)
 })
 
 test('listDirectoryPickerTree lists child directories and excludes files', () => {

@@ -319,6 +319,40 @@ function getDirectoryPickerHomePath() {
   return path.resolve(os.homedir())
 }
 
+function isReadableDirectory(directoryPath = '') {
+  try {
+    const stats = fs.statSync(directoryPath)
+    return stats.isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function getDirectoryPickerRootItems(homePath = getDirectoryPickerHomePath()) {
+  const roots = [createDirectoryPickerItem(homePath)]
+
+  if (process.platform !== 'win32') {
+    return roots
+  }
+
+  ;['c', 'd', 'e', 'f'].forEach((driveLetter) => {
+    const drivePath = `${driveLetter.toUpperCase()}:\\`
+    if (!isReadableDirectory(drivePath)) {
+      return
+    }
+
+    const normalizedHomePath = path.resolve(homePath).toLowerCase()
+    const normalizedDrivePath = path.resolve(drivePath).toLowerCase()
+    if (normalizedHomePath === normalizedDrivePath) {
+      return
+    }
+
+    roots.push(createDirectoryPickerItem(drivePath, `${driveLetter.toUpperCase()} 盘`))
+  })
+
+  return roots
+}
+
 function normalizeDirectoryPickerPath(input = '') {
   const value = String(input || '').trim()
   if (!value) {
@@ -992,6 +1026,7 @@ export function readWorkspaceFileContent(workspacePath, options = {}) {
 }
 
 export function listDirectoryPickerTree(options = {}) {
+  const isRootRequest = !String(options.path || '').trim()
   const targetPath = normalizeDirectoryPickerPath(options.path) || getDirectoryPickerHomePath()
 
   const limit = clampLimit(options.limit, DIRECTORY_PICKER_LIMIT, 600)
@@ -1002,7 +1037,8 @@ export function listDirectoryPickerTree(options = {}) {
 
   return {
     path: targetPath,
-    parentPath: '',
+    parentPath: getDirectoryParentPath(targetPath),
+    roots: isRootRequest ? getDirectoryPickerRootItems(targetPath) : undefined,
     items: entries.slice(0, limit),
     truncated: entries.length > limit,
   }
