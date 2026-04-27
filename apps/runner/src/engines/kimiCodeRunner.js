@@ -162,30 +162,46 @@ function stringifyKimiToolResultContent(value) {
   }
 }
 
+function mapKimiToolNameForDisplay(name = '') {
+  const normalized = String(name || '').trim().toLowerCase()
+  const aliasMap = {
+    readfile: 'read',
+    writefile: 'write',
+    editfile: 'edit',
+    search: 'search',
+    shell: 'shell',
+    settodolist: 'todo',
+  }
+  return aliasMap[normalized] || normalized || 'kimi tool'
+}
+
 function buildKimiToolCommand(name = '', input = {}) {
-  const toolName = String(name || 'Kimi tool').trim() || 'Kimi tool'
+  const displayName = mapKimiToolNameForDisplay(name)
   if (!input || typeof input !== 'object') {
-    return toolName
+    return displayName
   }
 
   const command = String(input.command || '').trim()
   if (command) {
-    return `${toolName}: ${command}`
+    return `${displayName}: ${command}`
   }
 
   const singleValueKeys = ['file_path', 'path', 'pattern', 'query', 'url', 'description']
   for (const key of singleValueKeys) {
     const value = String(input[key] || '').trim()
     if (value) {
-      return `${toolName}: ${value}`
+      return `${displayName}: ${value}`
     }
   }
 
   try {
     const compact = JSON.stringify(input)
-    return compact.length <= 240 ? `${toolName}: ${compact}` : `${toolName}: ${compact.slice(0, 237)}...`
+    if (compact === '{}') {
+      return displayName
+    }
+    return compact.length <= 240 ? `${displayName}: ${compact}` : `${displayName}: ${compact.slice(0, 237)}...`
   } catch {
-    return toolName
+    return displayName
   }
 }
 
@@ -296,12 +312,18 @@ export function normalizeKimiEvents(event = {}, state = createKimiNormalizationS
     toolCalls.forEach((toolCall) => {
       const toolUseId = String(toolCall?.id || '').trim()
       const name = String(toolCall?.function?.name || toolCall?.name || 'Kimi tool').trim() || 'Kimi tool'
-      const argsText = toolCall?.function?.arguments || toolCall?.arguments || '{}'
       let parsedArgs = {}
-      try {
-        parsedArgs = JSON.parse(argsText)
-      } catch {
-        parsedArgs = {}
+      const rawArgs = toolCall?.function?.arguments ?? toolCall?.arguments
+      if (rawArgs != null) {
+        if (typeof rawArgs === 'string') {
+          try {
+            parsedArgs = JSON.parse(rawArgs)
+          } catch {
+            parsedArgs = {}
+          }
+        } else if (typeof rawArgs === 'object') {
+          parsedArgs = rawArgs
+        }
       }
       const command = buildKimiToolCommand(name, parsedArgs)
       const isTodoTool = isKimiTodoToolName(name)
@@ -446,6 +468,7 @@ export function streamPromptToKimiCodeSession(sessionInput, prompt, callbacks = 
 
     finalSessionId = value
     onThreadStarted(value)
+    onEvent(createAgentEventEnvelopeEvent(createThreadStartedEvent(value)))
   }
 
   const emitKimiJsonLine = (line) => {

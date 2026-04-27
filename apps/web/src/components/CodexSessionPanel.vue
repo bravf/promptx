@@ -258,10 +258,6 @@ watch(
 )
 
 function shouldHideSystemEvent(item = {}) {
-  if (item?.kind === 'reasoning') {
-    return true
-  }
-
   const title = String(item?.title || '').trim()
   if (!title) {
     return false
@@ -271,9 +267,7 @@ function shouldHideSystemEvent(item = {}) {
     /^已连接项目：/,
     /^工作目录：/,
     /^项目会话已更新$/,
-    /^Codex 会话已创建$/,
-    /^Claude Code 会话已创建$/,
-    /^OpenCode 会话已创建$/,
+    / 会话已创建$/,
     /^事件: claude\.system$/,
     /^线程 ID:/,
     /^Thread ID:/,

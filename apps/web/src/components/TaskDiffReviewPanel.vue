@@ -180,7 +180,7 @@ watch(diffScope, () => {
               <div class="flex items-start gap-3">
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-xs font-medium text-[var(--theme-textPrimary)]">
-                    {{ formatDateTime(option.startedAt || option.createdAt) }}
+                    {{ formatDateTime(option.startedAt || option.createdAt, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}
                   </div>
                   <div class="theme-muted-text mt-1 text-[11px]">
                     {{ getRunStatusLabel(option) }}
