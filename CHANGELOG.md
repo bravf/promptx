@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.14
+
+- 修复 `Claude Code` 历史 session 在项目路径包含 `.` 时无法匹配的问题：候选发现会优先读取 jsonl 中的真实 `cwd`，并在缺失时用当前工作目录正向编码匹配 Claude projects 目录，避免不可逆 decode 导致 `/Users/foo/.claude` 被误判为 `/Users/foo//claude`。
+- 增强 Claude session 路径匹配的兼容性：支持尾斜杠、Windows 盘符大小写与反斜杠、symlink / realpath 等价路径，并优先扫描当前项目对应目录，避免全局历史文件过多时被扫描上限漏掉。
+- 优化 Claude jsonl 读取策略：大文件现在会安全读取文件头部用于提取 `cwd` 和会话预览，不再因为超过 256KB 就完全跳过。
+- 重构 `Stone Dark` 主题为高对比度冷暖配色，提升工作台、弹窗、列表和状态色在暗色环境下的辨识度。
+
 ## 0.2.13
 
 - 修复 `promptx relay start/restart` 启动失败并提示 `logDir is not defined` 的问题，Relay 后台进程现在会正确拿到日志目录。
