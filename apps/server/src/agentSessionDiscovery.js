@@ -39,6 +39,32 @@ function safeReadFile(filePath = '', maxBytes = MAX_DAT_FILE_SIZE) {
   }
 }
 
+function safeReadFileHead(filePath = '', maxBytes = 256 * 1024) {
+  const stat = safeStat(filePath)
+  if (!stat?.isFile()) {
+    return ''
+  }
+
+  const bytesToRead = Math.min(Math.max(1, Number(maxBytes) || 1), stat.size)
+  const buffer = Buffer.allocUnsafe(bytesToRead)
+  let fd = null
+  try {
+    fd = fs.openSync(filePath, 'r')
+    const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead, 0)
+    return buffer.subarray(0, bytesRead).toString('utf8')
+  } catch {
+    return ''
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd)
+      } catch {
+        // ignore close errors for best-effort discovery
+      }
+    }
+  }
+}
+
 function parseJson(value) {
   const text = normalizeText(value)
   if (!text) {
@@ -288,7 +314,7 @@ function extractMessageText(value, depth = 0) {
 }
 
 function readJsonlPreview(filePath = '') {
-  const content = safeReadFile(filePath, 256 * 1024)
+  const content = safeReadFileHead(filePath, 256 * 1024)
   if (!content) {
     return ''
   }
@@ -312,6 +338,134 @@ function readJsonlPreview(filePath = '') {
   }
 
   return ''
+}
+
+function readClaudeJsonlCwd(filePath = '') {
+  const content = safeReadFileHead(filePath, 256 * 1024)
+  if (!content) {
+    return ''
+  }
+
+  const lines = content.replace(/\r\n/g, '\n').split('\n')
+  for (const line of lines) {
+    const event = parseJson(line)
+    if (!event || typeof event !== 'object') {
+      continue
+    }
+
+    const cwd = normalizeText(event.cwd)
+    if (cwd) {
+      return cwd
+    }
+
+    const message = event.message
+    if (message && typeof message === 'object') {
+      const msgCwd = normalizeText(message.cwd)
+      if (msgCwd) {
+        return msgCwd
+      }
+    }
+  }
+
+  return ''
+}
+
+function normalizeClaudeProjectPathInput(cwd = '') {
+  const value = normalizeText(cwd)
+  if (!value) {
+    return ''
+  }
+
+  const normalized = value.replace(/\\/g, '/')
+  if (normalized.length > 1 && !/^[A-Za-z]:\/$/i.test(normalized)) {
+    return normalized.replace(/\/+$/, '')
+  }
+  return normalized
+}
+
+function getClaudeProjectPathInputs(cwd = '') {
+  const primary = normalizeClaudeProjectPathInput(cwd)
+  if (!primary) {
+    return []
+  }
+
+  const values = [primary]
+  try {
+    const realPath = normalizeClaudeProjectPathInput(fs.realpathSync.native(primary))
+    if (realPath && !values.includes(realPath)) {
+      values.push(realPath)
+    }
+  } catch {
+    // Some candidate paths may not exist locally, especially cross-platform paths.
+  }
+
+  return values
+}
+
+function encodeClaudeProjectPath(cwd = '') {
+  const value = normalizeClaudeProjectPathInput(cwd)
+  if (!value) {
+    return ''
+  }
+
+  return value.replace(/[/:.]/g, '-')
+}
+
+function getClaudeProjectKeysForCwd(cwd = '') {
+  const keys = []
+  getClaudeProjectPathInputs(cwd).forEach((targetPath) => {
+    const key = encodeClaudeProjectPath(targetPath)
+    if (!key || keys.includes(key)) {
+      return
+    }
+    keys.push(key)
+
+    if (/^[A-Za-z]--/.test(key)) {
+      const upperDriveKey = `${key[0].toUpperCase()}${key.slice(1)}`
+      const lowerDriveKey = `${key[0].toLowerCase()}${key.slice(1)}`
+      ;[upperDriveKey, lowerDriveKey].forEach((driveKey) => {
+        if (!keys.includes(driveKey)) {
+          keys.push(driveKey)
+        }
+      })
+    }
+  })
+  return keys
+}
+
+function inferClaudeProjectCwd(projectKey = '', options = {}) {
+  const key = normalizeText(projectKey)
+  const targetPaths = getClaudeProjectPathInputs(options.cwd)
+  if (!key || !targetPaths.length) {
+    return ''
+  }
+
+  const matched = targetPaths.some((targetPath) => {
+    const encodedTarget = encodeClaudeProjectPath(targetPath)
+    const isWindowsPath = /^[A-Za-z]:\//.test(targetPath)
+    return isWindowsPath
+      ? encodedTarget.toLowerCase() === key.toLowerCase()
+      : encodedTarget === key
+  })
+  return matched ? targetPaths[0] : ''
+}
+
+function normalizeClaudeDiscoveredCwd(cwd = '', options = {}) {
+  const discoveredCwd = normalizeClaudeProjectPathInput(cwd)
+  if (!discoveredCwd) {
+    return ''
+  }
+
+  const targetPaths = getClaudeProjectPathInputs(options.cwd)
+  if (!targetPaths.length) {
+    return discoveredCwd
+  }
+
+  const discoveredComparable = normalizeComparablePath(discoveredCwd)
+  const isTargetEquivalent = targetPaths.some((targetPath) => (
+    normalizeComparablePath(targetPath) === discoveredComparable
+  ))
+  return isTargetEquivalent ? targetPaths[0] : discoveredCwd
 }
 
 export function decodeClaudeProjectPath(projectKey = '') {
@@ -338,6 +492,7 @@ export function listKnownClaudeCodeSessions(options = {}) {
   const transcriptDir = path.join(claudeHome, 'transcripts')
   const projectsDir = path.join(claudeHome, 'projects')
   const items = []
+  const seenProjectFiles = new Set()
 
   collectFiles(transcriptDir, {
     maxDepth: 0,
@@ -355,15 +510,19 @@ export function listKnownClaudeCodeSessions(options = {}) {
     })
   })
 
-  collectFiles(projectsDir, {
-    maxDepth: 3,
-    maxFiles: MAX_SCAN_FILES,
-    match: (filePath) => filePath.endsWith('.jsonl'),
-  }).forEach((filePath) => {
+  function addClaudeProjectFile(filePath) {
+    const fileKey = path.resolve(filePath)
+    if (seenProjectFiles.has(fileKey)) {
+      return
+    }
+    seenProjectFiles.add(fileKey)
+
     const stat = safeStat(filePath)
     const relativeParts = path.relative(projectsDir, filePath).split(path.sep).filter(Boolean)
     const projectKey = relativeParts[0] || ''
-    const cwd = decodeClaudeProjectPath(projectKey)
+    const cwd = normalizeClaudeDiscoveredCwd(readClaudeJsonlCwd(filePath), options)
+      || inferClaudeProjectCwd(projectKey, options)
+      || decodeClaudeProjectPath(projectKey)
     const id = path.basename(filePath, '.jsonl')
     items.push({
       id,
@@ -373,7 +532,21 @@ export function listKnownClaudeCodeSessions(options = {}) {
       updatedAt: stat?.mtime,
       source: 'claude_projects',
     })
+  }
+
+  getClaudeProjectKeysForCwd(options.cwd).forEach((targetProjectKey) => {
+    collectFiles(path.join(projectsDir, targetProjectKey), {
+      maxDepth: 2,
+      maxFiles: MAX_SCAN_FILES,
+      match: (filePath) => filePath.endsWith('.jsonl'),
+    }).forEach(addClaudeProjectFile)
   })
+
+  collectFiles(projectsDir, {
+    maxDepth: 3,
+    maxFiles: MAX_SCAN_FILES,
+    match: (filePath) => filePath.endsWith('.jsonl'),
+  }).forEach(addClaudeProjectFile)
 
   return sortAndLimitCandidates(items, options)
 }

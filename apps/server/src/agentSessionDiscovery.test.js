@@ -70,6 +70,392 @@ test('listKnownClaudeCodeSessions merges transcripts and project files', () => {
   }
 })
 
+test('listKnownClaudeCodeSessions reads real cwd from session file when project key contains dots', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-claude-dot-discovery-'))
+  const claudeHome = path.join(tempRoot, '.claude')
+  const projectsDir = path.join(claudeHome, 'projects', '-Users-bravf--claude')
+
+  fs.mkdirSync(projectsDir, { recursive: true })
+
+  const projectPath = path.join(projectsDir, 'ses_dot.jsonl')
+  fs.writeFileSync(
+    projectPath,
+    `${JSON.stringify({ type: 'user', message: { text: '看下配置' }, cwd: '/Users/bravf/.claude' })}
+`
+  )
+
+  const now = new Date('2026-04-13T08:00:00.000Z')
+  fs.utimesSync(projectPath, now, now)
+
+  try {
+    const items = listKnownClaudeCodeSessions({
+      claudeHome,
+      limit: 10,
+      cwd: '/Users/bravf/.claude',
+    })
+
+    assert.equal(items.length, 1)
+    assert.deepEqual(
+      {
+        id: items[0].id,
+        cwd: items[0].cwd,
+        matchedCwd: items[0].matchedCwd,
+      },
+      {
+        id: 'ses_dot',
+        cwd: '/Users/bravf/.claude',
+        matchedCwd: true,
+      }
+    )
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('listKnownClaudeCodeSessions reads cwd from large Claude jsonl files', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-claude-large-discovery-'))
+  const claudeHome = path.join(tempRoot, '.claude')
+  const projectsDir = path.join(claudeHome, 'projects', '-Users-bravf--config')
+
+  fs.mkdirSync(projectsDir, { recursive: true })
+
+  const projectPath = path.join(projectsDir, 'ses_large.jsonl')
+  const firstLine = `${JSON.stringify({ type: 'user', message: { text: '读取大文件历史' }, cwd: '/Users/bravf/.config' })}\n`
+  fs.writeFileSync(projectPath, `${firstLine}${'x'.repeat(300 * 1024)}\n`)
+
+  const now = new Date('2026-04-13T08:00:00.000Z')
+  fs.utimesSync(projectPath, now, now)
+
+  try {
+    const items = listKnownClaudeCodeSessions({
+      claudeHome,
+      limit: 10,
+      cwd: '/Users/bravf/.config',
+    })
+
+    assert.equal(items.length, 1)
+    assert.deepEqual(
+      {
+        id: items[0].id,
+        cwd: items[0].cwd,
+        matchedCwd: items[0].matchedCwd,
+      },
+      {
+        id: 'ses_large',
+        cwd: '/Users/bravf/.config',
+        matchedCwd: true,
+      }
+    )
+    assert.match(items[0].label, /读取大文件历史|config/i)
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('listKnownClaudeCodeSessions matches encoded project key when session file has no cwd', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-claude-encoded-cwd-discovery-'))
+  const claudeHome = path.join(tempRoot, '.claude')
+  const projectsDir = path.join(claudeHome, 'projects', '-Users-bravf--claude')
+
+  fs.mkdirSync(projectsDir, { recursive: true })
+
+  const projectPath = path.join(projectsDir, 'ses_encoded_cwd.jsonl')
+  fs.writeFileSync(projectPath, `${JSON.stringify({ type: 'user', message: { text: '继续之前的任务' } })}\n`)
+
+  const now = new Date('2026-04-13T08:00:00.000Z')
+  fs.utimesSync(projectPath, now, now)
+
+  try {
+    const items = listKnownClaudeCodeSessions({
+      claudeHome,
+      limit: 10,
+      cwd: '/Users/bravf/.claude',
+    })
+
+    assert.equal(items.length, 1)
+    assert.deepEqual(
+      {
+        id: items[0].id,
+        cwd: items[0].cwd,
+        matchedCwd: items[0].matchedCwd,
+      },
+      {
+        id: 'ses_encoded_cwd',
+        cwd: '/Users/bravf/.claude',
+        matchedCwd: true,
+      }
+    )
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('listKnownClaudeCodeSessions matches encoded project key with trailing cwd slash', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-claude-trailing-cwd-discovery-'))
+  const claudeHome = path.join(tempRoot, '.claude')
+  const projectsDir = path.join(claudeHome, 'projects', '-Users-bravf--claude')
+
+  fs.mkdirSync(projectsDir, { recursive: true })
+
+  const projectPath = path.join(projectsDir, 'ses_trailing_cwd.jsonl')
+  fs.writeFileSync(projectPath, `${JSON.stringify({ type: 'user', message: { text: '继续之前的任务' } })}\n`)
+
+  const now = new Date('2026-04-13T08:00:00.000Z')
+  fs.utimesSync(projectPath, now, now)
+
+  try {
+    const items = listKnownClaudeCodeSessions({
+      claudeHome,
+      limit: 10,
+      cwd: '/Users/bravf/.claude/',
+    })
+
+    assert.equal(items.length, 1)
+    assert.deepEqual(
+      {
+        id: items[0].id,
+        cwd: items[0].cwd,
+        matchedCwd: items[0].matchedCwd,
+      },
+      {
+        id: 'ses_trailing_cwd',
+        cwd: '/Users/bravf/.claude',
+        matchedCwd: true,
+      }
+    )
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('listKnownClaudeCodeSessions scans target project before global file limit', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-claude-target-first-discovery-'))
+  const claudeHome = path.join(tempRoot, '.claude')
+  const projectsRoot = path.join(claudeHome, 'projects')
+  const targetDir = path.join(projectsRoot, '-zzzz--claude')
+
+  fs.mkdirSync(targetDir, { recursive: true })
+
+  for (let index = 0; index < 805; index += 1) {
+    const fillerDir = path.join(projectsRoot, `-Users-bravf-code-filler-${String(index).padStart(3, '0')}`)
+    fs.mkdirSync(fillerDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(fillerDir, `ses_filler_${index}.jsonl`),
+      `${JSON.stringify({ type: 'user', message: { text: `无关历史 ${index}` } })}\n`
+    )
+  }
+
+  const projectPath = path.join(targetDir, 'ses_target_first.jsonl')
+  fs.writeFileSync(projectPath, `${JSON.stringify({ type: 'user', message: { text: '目标项目历史' } })}\n`)
+
+  const now = new Date('2026-04-13T08:00:00.000Z')
+  fs.utimesSync(projectPath, now, now)
+
+  try {
+    const items = listKnownClaudeCodeSessions({
+      claudeHome,
+      limit: 10,
+      cwd: '/zzzz/.claude',
+    })
+
+    assert.equal(items[0]?.id, 'ses_target_first')
+    assert.equal(items[0]?.cwd, '/zzzz/.claude')
+    assert.equal(items[0]?.matchedCwd, true)
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('listKnownClaudeCodeSessions matches realpath project key for symlink cwd', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-claude-realpath-discovery-'))
+  const claudeHome = path.join(tempRoot, '.claude')
+  const realCwd = path.join(tempRoot, 'real-workspace')
+  const linkCwd = path.join(tempRoot, 'link-workspace')
+
+  fs.mkdirSync(realCwd, { recursive: true })
+  fs.symlinkSync(realCwd, linkCwd, 'dir')
+
+  const realProjectKey = fs.realpathSync.native(realCwd).replace(/[/:.]/g, '-')
+  const projectsDir = path.join(claudeHome, 'projects', realProjectKey)
+  fs.mkdirSync(projectsDir, { recursive: true })
+
+  const projectPath = path.join(projectsDir, 'ses_realpath_cwd.jsonl')
+  fs.writeFileSync(projectPath, `${JSON.stringify({ type: 'user', message: { text: 'symlink 历史' } })}\n`)
+
+  const now = new Date('2026-04-13T08:00:00.000Z')
+  fs.utimesSync(projectPath, now, now)
+
+  try {
+    const items = listKnownClaudeCodeSessions({
+      claudeHome,
+      limit: 10,
+      cwd: linkCwd,
+    })
+
+    assert.equal(items[0]?.id, 'ses_realpath_cwd')
+    assert.equal(items[0]?.cwd, linkCwd)
+    assert.equal(items[0]?.matchedCwd, true)
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('listKnownClaudeCodeSessions treats jsonl realpath cwd as matching symlink cwd', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-claude-jsonl-realpath-discovery-'))
+  const claudeHome = path.join(tempRoot, '.claude')
+  const realCwd = path.join(tempRoot, 'real-workspace')
+  const linkCwd = path.join(tempRoot, 'link-workspace')
+
+  fs.mkdirSync(realCwd, { recursive: true })
+  fs.symlinkSync(realCwd, linkCwd, 'dir')
+
+  const nativeRealCwd = fs.realpathSync.native(realCwd)
+  const realProjectKey = nativeRealCwd.replace(/[/:.]/g, '-')
+  const projectsDir = path.join(claudeHome, 'projects', realProjectKey)
+  fs.mkdirSync(projectsDir, { recursive: true })
+
+  const projectPath = path.join(projectsDir, 'ses_jsonl_realpath_cwd.jsonl')
+  fs.writeFileSync(
+    projectPath,
+    `${JSON.stringify({ type: 'user', message: { text: 'jsonl realpath 历史' }, cwd: nativeRealCwd })}\n`
+  )
+
+  const now = new Date('2026-04-13T08:00:00.000Z')
+  fs.utimesSync(projectPath, now, now)
+
+  try {
+    const items = listKnownClaudeCodeSessions({
+      claudeHome,
+      limit: 10,
+      cwd: linkCwd,
+    })
+
+    assert.equal(items[0]?.id, 'ses_jsonl_realpath_cwd')
+    assert.equal(items[0]?.cwd, linkCwd)
+    assert.equal(items[0]?.matchedCwd, true)
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('listKnownClaudeCodeSessions matches Windows encoded project key case-insensitively', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-claude-windows-cwd-discovery-'))
+  const claudeHome = path.join(tempRoot, '.claude')
+  const projectsDir = path.join(claudeHome, 'projects', 'C--Users-bravf--claude')
+
+  fs.mkdirSync(projectsDir, { recursive: true })
+
+  const projectPath = path.join(projectsDir, 'ses_windows_cwd.jsonl')
+  fs.writeFileSync(projectPath, `${JSON.stringify({ type: 'user', message: { text: '继续 Windows 任务' } })}\n`)
+
+  const now = new Date('2026-04-13T08:00:00.000Z')
+  fs.utimesSync(projectPath, now, now)
+
+  try {
+    const items = listKnownClaudeCodeSessions({
+      claudeHome,
+      limit: 10,
+      cwd: 'c:\\Users\\bravf\\.claude\\',
+    })
+
+    assert.equal(items.length, 1)
+    assert.deepEqual(
+      {
+        id: items[0].id,
+        cwd: items[0].cwd,
+        matchedCwd: items[0].matchedCwd,
+      },
+      {
+        id: 'ses_windows_cwd',
+        cwd: 'c:/Users/bravf/.claude',
+        matchedCwd: true,
+      }
+    )
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('listKnownClaudeCodeSessions scans uppercase Windows project key before global file limit', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-claude-windows-target-first-discovery-'))
+  const claudeHome = path.join(tempRoot, '.claude')
+  const projectsRoot = path.join(claudeHome, 'projects')
+  const targetDir = path.join(projectsRoot, 'C--Users-bravf--claude')
+
+  fs.mkdirSync(targetDir, { recursive: true })
+
+  for (let index = 0; index < 805; index += 1) {
+    const fillerDir = path.join(projectsRoot, `A--Users-bravf-code-filler-${String(index).padStart(3, '0')}`)
+    fs.mkdirSync(fillerDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(fillerDir, `ses_windows_filler_${index}.jsonl`),
+      `${JSON.stringify({ type: 'user', message: { text: `无关 Windows 历史 ${index}` } })}\n`
+    )
+  }
+
+  const projectPath = path.join(targetDir, 'ses_windows_target_first.jsonl')
+  fs.writeFileSync(projectPath, `${JSON.stringify({ type: 'user', message: { text: 'Windows 目标项目历史' } })}\n`)
+
+  const now = new Date('2026-04-13T08:00:00.000Z')
+  fs.utimesSync(projectPath, now, now)
+
+  try {
+    const items = listKnownClaudeCodeSessions({
+      claudeHome,
+      limit: 10,
+      cwd: 'c:\\Users\\bravf\\.claude\\',
+    })
+
+    assert.equal(items[0]?.id, 'ses_windows_target_first')
+    assert.equal(items[0]?.cwd, 'c:/Users/bravf/.claude')
+    assert.equal(items[0]?.matchedCwd, true)
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('listKnownClaudeCodeSessions reads cwd from message.cwd when top-level cwd is missing', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-claude-msgcwd-discovery-'))
+  const claudeHome = path.join(tempRoot, '.claude')
+  const projectsDir = path.join(claudeHome, 'projects', '-Users-bravf--config')
+
+  fs.mkdirSync(projectsDir, { recursive: true })
+
+  const projectPath = path.join(projectsDir, 'ses_msgcwd.jsonl')
+  fs.writeFileSync(
+    projectPath,
+    `${JSON.stringify({ type: 'user', message: { text: '编辑配置', cwd: '/Users/bravf/.config' } })}
+`
+  )
+
+  const now = new Date('2026-04-13T08:00:00.000Z')
+  fs.utimesSync(projectPath, now, now)
+
+  try {
+    const items = listKnownClaudeCodeSessions({
+      claudeHome,
+      limit: 10,
+      cwd: '/Users/bravf/.config',
+    })
+
+    assert.equal(items.length, 1)
+    assert.deepEqual(
+      {
+        id: items[0].id,
+        cwd: items[0].cwd,
+        matchedCwd: items[0].matchedCwd,
+      },
+      {
+        id: 'ses_msgcwd',
+        cwd: '/Users/bravf/.config',
+        matchedCwd: true,
+      }
+    )
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
 test('listKnownOpenCodeSessions discovers sessions from desktop dat files', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-opencode-discovery-'))
   const dataDir = path.join(tempRoot, 'ai.opencode.desktop')
