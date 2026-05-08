@@ -149,6 +149,7 @@ const COLLAPSED_PREVIEW_CLASS = 'max-h-40 overflow-hidden'
 const managerDialogRef = ref(null)
 const showSourceBrowser = ref(false)
 const sourceBrowserSessionId = ref('')
+const sourceBrowserInitialSearchQuery = ref('')
 const previewPromptImageUrl = ref('')
 const SELECTED_AGENT_FILTER_STORAGE_KEY = 'promptx:selected-agent-filter-map'
 
@@ -400,14 +401,14 @@ function insertTurnPrompt(turn = {}) {
 async function copyResponseCode(event) {
   const button = event?.target?.closest?.('[data-copy-code="1"]')
   if (!button) {
-    return
+    return false
   }
 
   const block = button.closest('.codex-code-block')
   const codeElement = block?.querySelector?.('pre code')
   const text = String(codeElement?.textContent || '').replace(/\u200b/g, '')
   if (!text) {
-    return
+    return false
   }
 
   event.preventDefault?.()
@@ -419,12 +420,116 @@ async function copyResponseCode(event) {
       message: t('sessionPanel.codeCopied'),
       type: 'success',
     })
+    return true
   } catch {
     emit('toast', {
       message: t('errors.requestFailed'),
       type: 'warning',
     })
+    // 返回值表示点击事件已被消费，复制是否成功由 toast 表达。
+    return true
   }
+}
+
+function stripPathLineSuffix(value = '') {
+  return String(value || '').trim().split(/[?#]/)[0].replace(/:(\d+)(?::\d+)?$/, '')
+}
+
+function decodePathValue(value = '') {
+  const text = String(value || '').trim()
+  try {
+    return decodeURI(text)
+  } catch {
+    return text
+  }
+}
+
+function normalizeSlashPath(value = '') {
+  return decodePathValue(value)
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/')
+    .trim()
+}
+
+function normalizeRelativeProjectPath(value = '') {
+  const parts = normalizeSlashPath(value)
+    .replace(/^\.\//, '')
+    .split('/')
+    .filter(Boolean)
+  if (!parts.length || parts.some((part) => part === '.' || part === '..')) {
+    return ''
+  }
+  return parts.join('/')
+}
+
+function getHrefPathCandidate(rawHref = '') {
+  const raw = String(rawHref || '').trim()
+  if (!raw || raw.startsWith('#') || raw.startsWith('//')) {
+    return ''
+  }
+
+  if (/^(?:https?:|mailto:|tel:|data:|blob:|javascript:)/i.test(raw)) {
+    try {
+      const parsed = new URL(raw)
+      if (parsed.origin !== window.location.origin) {
+        return ''
+      }
+      return stripPathLineSuffix(parsed.pathname)
+    } catch {
+      return ''
+    }
+  }
+
+  return stripPathLineSuffix(raw)
+}
+
+function resolveProjectFileSearchQuery(rawHref = '') {
+  const targetSession = resolveSourceBrowserSession()
+  const cwd = normalizeSlashPath(targetSession?.cwd || '').replace(/\/$/, '')
+  const candidate = normalizeSlashPath(getHrefPathCandidate(rawHref))
+  if (!cwd || !candidate) {
+    return ''
+  }
+
+  if (candidate.startsWith('/')) {
+    if (candidate === cwd || !candidate.startsWith(`${cwd}/`)) {
+      return ''
+    }
+    return normalizeRelativeProjectPath(candidate.slice(cwd.length + 1))
+  }
+
+  return normalizeRelativeProjectPath(candidate)
+}
+
+function handleResponseLocalFileLink(event) {
+  const anchor = event?.target?.closest?.('.codex-markdown a[href]')
+  if (!anchor) {
+    return false
+  }
+
+  const searchQuery = resolveProjectFileSearchQuery(anchor.getAttribute('href') || '')
+  if (!searchQuery) {
+    return false
+  }
+
+  event.preventDefault?.()
+  event.stopPropagation?.()
+
+  if (!openSourceBrowser(null, { searchQuery })) {
+    emit('toast', {
+      message: t('sourceBrowser.noProject'),
+      type: 'warning',
+    })
+  }
+  return true
+}
+
+function handleResponseClick(event) {
+  if (handleResponseLocalFileLink(event)) {
+    return
+  }
+
+  copyResponseCode(event)
 }
 
 function insertSelectedResponseContext() {
@@ -530,13 +635,14 @@ function resolveSourceBrowserSession(candidate = null) {
   return sortedSessions.value[0] || null
 }
 
-function openSourceBrowser(session = null) {
+function openSourceBrowser(session = null, options = {}) {
   const targetSession = resolveSourceBrowserSession(session)
   if (!targetSession?.cwd) {
     return false
   }
 
   sourceBrowserSessionId.value = targetSession.id
+  sourceBrowserInitialSearchQuery.value = String(options.searchQuery || '').trim()
   showSourceBrowser.value = true
   return true
 }
@@ -583,6 +689,7 @@ defineExpose({
     <CodexSessionSourceBrowserDialog
       :open="showSourceBrowser"
       :session="sessions.find((item) => item.id === sourceBrowserSessionId) || null"
+      :initial-search-query="sourceBrowserInitialSearchQuery"
       @insert-code-context="emit('insert-code-context', $event)"
       @close="showSourceBrowser = false"
     />
@@ -887,7 +994,7 @@ defineExpose({
                   class="prose-like codex-markdown"
                   :data-response-selection-root="'1'"
                   @mouseup="handleResponseMouseUp"
-                  @click="copyResponseCode"
+                  @click="handleResponseClick"
                   v-html="renderResponseBody(turn)"
                 />
               </div>

@@ -40,6 +40,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  initialSearchQuery: {
+    type: String,
+    default: '',
+  },
 })
 
 const emit = defineEmits(['close', 'insert-code-context'])
@@ -619,6 +623,20 @@ function focusSearchInput() {
   })
 }
 
+function applyPathSearch(query = '') {
+  const nextQuery = String(query || '').trim()
+  if (!nextQuery) {
+    return false
+  }
+
+  searchMode.value = 'path'
+  resetContentSearchState()
+  searchInput.value = nextQuery
+  pickerProps.query = nextQuery
+  focusSearchInput()
+  return true
+}
+
 function handleEscapeIntent(event) {
   event?.preventDefault?.()
 
@@ -1178,7 +1196,9 @@ watch(
       resetPreviewState()
       resetContentSearchState()
       initializeData()
-      focusSearchInput()
+      if (!applyPathSearch(props.initialSearchQuery)) {
+        focusSearchInput()
+      }
       return
     }
 
@@ -1200,6 +1220,15 @@ watch(
       resetPreviewState()
       resetContentSearchState()
       handleSessionChange()
+    }
+  }
+)
+
+watch(
+  () => props.initialSearchQuery,
+  (value) => {
+    if (props.open) {
+      applyPathSearch(value)
     }
   }
 )
@@ -1274,6 +1303,10 @@ onBeforeUnmount(() => {
   window.getSelection?.()?.removeAllRanges?.()
   clearPreviewLineSelection({ clearBrowserSelection: true })
   clearScheduledPreviewLoad()
+})
+
+defineExpose({
+  applyPathSearch,
 })
 </script>
 
