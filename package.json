@@ -1,6 +1,6 @@
 {
   "name": "@muyichengshayu/promptx",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "PromptX 本机 AI 协作工作台",
   "license": "Apache-2.0",
   "type": "module",

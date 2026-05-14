@@ -1,4 +1,5 @@
 <script setup>
+import { BLOCK_TYPES } from '@promptx/shared'
 import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import {
   ArrowDown,
@@ -371,30 +372,40 @@ async function copyText(text) {
   document.body.removeChild(textarea)
 }
 
-function getTurnPromptContent(turn = {}) {
+function getTurnPromptInsertBlocks(turn = {}) {
   const promptBlocks = Array.isArray(turn?.promptBlocks) ? turn.promptBlocks : []
-  const blockText = promptBlocks
-    .filter((item) => item?.type === 'text' || item?.type === 'imported_text')
-    .map((item) => String(item?.content || '').replace(/\u200b/g, '').trim())
-    .filter(Boolean)
-    .join('\n\n')
+  const insertBlocks = promptBlocks
+    .filter((item) => item?.type === BLOCK_TYPES.TEXT || item?.type === BLOCK_TYPES.IMPORTED_TEXT || item?.type === BLOCK_TYPES.IMAGE)
+    .map((item) => ({
+      type: item.type,
+      content: String(item?.content || '').replace(/\u200b/g, '').trim(),
+      meta: item?.meta ? { ...item.meta } : {},
+    }))
+    .filter((item) => item.content)
 
-  if (blockText) {
-    return blockText
+  if (insertBlocks.length) {
+    return insertBlocks
   }
 
-  return String(turn?.prompt || '').replace(/\u200b/g, '').trim()
+  const fallbackContent = String(turn?.prompt || '').replace(/\u200b/g, '').trim()
+  return fallbackContent
+    ? [{ type: BLOCK_TYPES.TEXT, content: fallbackContent, meta: {} }]
+    : []
+}
+
+function hasInsertableTurnPrompt(turn = {}) {
+  return getTurnPromptInsertBlocks(turn).length > 0
 }
 
 function insertTurnPrompt(turn = {}) {
-  const content = getTurnPromptContent(turn)
-  if (!content) {
+  const blocks = getTurnPromptInsertBlocks(turn)
+  if (!blocks.length) {
     return
   }
 
   emit('insert-code-context', {
     source: 'response',
-    content,
+    blocks,
   })
 }
 
@@ -837,7 +848,7 @@ defineExpose({
                 <span class="font-semibold">{{ getTurnPromptTitle(turn) }}</span>
                 <div class="flex items-center gap-2">
                   <button
-                    v-if="getTurnPromptContent(turn)"
+                    v-if="hasInsertableTurnPrompt(turn)"
                     type="button"
                     class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
                     @click="insertTurnPrompt(turn)"

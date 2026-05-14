@@ -660,9 +660,15 @@ async function insertBlocksIntoEditor(blocks = [], method = 'insertBlocks') {
 
 async function handleInsertCodeContext(context = {}) {
   const source = String(context?.source || '').trim()
+  const blocks = Array.isArray(context?.blocks) ? context.blocks.filter(Boolean) : []
   const responseContent = String(context?.content || '').replace(/\r\n/g, '\n').trim()
 
   if (source === 'response') {
+    if (blocks.length) {
+      await insertBlocksIntoEditor(blocks, 'insertBlocks')
+      return
+    }
+
     if (!responseContent) {
       return
     }
