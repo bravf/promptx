@@ -15,3 +15,8 @@ data
 uploads
 tmp
 .omx/
+apps/android/.gradle
+apps/android/build
+apps/android/app/build
+apps/android/keystore
+apps/android/signing.properties
