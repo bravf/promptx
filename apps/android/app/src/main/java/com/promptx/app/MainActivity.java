@@ -2,6 +2,7 @@ package com.promptx.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -34,16 +35,22 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 public class MainActivity extends Activity {
   private static final String PREFS_NAME = "promptx_android";
   private static final String PREF_URL = "base_url";
+  private static final String PREF_SITES = "sites";
   private static final int FILE_CHOOSER_REQUEST_CODE = 1001;
   private static final long LOAD_TIMEOUT_MS = 10000L;
 
@@ -51,6 +58,7 @@ public class MainActivity extends Activity {
 
   private SharedPreferences preferences;
   private EditText addressInput;
+  private Button siteSwitchButton;
   private ProgressBar progressBar;
   private WebView webView;
   private LinearLayout overlay;
@@ -62,12 +70,14 @@ public class MainActivity extends Activity {
   private String pendingUrl = "";
   private boolean loading = false;
   private boolean hasMainFrameError = false;
+  private boolean shouldPersistNextSuccess = false;
 
   private final Runnable loadTimeoutRunnable = () -> {
     if (!loading) {
       return;
     }
     hasMainFrameError = true;
+    shouldPersistNextSuccess = false;
     loading = false;
     webView.stopLoading();
     setLoading(false);
@@ -154,9 +164,19 @@ public class MainActivity extends Activity {
       return false;
     });
     toolbar.addView(addressInput, new LinearLayout.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT,
-      dp(44)
+      0,
+      dp(44),
+      1
     ));
+
+    siteSwitchButton = new Button(this);
+    siteSwitchButton.setText("▼");
+    siteSwitchButton.setAllCaps(false);
+    siteSwitchButton.setTextSize(13);
+    siteSwitchButton.setOnClickListener((view) -> showSiteSwitcher());
+    LinearLayout.LayoutParams switchParams = new LinearLayout.LayoutParams(dp(44), dp(44));
+    switchParams.setMargins(dp(8), 0, 0, 0);
+    toolbar.addView(siteSwitchButton, switchParams);
 
     progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
     progressBar.setIndeterminate(true);
@@ -267,6 +287,7 @@ public class MainActivity extends Activity {
 
     pendingUrl = normalizedUrl;
     currentUrl = normalizedUrl;
+    shouldPersistNextSuccess = true;
     addressInput.setText(normalizedUrl);
     hideOverlay();
     setLoading(true);
@@ -283,9 +304,19 @@ public class MainActivity extends Activity {
       return;
     }
     currentUrl = normalizedUrl;
-    pendingUrl = "";
-    preferences.edit().putString(PREF_URL, normalizedUrl).apply();
     addressInput.setText(normalizedUrl);
+    if (!shouldPersistNextSuccess) {
+      return;
+    }
+
+    String siteUrl = normalizeUrl(pendingUrl);
+    if (siteUrl.isEmpty()) {
+      siteUrl = normalizedUrl;
+    }
+    pendingUrl = "";
+    shouldPersistNextSuccess = false;
+    preferences.edit().putString(PREF_URL, siteUrl).apply();
+    addSavedSite(siteUrl);
   }
 
   private boolean isInternalWebViewUrl(String url) {
@@ -311,6 +342,152 @@ public class MainActivity extends Activity {
     }
 
     loadFromAddress(true);
+  }
+
+  private List<String> getSavedSites() {
+    String raw = preferences.getString(PREF_SITES, "");
+    Set<String> seen = new LinkedHashSet<>();
+    if (raw != null && !raw.trim().isEmpty()) {
+      String[] parts = raw.split("\\n");
+      for (String part : parts) {
+        String normalizedUrl = normalizeUrl(part);
+        if (!normalizedUrl.isEmpty()) {
+          seen.add(normalizedUrl);
+        }
+      }
+    }
+
+    String savedUrl = normalizeUrl(preferences.getString(PREF_URL, ""));
+    if (!savedUrl.isEmpty()) {
+      seen.add(savedUrl);
+    }
+
+    return new ArrayList<>(seen);
+  }
+
+  private void persistSavedSites(List<String> sites) {
+    Set<String> seen = new LinkedHashSet<>();
+    for (String site : sites) {
+      String normalizedUrl = normalizeUrl(site);
+      if (!normalizedUrl.isEmpty()) {
+        seen.add(normalizedUrl);
+      }
+    }
+    preferences.edit().putString(PREF_SITES, String.join("\n", seen)).apply();
+  }
+
+  private void addSavedSite(String url) {
+    String normalizedUrl = normalizeUrl(url);
+    if (normalizedUrl.isEmpty()) {
+      return;
+    }
+    List<String> sites = getSavedSites();
+    sites.remove(normalizedUrl);
+    sites.add(0, normalizedUrl);
+    persistSavedSites(sites);
+  }
+
+  private void removeSavedSite(String url) {
+    String normalizedUrl = normalizeUrl(url);
+    if (normalizedUrl.isEmpty()) {
+      return;
+    }
+    List<String> sites = getSavedSites();
+    sites.remove(normalizedUrl);
+    persistSavedSites(sites);
+
+    String savedUrl = normalizeUrl(preferences.getString(PREF_URL, ""));
+    if (normalizedUrl.equals(savedUrl)) {
+      if (sites.isEmpty()) {
+        preferences.edit().remove(PREF_URL).apply();
+        addressInput.setText("");
+        webView.loadUrl("about:blank");
+        showWelcomeState();
+      } else {
+        preferences.edit().putString(PREF_URL, sites.get(0)).apply();
+        loadUrl(sites.get(0));
+      }
+    }
+  }
+
+  private void showSiteSwitcher() {
+    hideKeyboard();
+    List<String> sites = getSavedSites();
+    List<String> labels = new ArrayList<>();
+    String activeUrl = normalizeUrl(preferences.getString(PREF_URL, currentUrl));
+    for (String site : sites) {
+      labels.add((site.equals(activeUrl) ? "✓ " : "  ") + getSiteLabel(site));
+    }
+    labels.add("+ 添加站点");
+
+    AlertDialog dialog = new AlertDialog.Builder(this)
+      .setTitle("PromptX 站点")
+      .setItems(labels.toArray(new String[0]), (d, which) -> {
+        if (which >= sites.size()) {
+          d.dismiss();
+          addressInput.postDelayed(this::beginAddSite, 200);
+          return;
+        }
+        String selectedSite = sites.get(which);
+        preferences.edit().putString(PREF_URL, selectedSite).apply();
+        addressInput.setText(selectedSite);
+        loadUrl(selectedSite);
+      })
+      .create();
+
+    dialog.setOnShowListener((d) -> {
+      ListView listView = dialog.getListView();
+      listView.setOnItemLongClickListener((parent, view, position, id) -> {
+        if (position >= sites.size()) {
+          return false;
+        }
+        confirmDeleteSite(sites.get(position));
+        dialog.dismiss();
+        return true;
+      });
+    });
+
+    dialog.show();
+  }
+
+  private void beginAddSite() {
+    addressInput.setText("");
+    addressInput.setHint("输入新的 PromptX 访问地址");
+    addressInput.requestFocus();
+    addressInput.post(() -> {
+      InputMethodManager inputMethodManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+      if (inputMethodManager != null) {
+        inputMethodManager.showSoftInput(addressInput, InputMethodManager.SHOW_IMPLICIT);
+      }
+    });
+  }
+
+  private void confirmDeleteSite(String site) {
+    new AlertDialog.Builder(this)
+      .setTitle("删除站点？")
+      .setMessage(getSiteLabel(site))
+      .setNegativeButton("取消", null)
+      .setPositiveButton("删除", (dialog, which) -> removeSavedSite(site))
+      .show();
+  }
+
+  private String getSiteLabel(String url) {
+    try {
+      URI uri = new URI(url);
+      String host = uri.getHost();
+      String path = uri.getPath();
+      String query = uri.getQuery();
+      StringBuilder label = new StringBuilder(host == null || host.isEmpty() ? url : host);
+      if (path != null && !path.isEmpty() && !path.equals("/")) {
+        label.append(path);
+      }
+      if (query != null && !query.isEmpty()) {
+        label.append("?").append(query);
+      }
+      return label.toString();
+    } catch (URISyntaxException err) {
+      return url;
+    }
   }
 
   private void setLoading(boolean nextLoading) {
@@ -412,7 +589,6 @@ public class MainActivity extends Activity {
       String scheme = uri == null || uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
       if (scheme.equals("http") || scheme.equals("https")) {
         currentUrl = uri.toString();
-        pendingUrl = currentUrl;
         addressInput.setText(currentUrl);
         return false;
       }
@@ -423,7 +599,6 @@ public class MainActivity extends Activity {
     @Override
     public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
       currentUrl = url == null ? "" : url;
-      pendingUrl = currentUrl;
       hasMainFrameError = false;
       if (!currentUrl.equals("about:blank")) {
         addressInput.setText(currentUrl);
@@ -458,6 +633,7 @@ public class MainActivity extends Activity {
       }
       loading = false;
       hasMainFrameError = true;
+      shouldPersistNextSuccess = false;
       handler.removeCallbacks(loadTimeoutRunnable);
       setLoading(false);
       String detail = error == null ? "请检查访问地址或网络。" : String.valueOf(error.getDescription());
@@ -469,6 +645,7 @@ public class MainActivity extends Activity {
       handler.cancel();
       loading = false;
       hasMainFrameError = true;
+      shouldPersistNextSuccess = false;
       MainActivity.this.handler.removeCallbacks(loadTimeoutRunnable);
       setLoading(false);
       showErrorState("证书校验失败", "当前地址的 HTTPS 证书无法通过校验，请检查域名和证书配置。");
