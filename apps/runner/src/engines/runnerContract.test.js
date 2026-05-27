@@ -191,6 +191,37 @@ setInterval(() => {}, 1000)
   return cmdPath
 }
 
+function createHangingFakeCodexBinary(tempDir) {
+  const scriptPath = path.join(tempDir, process.platform === 'win32' ? 'fake-codex-hang.js' : 'fake-codex-hang')
+  const script = `#!/usr/bin/env node
+const fs = require('node:fs')
+
+const args = process.argv.slice(2)
+const outputIndex = args.indexOf('--output-last-message')
+const outputFile = outputIndex >= 0 ? args[outputIndex + 1] : ''
+
+if (outputFile) {
+  fs.writeFileSync(outputFile, '最终回复')
+}
+
+process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'thread-contract-1' }) + '\\n')
+process.stdout.write(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '已完成修改' } }) + '\\n')
+process.stdout.write(JSON.stringify({ type: 'turn.completed', result: '最终回复' }) + '\\n')
+
+setInterval(() => {}, 1000)
+`
+
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 })
+
+  if (process.platform !== 'win32') {
+    return scriptPath
+  }
+
+  const cmdPath = path.join(tempDir, 'fake-codex-hang.cmd')
+  fs.writeFileSync(cmdPath, '@echo off\r\nnode "%~dp0fake-codex-hang.js" %*\r\n')
+  return cmdPath
+}
+
 function createFakeOpenCodeBinary(tempDir) {
   const scriptPath = path.join(tempDir, process.platform === 'win32' ? 'fake-opencode.js' : 'fake-opencode')
   const script = `#!/usr/bin/env node
@@ -431,6 +462,36 @@ test('Claude Code runner 在 result 后进程不退出时会按 grace timeout �
     async () => {
       const { streamPromptToClaudeCodeSession } = await importFreshRunnerModules()
       const result = await collectRunnerContractEvents(streamPromptToClaudeCodeSession)
+
+      assert.deepEqual(result.result, {
+        sessionId: 'session-1',
+        threadId: 'thread-contract-1',
+        message: '最终回复',
+      })
+      assertOrderedSubsequence(projectRunnerContractPhases(result.events), [
+        'status',
+        'thread.started',
+        'agent_message',
+        'turn.completed',
+        'completed',
+      ])
+    }
+  )
+})
+
+test('Codex runner 在 turn.completed 后进程不退出时会按 grace timeout 完成', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-runner-codex-hang-'))
+  const fakeCodexBin = createHangingFakeCodexBinary(tempDir)
+
+  await withEnv(
+    {
+      CODEX_BIN: fakeCodexBin,
+      PROMPTX_CODEX_RESULT_EXIT_GRACE_MS: '30',
+      PROMPTX_CODEX_RESULT_FORCE_STOP_GRACE_MS: '30',
+    },
+    async () => {
+      const { streamPromptToCodexSession } = await importFreshRunnerModules()
+      const result = await collectRunnerContractEvents(streamPromptToCodexSession)
 
       assert.deepEqual(result.result, {
         sessionId: 'session-1',

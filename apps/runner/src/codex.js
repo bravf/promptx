@@ -21,6 +21,14 @@ const STATE_DB_PATH = path.join(CODEX_HOME, 'state_5.sqlite')
 const TMP_DIR = path.join(CODEX_HOME, 'tmp')
 const MAX_THREAD_COUNT = 120
 const MAX_OUTPUT_TAIL_LENGTH = 64 * 1024
+const CODEX_RESULT_EXIT_GRACE_MS = Math.max(
+  0,
+  Number(process.env.PROMPTX_CODEX_RESULT_EXIT_GRACE_MS) || 3000
+)
+const CODEX_RESULT_FORCE_STOP_GRACE_MS = Math.max(
+  200,
+  Number(process.env.PROMPTX_CODEX_RESULT_FORCE_STOP_GRACE_MS) || 1500
+)
 const CODEX_DEFAULT_ARGS = ['--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check']
 const RESOLVED_CODEX_BIN = resolveCodexBinary()
 const require = createRequire(import.meta.url)
@@ -335,6 +343,25 @@ function trackThreadId(event, setThreadId) {
   }
 }
 
+function extractCodexCompletionMessage(event = {}) {
+  if (event?.type === AGENT_RUN_EVENT_TYPES.TURN_COMPLETED) {
+    return extractTextFromUnknownError(event.result)
+      || extractTextFromUnknownError(event.message)
+      || extractTextFromUnknownError(event.response)
+  }
+
+  if (
+    event?.type === AGENT_RUN_EVENT_TYPES.ITEM_COMPLETED
+    && event?.item?.type === 'agent_message'
+  ) {
+    return extractTextFromUnknownError(event.item.text)
+      || extractTextFromUnknownError(event.item.message)
+      || extractTextFromUnknownError(event.item.content)
+  }
+
+  return ''
+}
+
 function parseThreadIdFromStdout(stdout = '') {
   const lines = String(stdout || '')
     .replace(/\r\n/g, '\n')
@@ -430,6 +457,74 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
   let stderrRaw = ''
   let finalMessage = ''
   let finalThreadId = session.codexThreadId || ''
+  let resultExitGraceTimer = null
+  let settled = false
+  let resolveResult = null
+  let rejectResult = null
+
+  const clearResultExitGraceTimer = () => {
+    if (resultExitGraceTimer) {
+      clearTimeout(resultExitGraceTimer)
+      resultExitGraceTimer = null
+    }
+  }
+
+  const readOutputFileMessage = () => {
+    if (!fs.existsSync(outputFile)) {
+      return ''
+    }
+
+    return repairPossibleMojibake(fs.readFileSync(outputFile, 'utf8').trim())
+  }
+
+  const refreshFinalMessageFromOutputFile = () => {
+    finalMessage = readOutputFileMessage() || finalMessage
+  }
+
+  const settleCompleted = (options = {}) => {
+    if (settled) {
+      return
+    }
+
+    settled = true
+    clearResultExitGraceTimer()
+    refreshFinalMessageFromOutputFile()
+    if (!finalThreadId) {
+      finalThreadId = parseThreadIdFromStdout(stdoutRaw)
+    }
+    emit(createCompletedEnvelopeEvent(finalMessage))
+    resolveResult?.({
+      sessionId: session.id,
+      message: finalMessage,
+      threadId: finalThreadId,
+    })
+
+    if (options.stopChild && child.exitCode === null && child.signalCode === null) {
+      forceStopChildProcess(child, { graceMs: CODEX_RESULT_FORCE_STOP_GRACE_MS })
+    }
+  }
+
+  const settleError = (error) => {
+    if (settled) {
+      return
+    }
+
+    settled = true
+    clearResultExitGraceTimer()
+    rejectResult?.(error)
+  }
+
+  const scheduleResultExitGrace = () => {
+    if (settled || resultExitGraceTimer || CODEX_RESULT_EXIT_GRACE_MS <= 0) {
+      return
+    }
+
+    resultExitGraceTimer = setTimeout(() => {
+      resultExitGraceTimer = null
+      settleCompleted({ stopChild: true })
+    }, CODEX_RESULT_EXIT_GRACE_MS)
+    resultExitGraceTimer.unref?.()
+  }
 
   const emit = (event) => {
     try {
@@ -471,6 +566,10 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
       if (event) {
         trackThreadId(event, rememberThreadId)
         emit(createAgentEventEnvelopeEvent(sanitizeCodexPayload(event)))
+        finalMessage = extractCodexCompletionMessage(event) || finalMessage
+        if (event.type === AGENT_RUN_EVENT_TYPES.TURN_COMPLETED) {
+          scheduleResultExitGrace()
+        }
         continue
       }
 
@@ -494,11 +593,18 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
   child.stdin.end()
 
   const result = new Promise((resolve, reject) => {
+    resolveResult = resolve
+    rejectResult = reject
+
     child.on('error', (error) => {
-      reject(normalizeSpawnError(error))
+      settleError(normalizeSpawnError(error))
     })
 
     child.on('close', (code) => {
+      if (settled) {
+        return
+      }
+
       const stdoutTail = flushBufferedText(stdoutBuffer)
       const stderrTail = flushBufferedText(stderrBuffer)
 
@@ -507,6 +613,10 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
         if (event) {
           trackThreadId(event, rememberThreadId)
           emit(createAgentEventEnvelopeEvent(sanitizeCodexPayload(event)))
+          finalMessage = extractCodexCompletionMessage(event) || finalMessage
+          if (event.type === AGENT_RUN_EVENT_TYPES.TURN_COMPLETED) {
+            scheduleResultExitGrace()
+          }
         } else {
           emit(createStdoutEnvelopeEvent(repairPossibleMojibake(line)))
         }
@@ -516,26 +626,14 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
         emit(createStderrEnvelopeEvent(repairPossibleMojibake(line)))
       })
 
-      if (fs.existsSync(outputFile)) {
-        finalMessage = repairPossibleMojibake(fs.readFileSync(outputFile, 'utf8').trim())
-      }
-
-      if (!finalThreadId) {
-        finalThreadId = parseThreadIdFromStdout(stdoutRaw)
-      }
+      refreshFinalMessageFromOutputFile()
 
       if (code !== 0) {
-        reject(new Error(repairPossibleMojibake(extractCodexError(stderrRaw, stdoutRaw))))
+        settleError(new Error(repairPossibleMojibake(extractCodexError(stderrRaw, stdoutRaw))))
         return
       }
 
-      emit(createCompletedEnvelopeEvent(finalMessage))
-
-      resolve({
-        sessionId: session.id,
-        message: finalMessage,
-        threadId: finalThreadId,
-      })
+      settleCompleted()
     })
   }).finally(() => {
     fs.rmSync(outputFile, { force: true })
