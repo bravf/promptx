@@ -556,6 +556,9 @@ export const MESSAGES = {
       selectCodeLineHint: '直接拖选代码，选区旁会显示插入按钮。',
       selectedLines: ({ count }) => `已选 ${count} 行`,
       insertSelection: '插入到编辑区',
+      blameLoading: '正在加载行作者...',
+      blameUnavailable: '暂无行作者信息。',
+      blameLoadFailed: '行作者信息加载失败。',
     },
     directoryPicker: {
       title: '选择工作目录',
@@ -1353,6 +1356,9 @@ export const MESSAGES = {
       selectCodeLineHint: 'Select code directly. An insert button appears beside the selection.',
       selectedLines: ({ count }) => `${count} line(s) selected`,
       insertSelection: 'Insert into editor',
+      blameLoading: 'Loading line author...',
+      blameUnavailable: 'No line author information.',
+      blameLoadFailed: 'Failed to load line author information.',
     },
     directoryPicker: {
       title: 'Choose Working Directory',

@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { createApiError } from './apiErrors.js'
 
 const WORKSPACE_HIDDEN_DIRECTORY_NAMES = new Set([
@@ -41,6 +42,8 @@ const DEFAULT_CONTENT_SEARCH_LIMIT = 80
 const MAX_SEARCH_VISITS = 20000
 const DIRECTORY_PICKER_LIMIT = 240
 const DEFAULT_FILE_PREVIEW_LIMIT = 200 * 1024
+const DEFAULT_FILE_BLAME_LINE_LIMIT = Math.max(200, Number(process.env.PROMPTX_FILE_BLAME_LINE_LIMIT) || 5000)
+const DEFAULT_FILE_BLAME_TIMEOUT_MS = Math.max(500, Number(process.env.PROMPTX_FILE_BLAME_TIMEOUT_MS) || 6000)
 const MAX_IMAGE_PREVIEW_BYTES = 2 * 1024 * 1024
 const MAX_CONTENT_SEARCH_FILE_BYTES = 1024 * 1024
 const MAX_CONTENT_MATCHES_PER_FILE = 20
@@ -155,6 +158,17 @@ function createHttpError(message, statusCode = 400) {
   return createApiError('', message, statusCode)
 }
 
+function createWorkspaceUnavailablePayload(target, reason = '', message = '') {
+  return {
+    cwd: target.root,
+    path: target.relativePath,
+    supported: false,
+    reason: String(reason || 'unavailable').trim() || 'unavailable',
+    message: String(message || '').trim(),
+    items: [],
+  }
+}
+
 function toPosixPath(value = '') {
   return String(value || '').replace(/\\/g, '/')
 }
@@ -216,6 +230,25 @@ function resolveWorkspaceTarget(workspacePath, relativePath = '') {
   }
 }
 
+function runGit(workspacePath = '', args = [], options = {}) {
+  const result = spawnSync('git', ['-C', workspacePath, ...args], {
+    encoding: 'utf8',
+    maxBuffer: 12 * 1024 * 1024,
+    timeout: DEFAULT_FILE_BLAME_TIMEOUT_MS,
+    windowsHide: true,
+    ...options,
+  })
+
+  return {
+    status: typeof result.status === 'number' ? result.status : 1,
+    stdout: String(result.stdout || ''),
+    stderr: String(result.stderr || ''),
+    signal: String(result.signal || ''),
+    errorCode: String(result.error?.code || ''),
+    timedOut: String(result.error?.code || '') === 'ETIMEDOUT',
+  }
+}
+
 function getPathType(absolutePath = '') {
   try {
     const stats = fs.statSync(absolutePath)
@@ -230,6 +263,78 @@ function getPathType(absolutePath = '') {
   }
 
   return ''
+}
+
+function getFileLineCount(absolutePath = '') {
+  const content = fs.readFileSync(absolutePath, 'utf8').replace(/\r\n/g, '\n')
+  return content ? content.split('\n').length : 0
+}
+
+function parseGitBlamePorcelain(output = '') {
+  const items = []
+  const commitMeta = new Map()
+  let current = null
+
+  String(output || '').replace(/\r\n/g, '\n').split('\n').forEach((line) => {
+    const headerMatch = line.match(/^([0-9a-f]{40})\s+\d+\s+(\d+)(?:\s+\d+)?$/i)
+    if (headerMatch) {
+      const commit = headerMatch[1]
+      const lineNumber = Number(headerMatch[2]) || 0
+      const cached = commitMeta.get(commit) || {}
+      current = {
+        line: lineNumber,
+        commit,
+        author: cached.author || '',
+        authorMail: cached.authorMail || '',
+        authorTime: cached.authorTime || '',
+        summary: cached.summary || '',
+      }
+      return
+    }
+
+    if (!current) {
+      return
+    }
+
+    if (line.startsWith('author ')) {
+      current.author = line.slice('author '.length)
+      return
+    }
+    if (line.startsWith('author-mail ')) {
+      current.authorMail = line.slice('author-mail '.length).replace(/^<|>$/g, '')
+      return
+    }
+    if (line.startsWith('author-time ')) {
+      const timestamp = Number(line.slice('author-time '.length)) || 0
+      current.authorTime = timestamp > 0 ? new Date(timestamp * 1000).toISOString() : ''
+      return
+    }
+    if (line.startsWith('summary ')) {
+      current.summary = line.slice('summary '.length)
+      return
+    }
+
+    if (line.startsWith('\t')) {
+      if (current.line > 0) {
+        const meta = {
+          author: current.author,
+          authorMail: current.authorMail,
+          authorTime: current.authorTime,
+          summary: current.summary,
+        }
+        commitMeta.set(current.commit, meta)
+        items.push({
+          line: current.line,
+          commit: current.commit,
+          shortCommit: current.commit.slice(0, 8),
+          ...meta,
+        })
+      }
+      current = null
+    }
+  })
+
+  return items.sort((left, right) => left.line - right.line)
 }
 
 function shouldIgnoreDirectory(entry) {
@@ -1022,6 +1127,71 @@ export function readWorkspaceFileContent(workspacePath, options = {}) {
     content: buffer.toString('utf8').replace(/\r\n/g, '\n'),
     truncated: stats.size > previewLimit,
     tooLarge: stats.size > previewLimit,
+  }
+}
+
+export function readWorkspaceFileBlame(workspacePath, options = {}) {
+  const target = resolveWorkspaceTarget(workspacePath, options.path)
+
+  let stats
+  try {
+    stats = fs.statSync(target.absolutePath)
+  } catch {
+    throw createApiError('errors.fileNotFound', '文件不存在。', 404)
+  }
+
+  if (!stats.isFile()) {
+    throw createApiError('errors.fileOnly', '只能读取文件内容。')
+  }
+
+  if (stats.size > DEFAULT_FILE_PREVIEW_LIMIT) {
+    return createWorkspaceUnavailablePayload(target, 'too_large', '文件较大，暂不加载行作者信息。')
+  }
+
+  const previewBuffer = readFileSlice(target.absolutePath, Math.min(stats.size, DEFAULT_FILE_PREVIEW_LIMIT))
+  const extension = path.extname(path.basename(target.absolutePath)).toLowerCase()
+  const isKnownTextFile = TEXT_FILE_EXTENSIONS.has(extension)
+  if (!isKnownTextFile && isLikelyBinaryBuffer(previewBuffer)) {
+    return createWorkspaceUnavailablePayload(target, 'binary', '当前文件为二进制内容，暂不加载行作者信息。')
+  }
+
+  const fileLineCount = getFileLineCount(target.absolutePath)
+  if (fileLineCount > DEFAULT_FILE_BLAME_LINE_LIMIT) {
+    return createWorkspaceUnavailablePayload(target, 'too_many_lines', '文件行数较多，暂不加载行作者信息。')
+  }
+
+  const gitCheck = runGit(target.root, ['rev-parse', '--is-inside-work-tree'])
+  if (gitCheck.status !== 0 || String(gitCheck.stdout || '').trim() !== 'true') {
+    return createWorkspaceUnavailablePayload(target, 'not_git', '当前目录不是 Git 仓库。')
+  }
+
+  const blame = runGit(target.root, [
+    'blame',
+    '--line-porcelain',
+    '--',
+    target.relativePath,
+  ])
+
+  if (blame.timedOut) {
+    return createWorkspaceUnavailablePayload(target, 'timeout', '行作者信息加载超时。')
+  }
+
+  if (blame.status !== 0) {
+    const stderr = String(blame.stderr || '').trim()
+    if (/no such path|no such file|not in HEAD|fatal: no such/i.test(stderr)) {
+      return createWorkspaceUnavailablePayload(target, 'untracked', '当前文件尚未被 Git 跟踪。')
+    }
+
+    return createWorkspaceUnavailablePayload(target, 'failed', stderr || '行作者信息加载失败。')
+  }
+
+  return {
+    cwd: target.root,
+    path: target.relativePath,
+    supported: true,
+    reason: '',
+    message: '',
+    items: parseGitBlamePorcelain(blame.stdout),
   }
 }
 
