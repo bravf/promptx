@@ -55,6 +55,7 @@ import { listKnownSessionsByEngine, listKnownWorkspacesByEngine } from './agents
 import {
   listDirectoryPickerTree,
   readWorkspaceFileContent,
+  readWorkspaceFileBlame,
   listWorkspaceTree,
   searchDirectoryPickerEntries,
   searchWorkspaceFileContent,
@@ -434,6 +435,7 @@ registerCodexRoutes(app, {
   listTaskSlugsByCodexSessionId,
   listWorkspaceSuggestions: workspaceSuggestionService.listWorkspaceSuggestions,
   listWorkspaceTree,
+  readWorkspaceFileBlame,
   readWorkspaceFileContent,
   resetPromptxCodexSession,
   runDispatchService,

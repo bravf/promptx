@@ -74,6 +74,7 @@ function registerCodexRoutes(app, options = {}) {
     listTaskSlugsByCodexSessionId = () => [],
     listWorkspaceSuggestions,
     listWorkspaceTree,
+    readWorkspaceFileBlame,
     readWorkspaceFileContent,
     resetPromptxCodexSession = () => null,
     runDispatchService,
@@ -170,6 +171,17 @@ function registerCodexRoutes(app, options = {}) {
     return readWorkspaceFileContent(session.cwd, {
       path: request.query?.path,
       limit: request.query?.limit,
+    })
+  })
+
+  app.get('/api/codex/sessions/:sessionId/files/blame', async (request, reply) => {
+    const session = getPromptxCodexSessionById(request.params.sessionId)
+    if (!session) {
+      return reply.code(404).send({ messageKey: 'errors.sessionNotFound', message: '没有找到对应的 PromptX 项目。' })
+    }
+
+    return readWorkspaceFileBlame(session.cwd, {
+      path: request.query?.path,
     })
   })
 

@@ -16,6 +16,7 @@ import { useI18n } from '../composables/useI18n.js'
 import { useTheme } from '../composables/useTheme.js'
 import { useWorkspacePickerData } from '../composables/useWorkspacePickerData.js'
 import {
+  getCodexSessionFileBlame,
   getCodexSessionFileContent,
   searchCodexSessionFileContent,
 } from '../lib/api.js'
@@ -75,16 +76,24 @@ const previewContainerRef = ref(null)
 const previewFocusLine = ref(0)
 const previewMatchLines = ref([])
 const previewSearchQuery = ref('')
+const blameLoading = ref(false)
+const blameError = ref('')
+const blamePayload = ref(null)
+const blameHoverLine = ref(0)
+const blameHoverTop = ref(8)
 
 let previewRequestId = 0
+let blameRequestId = 0
 let contentSearchRequestId = 0
 let contentSearchTimer = null
 let contentSearchAbortController = null
+let blameAbortController = null
 const CONTENT_SEARCH_DEBOUNCE_MS = WORKSPACE_CONTENT_SEARCH_DEBOUNCE_MS
 const PREVIEW_SELECTION_DEBOUNCE_MS = WORKSPACE_PREVIEW_SELECTION_DEBOUNCE_MS
 const PREVIEW_CACHE_LIMIT = 20
 let previewSelectionTimer = null
 const previewPayloadCache = new Map()
+const blamePayloadCache = new Map()
 
 const sessionId = computed(() => String(props.session?.id || '').trim())
 const sessionCwd = computed(() => String(props.session?.cwd || '').trim())
@@ -162,6 +171,19 @@ const selectedPreviewLineItems = computed(() => {
     .filter((item) => item.lineNumber > 0)
 })
 const canInsertPreviewSelection = computed(() => selectedPreviewLineItems.value.length > 0)
+const activeBlameItem = computed(() => {
+  const line = Math.max(0, Number(blameHoverLine.value) || 0)
+  if (!line || !Array.isArray(blamePayload.value?.items)) {
+    return null
+  }
+
+  return blamePayload.value.items.find((item) => Number(item?.line) === line) || null
+})
+const showBlamePopover = computed(() => Boolean(
+  showTextPreview.value
+  && blameHoverLine.value
+  && (blameLoading.value || blameError.value || activeBlameItem.value || blamePayload.value?.message)
+))
 const currentSearchPlaceholder = computed(() => (
   isContentSearchMode.value
     ? t('sourceBrowser.contentSearchPlaceholder')
@@ -472,6 +494,164 @@ function formatFileSize(value = 0) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function formatBlameTime(value = '') {
+  const parsed = new Date(String(value || ''))
+  if (Number.isNaN(parsed.getTime())) {
+    return t('common.notAvailable')
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(parsed)
+}
+
+function formatBlameRelativeTime(value = '') {
+  const parsed = new Date(String(value || ''))
+  const time = parsed.getTime()
+  if (Number.isNaN(time)) {
+    return ''
+  }
+
+  const diffMs = Date.now() - time
+  const absMs = Math.abs(diffMs)
+  const units = [
+    ['year', 365 * 24 * 60 * 60 * 1000],
+    ['month', 30 * 24 * 60 * 60 * 1000],
+    ['day', 24 * 60 * 60 * 1000],
+    ['hour', 60 * 60 * 1000],
+    ['minute', 60 * 1000],
+  ]
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+  const [unit, unitMs] = units.find(([, size]) => absMs >= size) || ['minute', 60 * 1000]
+  const valueNumber = Math.round((time - Date.now()) / unitMs)
+  return formatter.format(valueNumber, unit)
+}
+
+function getBlamePopoverStyle() {
+  const top = Math.max(8, Number(blameHoverTop.value) || 0)
+  return {
+    top: `${top}px`,
+    right: '12px',
+  }
+}
+
+function getCachedBlamePayload(pathValue = '') {
+  const path = String(pathValue || '').trim()
+  return path ? blamePayloadCache.get(path) || null : null
+}
+
+function setCachedBlamePayload(pathValue = '', payload = null) {
+  const path = String(pathValue || '').trim()
+  if (!path || !payload) {
+    return
+  }
+
+  blamePayloadCache.set(path, payload)
+  while (blamePayloadCache.size > PREVIEW_CACHE_LIMIT) {
+    const oldestKey = blamePayloadCache.keys().next().value
+    if (!oldestKey) {
+      break
+    }
+    blamePayloadCache.delete(oldestKey)
+  }
+}
+
+function resetBlameState(options = {}) {
+  blameRequestId += 1
+  if (blameAbortController) {
+    blameAbortController.abort()
+    blameAbortController = null
+  }
+  blameLoading.value = false
+  blameError.value = ''
+  blamePayload.value = null
+  blameHoverLine.value = 0
+  if (options.clearCache) {
+    blamePayloadCache.clear()
+  }
+}
+
+async function loadBlameForPreview() {
+  const pathValue = previewPath.value
+  if (!sessionId.value || !pathValue || !showTextPreview.value) {
+    return
+  }
+
+  const cached = getCachedBlamePayload(pathValue)
+  if (cached) {
+    blamePayload.value = cached
+    blameLoading.value = false
+    blameError.value = ''
+    return
+  }
+
+  blameRequestId += 1
+  const requestId = blameRequestId
+  if (blameAbortController) {
+    blameAbortController.abort()
+  }
+  blameAbortController = new AbortController()
+  blameLoading.value = true
+  blameError.value = ''
+
+  try {
+    const payload = await getCodexSessionFileBlame(sessionId.value, {
+      path: pathValue,
+      refreshToken: String(Date.now()),
+      signal: blameAbortController.signal,
+    })
+
+    if (requestId !== blameRequestId) {
+      return
+    }
+
+    blamePayload.value = payload
+    setCachedBlamePayload(pathValue, payload)
+    blameError.value = payload?.supported === false ? String(payload.message || '') : ''
+  } catch (error) {
+    if (isAbortError(error) || requestId !== blameRequestId) {
+      return
+    }
+
+    blamePayload.value = null
+    blameError.value = error?.message || t('sourceBrowser.blameLoadFailed')
+  } finally {
+    if (requestId === blameRequestId) {
+      blameLoading.value = false
+      blameAbortController = null
+    }
+  }
+}
+
+function handlePreviewMouseMove(event) {
+  if (!showTextPreview.value) {
+    return
+  }
+
+  const row = event?.target?.closest?.('.source-code-view__line')
+  if (!row || !previewContainerRef.value?.contains(row)) {
+    blameHoverLine.value = 0
+    return
+  }
+
+  const line = Number(row.getAttribute('data-line') || 0) || 0
+  const containerRect = previewContainerRef.value.getBoundingClientRect()
+  const rowRect = row.getBoundingClientRect()
+  blameHoverLine.value = line
+  blameHoverTop.value = rowRect.bottom - containerRect.top + previewContainerRef.value.scrollTop + 4
+  if (!blamePayload.value && !blameLoading.value) {
+    loadBlameForPreview()
+  }
+}
+
+function handlePreviewMouseLeave() {
+  blameHoverLine.value = 0
+}
+
 function clearPreviewFocusStyles() {
   const container = previewContainerRef.value
   if (!container) {
@@ -577,6 +757,7 @@ function clearScheduledPreviewLoad() {
 
 function clearPreviewCache() {
   previewPayloadCache.clear()
+  blamePayloadCache.clear()
 }
 
 function getCachedPreviewPayload(pathValue = '') {
@@ -666,6 +847,7 @@ function resetPreviewState() {
   previewFocusLine.value = 0
   previewMatchLines.value = []
   previewSearchQuery.value = ''
+  resetBlameState({ clearCache: true })
   clearPreviewLineSelection()
   clearPreviewFocusStyles()
 }
@@ -753,6 +935,7 @@ function selectSidebarItem(item, options = {}) {
   previewFocusLine.value = 0
   previewMatchLines.value = []
   previewSearchQuery.value = ''
+  resetBlameState()
 
   if (item?.type === 'directory') {
     clearScheduledPreviewLoad()
@@ -1134,6 +1317,7 @@ function handleSelectContentSearchItem(item, options = {}) {
   selectedPath.value = String(item?.path || '').trim()
   selectedItemType.value = 'file'
   previewError.value = ''
+  resetBlameState()
   previewSearchQuery.value = contentSearchExecutedQuery.value || normalizedSearchInput.value
   previewMatchLines.value = contentSearchResults.value
     .filter((entry) => entry?.path === item?.path)
@@ -1680,11 +1864,35 @@ defineExpose({
             }"
             @copy="handlePreviewCopy"
             @mouseup="handlePreviewMouseUp"
+            @mousemove="handlePreviewMouseMove"
+            @mouseleave="handlePreviewMouseLeave"
           >
             <div class="source-code-view">
               <table class="source-code-view__table">
                 <tbody v-html="previewCodeHtml" />
               </table>
+            </div>
+            <div
+              v-if="showBlamePopover"
+              class="source-blame-popover pointer-events-none absolute z-20 w-[min(24rem,calc(100%-1.5rem))] rounded-sm border px-3 py-2 text-[11px] shadow-lg"
+              :style="getBlamePopoverStyle()"
+            >
+              <div v-if="blameLoading" class="inline-flex items-center gap-2">
+                <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
+                <span>{{ t('sourceBrowser.blameLoading') }}</span>
+              </div>
+              <div v-else-if="activeBlameItem" class="min-w-0">
+                <div class="flex min-w-0 items-center gap-2">
+                  <span class="font-medium">{{ activeBlameItem.author || t('common.notAvailable') }}</span>
+                  <span class="theme-muted-text">{{ activeBlameItem.shortCommit }}</span>
+                  <span v-if="activeBlameItem.authorTime" class="theme-muted-text">{{ formatBlameRelativeTime(activeBlameItem.authorTime) }}</span>
+                </div>
+                <div v-if="activeBlameItem.summary" class="mt-1 truncate">{{ activeBlameItem.summary }}</div>
+                <div v-if="activeBlameItem.authorTime" class="theme-muted-text mt-1">{{ formatBlameTime(activeBlameItem.authorTime) }}</div>
+              </div>
+              <div v-else>
+                {{ blameError || blamePayload?.message || t('sourceBrowser.blameUnavailable') }}
+              </div>
             </div>
             <SelectionInsertButton
               v-if="open && previewSelectionAction.visible"
@@ -1720,6 +1928,17 @@ defineExpose({
   color: var(--source-code-fg);
   height: 100%;
   overflow: auto;
+}
+
+.source-blame-popover {
+  border-color: var(--theme-borderDefault);
+  background: var(--theme-appOverlay);
+  color: var(--theme-textPrimary);
+  backdrop-filter: blur(10px);
+}
+
+.source-code-view :deep(.source-code-view__line:hover) {
+  background: color-mix(in srgb, var(--theme-accentSoft) 50%, transparent);
 }
 
 .source-browser-layout .theme-list-item-title,

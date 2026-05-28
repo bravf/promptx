@@ -176,6 +176,25 @@ export function getCodexSessionFileContent(sessionId, options = {}) {
   })
 }
 
+export function getCodexSessionFileBlame(sessionId, options = {}) {
+  const params = new URLSearchParams()
+  const targetPath = String(options.path || '').trim()
+  const refreshToken = String(options.refreshToken || '').trim()
+
+  if (targetPath) {
+    params.set('path', targetPath)
+  }
+  if (refreshToken) {
+    params.set('_', refreshToken)
+  }
+
+  const query = params.toString()
+  return request(`/api/codex/sessions/${encodeURIComponent(sessionId)}/files/blame${query ? `?${query}` : ''}`, {
+    cache: 'no-store',
+    signal: options.signal,
+  })
+}
+
 export function searchCodexSessionFileContent(sessionId, query, options = {}) {
   const params = new URLSearchParams()
   const keyword = String(query || '').trim()

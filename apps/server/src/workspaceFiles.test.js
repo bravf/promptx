@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -7,11 +8,19 @@ import test from 'node:test'
 import {
   listDirectoryPickerTree,
   listWorkspaceTree,
+  readWorkspaceFileBlame,
   readWorkspaceFileContent,
   searchWorkspaceFileContent,
   searchWorkspaceEntries,
   searchDirectoryPickerEntries,
 } from './workspaceFiles.js'
+
+function git(cwd, args = []) {
+  return execFileSync('git', ['-C', cwd, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim()
+}
 
 test('listDirectoryPickerTree returns filesystem roots when path is empty', () => {
   const payload = listDirectoryPickerTree()
@@ -276,4 +285,43 @@ test('readWorkspaceFileContent marks binary files', () => {
 
   assert.equal(payload.binary, true)
   assert.equal(payload.content, '')
+})
+
+test('readWorkspaceFileBlame returns author metadata per source line', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-workspace-blame-'))
+  const sourcePath = path.join(tempDir, 'src', 'main.js')
+
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true })
+  fs.writeFileSync(sourcePath, 'const answer = 42\nconsole.log(answer)\n', 'utf8')
+  git(tempDir, ['init'])
+  git(tempDir, ['config', 'user.email', 'promptx@example.com'])
+  git(tempDir, ['config', 'user.name', 'PromptX'])
+  git(tempDir, ['add', 'src/main.js'])
+  git(tempDir, ['commit', '-m', 'initial source'])
+
+  const payload = readWorkspaceFileBlame(tempDir, {
+    path: 'src/main.js',
+  })
+
+  assert.equal(payload.supported, true)
+  assert.equal(payload.path, 'src/main.js')
+  assert.equal(payload.items.length, 2)
+  assert.equal(payload.items[0].line, 1)
+  assert.equal(payload.items[0].author, 'PromptX')
+  assert.equal(payload.items[0].authorMail, 'promptx@example.com')
+  assert.equal(payload.items[0].summary, 'initial source')
+  assert.equal(payload.items[0].shortCommit.length, 8)
+})
+
+test('readWorkspaceFileBlame returns unavailable payload outside git repository', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-workspace-blame-nongit-'))
+  fs.writeFileSync(path.join(tempDir, 'note.txt'), 'hello\n', 'utf8')
+
+  const payload = readWorkspaceFileBlame(tempDir, {
+    path: 'note.txt',
+  })
+
+  assert.equal(payload.supported, false)
+  assert.equal(payload.reason, 'not_git')
+  assert.deepEqual(payload.items, [])
 })
