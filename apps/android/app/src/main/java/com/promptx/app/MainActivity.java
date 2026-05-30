@@ -11,6 +11,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.net.http.SslError;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -19,6 +20,9 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
@@ -91,6 +95,7 @@ public class MainActivity extends Activity {
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     preferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    configureSystemBars();
     buildLayout();
     configureWebView();
 
@@ -100,6 +105,30 @@ public class MainActivity extends Activity {
     } else {
       addressInput.setText(savedUrl);
       loadUrl(savedUrl);
+    }
+  }
+
+  private void configureSystemBars() {
+    Window window = getWindow();
+    window.clearFlags(
+      WindowManager.LayoutParams.FLAG_FULLSCREEN
+        | WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
+        | WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION
+        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+    );
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+      window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+      window.setStatusBarColor(Color.rgb(250, 250, 249));
+      window.setNavigationBarColor(Color.rgb(250, 250, 249));
+    }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+    }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      window.setDecorFitsSystemWindows(true);
     }
   }
 
@@ -133,7 +162,23 @@ public class MainActivity extends Activity {
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     root.setBackgroundColor(Color.rgb(250, 250, 249));
+    root.setFitsSystemWindows(true);
+    root.setOnApplyWindowInsetsListener((view, insets) -> {
+      int topInset;
+      int bottomInset;
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        android.graphics.Insets systemBars = insets.getInsets(WindowInsets.Type.systemBars());
+        topInset = systemBars.top;
+        bottomInset = systemBars.bottom;
+      } else {
+        topInset = insets.getSystemWindowInsetTop();
+        bottomInset = insets.getSystemWindowInsetBottom();
+      }
+      view.setPadding(0, topInset, 0, bottomInset);
+      return insets;
+    });
     setContentView(root);
+    root.requestApplyInsets();
 
     LinearLayout toolbar = new LinearLayout(this);
     toolbar.setOrientation(LinearLayout.HORIZONTAL);
