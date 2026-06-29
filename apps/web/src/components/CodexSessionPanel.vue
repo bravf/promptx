@@ -1,6 +1,7 @@
 <script setup>
 import { BLOCK_TYPES } from '@promptx/shared'
-import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { toBlob } from 'html-to-image'
 import {
   ArrowDown,
   ChevronDown,
@@ -10,6 +11,7 @@ import {
   Eye,
   EyeOff,
   FileDiff,
+  ImageDown,
   LoaderCircle,
   PencilLine,
   Plus,
@@ -152,6 +154,12 @@ const showSourceBrowser = ref(false)
 const sourceBrowserSessionId = ref('')
 const sourceBrowserInitialSearchQuery = ref('')
 const previewPromptImageUrl = ref('')
+const previewResponseImageUrl = ref('')
+const previewResponseImageObjectUrl = ref('')
+const responseImageExportingKey = ref('')
+const responseCardElements = new Map()
+const RESPONSE_IMAGE_EXPORT_WIDTH = 640
+const RESPONSE_IMAGE_EXPORT_PIXEL_RATIO = 2
 const SELECTED_AGENT_FILTER_STORAGE_KEY = 'promptx:selected-agent-filter-map'
 
 function getPersistedAgentFilterMap() {
@@ -310,6 +318,20 @@ function getResponseCacheKey(turn) {
   return String(turn?.runId || turn?.id || '').trim()
 }
 
+function setResponseCardRef(turn = {}, element = null) {
+  const key = getResponseCacheKey(turn)
+  if (!key) {
+    return
+  }
+
+  if (element instanceof HTMLElement) {
+    responseCardElements.set(key, element)
+    return
+  }
+
+  responseCardElements.delete(key)
+}
+
 function openTurnDiff(turn) {
   if (!turn?.runId) {
     return
@@ -370,6 +392,90 @@ async function copyText(text) {
   textarea.select()
   document.execCommand('copy')
   document.body.removeChild(textarea)
+}
+
+async function waitForResponseImageExportLayout() {
+  await nextTick()
+  if (document.fonts?.ready) {
+    try {
+      await document.fonts.ready
+    } catch {
+      // ignore
+    }
+  }
+  await new Promise((resolve) => window.requestAnimationFrame(resolve))
+}
+
+function createResponseImageExportCard(card) {
+  const host = document.createElement('div')
+  host.setAttribute('aria-hidden', 'true')
+  host.style.position = 'fixed'
+  host.style.left = `-${RESPONSE_IMAGE_EXPORT_WIDTH + 200}px`
+  host.style.top = '0'
+  host.style.width = `${RESPONSE_IMAGE_EXPORT_WIDTH}px`
+  host.style.pointerEvents = 'none'
+  host.style.zIndex = '-1'
+
+  const clone = card.cloneNode(true)
+  clone.classList.add('response-image-export-card')
+  clone.style.position = 'static'
+  clone.style.width = `${RESPONSE_IMAGE_EXPORT_WIDTH}px`
+  clone.style.minWidth = `${RESPONSE_IMAGE_EXPORT_WIDTH}px`
+  clone.style.maxWidth = `${RESPONSE_IMAGE_EXPORT_WIDTH}px`
+  clone.style.boxSizing = 'border-box'
+  clone.style.pointerEvents = 'none'
+
+  host.appendChild(clone)
+  document.body.appendChild(host)
+  return {
+    card: clone,
+    host,
+  }
+}
+
+async function previewTurnResponseImage(turn = {}) {
+  const key = getResponseCacheKey(turn)
+  const card = key ? responseCardElements.get(key) : null
+  if (!card || responseImageExportingKey.value) {
+    return
+  }
+
+  responseImageExportingKey.value = key
+  window.getSelection?.()?.removeAllRanges?.()
+
+  let exportTarget = null
+  try {
+    exportTarget = createResponseImageExportCard(card)
+    const exportCard = exportTarget.card
+    await waitForResponseImageExportLayout()
+
+    const exportCardStyle = window.getComputedStyle(exportCard)
+    const exportHeight = Math.max(1, Math.ceil(exportCard.scrollHeight || exportCard.getBoundingClientRect().height))
+    const blob = await toBlob(exportCard, {
+      backgroundColor: exportCardStyle.backgroundColor || undefined,
+      cacheBust: true,
+      filter: (node) => !(node instanceof Element && node.dataset.responseExportIgnore === '1'),
+      height: exportHeight,
+      pixelRatio: RESPONSE_IMAGE_EXPORT_PIXEL_RATIO,
+      width: RESPONSE_IMAGE_EXPORT_WIDTH,
+    })
+
+    if (!blob) {
+      throw new Error('Response image export returned an empty blob.')
+    }
+
+    showResponseImageBlob(blob)
+  } catch {
+    emit('toast', {
+      message: t('sessionPanel.responseImageFailed'),
+      type: 'warning',
+    })
+  } finally {
+    exportTarget?.host?.remove?.()
+    if (responseImageExportingKey.value === key) {
+      responseImageExportingKey.value = ''
+    }
+  }
 }
 
 function getTurnPromptInsertBlocks(turn = {}) {
@@ -583,6 +689,38 @@ const promptPreviewImages = computed(() => (
     .filter((item) => item?.type === 'image')
     .map((item) => item.content))
 ))
+const responsePreviewImages = computed(() => (
+  previewResponseImageUrl.value ? [previewResponseImageUrl.value] : []
+))
+
+function revokePreviewResponseImageUrl() {
+  if (!previewResponseImageObjectUrl.value) {
+    return
+  }
+
+  URL.revokeObjectURL(previewResponseImageObjectUrl.value)
+  previewResponseImageObjectUrl.value = ''
+}
+
+function showResponseImageBlob(blob) {
+  revokePreviewResponseImageUrl()
+  const url = URL.createObjectURL(blob)
+  previewResponseImageObjectUrl.value = url
+  previewResponseImageUrl.value = url
+}
+
+watch(
+  previewResponseImageUrl,
+  (value) => {
+    if (!value) {
+      revokePreviewResponseImageUrl()
+    }
+  }
+)
+
+onBeforeUnmount(() => {
+  revokePreviewResponseImageUrl()
+})
 
 function getVisibleTurnEvents(turn) {
   const events = Array.isArray(turn?.events) ? turn.events : []
@@ -851,10 +989,12 @@ defineExpose({
                     v-if="hasInsertableTurnPrompt(turn)"
                     type="button"
                     class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
+                    :aria-label="t('sessionPanel.insert')"
+                    :title="t('sessionPanel.insert')"
                     @click="insertTurnPrompt(turn)"
                   >
                     <Plus class="h-3 w-3" />
-                    <span>{{ t('sessionPanel.insert') }}</span>
+                    <span class="hidden sm:inline">{{ t('sessionPanel.insert') }}</span>
                   </button>
                   <span>{{ formatTurnTime(turn.startedAt) }}</span>
                 </div>
@@ -970,27 +1110,45 @@ defineExpose({
               :class="turn.errorMessage
                 ? 'bg-[var(--theme-dangerSoft)] text-[var(--theme-dangerText)]'
                 : 'bg-[var(--theme-responseBg)] text-[var(--theme-responseText)]'"
+              :ref="(element) => setResponseCardRef(turn, element)"
             >
               <div class="flex items-center justify-between gap-3 text-xs opacity-75 font-sans">
                 <span class="font-semibold">{{ getTurnResponseTitle(turn) }}</span>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2" data-response-export-ignore="1">
                   <button
                     v-if="diffSupported && turn.runId"
                     type="button"
                     class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
+                    :aria-label="t('sessionPanel.view')"
+                    :title="t('sessionPanel.view')"
                     @click="openTurnDiff(turn)"
                   >
                     <FileDiff class="h-3 w-3" />
-                    <span>{{ t('sessionPanel.view') }}</span>
+                    <span class="hidden sm:inline">{{ t('sessionPanel.view') }}</span>
                   </button>
                   <button
                     v-if="turn.responseMessage && !turn.errorMessage"
                     type="button"
                     class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
+                    :aria-label="t('sessionPanel.insert')"
+                    :title="t('sessionPanel.insert')"
                     @click="insertTurnResponse(turn)"
                   >
                     <Plus class="h-3 w-3" />
-                    <span>{{ t('sessionPanel.insert') }}</span>
+                    <span class="hidden sm:inline">{{ t('sessionPanel.insert') }}</span>
+                  </button>
+                  <button
+                    v-if="turn.responseMessage && !turn.errorMessage"
+                    type="button"
+                    class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)] disabled:cursor-wait disabled:opacity-60"
+                    :aria-label="t('sessionPanel.previewResponseImageAria')"
+                    :title="t('sessionPanel.previewResponseImageAria')"
+                    :disabled="Boolean(responseImageExportingKey)"
+                    @click="previewTurnResponseImage(turn)"
+                  >
+                    <LoaderCircle v-if="responseImageExportingKey === getResponseCacheKey(turn)" class="h-3 w-3 animate-spin" />
+                    <ImageDown v-else class="h-3 w-3" />
+                    <span class="hidden sm:inline">{{ t('sessionPanel.previewResponseImage') }}</span>
                   </button>
                   <span>{{ formatTurnTime(turn.finishedAt || turn.startedAt) }}</span>
                 </div>
@@ -1055,6 +1213,10 @@ defineExpose({
     <ImagePreviewOverlay
       v-model="previewPromptImageUrl"
       :images="promptPreviewImages"
+    />
+    <ImagePreviewOverlay
+      v-model="previewResponseImageUrl"
+      :images="responsePreviewImages"
     />
   </section>
 </template>

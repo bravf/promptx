@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -15,9 +16,12 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.text.InputType;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -44,11 +48,19 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.json.JSONTokener;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public class MainActivity extends Activity {
@@ -70,11 +82,15 @@ public class MainActivity extends Activity {
   private TextView overlayMessage;
   private Button overlayPrimaryButton;
   private ValueCallback<Uri[]> fileChooserCallback;
+  private Uri preparedCameraImageUri;
+  private Uri pendingCameraImageUri;
   private String currentUrl = "";
   private String pendingUrl = "";
   private boolean loading = false;
   private boolean hasMainFrameError = false;
   private boolean shouldPersistNextSuccess = false;
+  private float lastWebViewTouchX = -1f;
+  private float lastWebViewTouchY = -1f;
 
   private final Runnable loadTimeoutRunnable = () -> {
     if (!loading) {
@@ -156,6 +172,16 @@ public class MainActivity extends Activity {
     webView.setWebViewClient(new PromptXWebViewClient());
     webView.setWebChromeClient(new PromptXWebChromeClient());
     webView.setDownloadListener(createDownloadListener());
+    webView.setLongClickable(true);
+    webView.setOnTouchListener((view, event) -> {
+      int action = event.getActionMasked();
+      if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) {
+        lastWebViewTouchX = event.getX();
+        lastWebViewTouchY = event.getY();
+      }
+      return false;
+    });
+    webView.setOnLongClickListener((view) -> handleWebViewLongClick());
   }
 
   private void buildLayout() {
@@ -581,6 +607,147 @@ public class MainActivity extends Activity {
     };
   }
 
+  private boolean handleWebViewLongClick() {
+    if (webView == null) {
+      return false;
+    }
+
+    WebView.HitTestResult hitTestResult = webView.getHitTestResult();
+    int hitType = hitTestResult == null ? WebView.HitTestResult.UNKNOWN_TYPE : hitTestResult.getType();
+    if (hitType != WebView.HitTestResult.IMAGE_TYPE && hitType != WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
+      return false;
+    }
+
+    extractAndShareImageAtLastTouch();
+    return true;
+  }
+
+  private void extractAndShareImageAtLastTouch() {
+    if (webView == null || lastWebViewTouchX < 0 || lastWebViewTouchY < 0 || webView.getWidth() <= 0 || webView.getHeight() <= 0) {
+      Toast.makeText(this, "没有识别到图片", Toast.LENGTH_SHORT).show();
+      return;
+    }
+
+    String script = buildImageDataExtractionScript(lastWebViewTouchX, lastWebViewTouchY, webView.getWidth(), webView.getHeight());
+    webView.evaluateJavascript(script, (value) -> {
+      String payloadText = decodeJavascriptString(value);
+      if (payloadText.isEmpty()) {
+        Toast.makeText(MainActivity.this, "图片读取失败", Toast.LENGTH_SHORT).show();
+        return;
+      }
+
+      try {
+        JSONObject payload = new JSONObject(payloadText);
+        if (!payload.optBoolean("ok", false)) {
+          Toast.makeText(MainActivity.this, "没有识别到图片", Toast.LENGTH_SHORT).show();
+          return;
+        }
+        shareImageDataUrl(payload.optString("dataUrl", ""));
+      } catch (JSONException err) {
+        Toast.makeText(MainActivity.this, "图片读取失败", Toast.LENGTH_SHORT).show();
+      }
+    });
+  }
+
+  private String buildImageDataExtractionScript(float rawX, float rawY, int viewWidth, int viewHeight) {
+    return String.format(Locale.US,
+      "(function(){"
+        + "try{"
+        + "var rawX=%f,rawY=%f,viewWidth=%d,viewHeight=%d;"
+        + "var viewport=window.visualViewport;"
+        + "var viewportWidth=(viewport&&viewport.width)||window.innerWidth||document.documentElement.clientWidth||viewWidth;"
+        + "var viewportHeight=(viewport&&viewport.height)||window.innerHeight||document.documentElement.clientHeight||viewHeight;"
+        + "var offsetLeft=(viewport&&viewport.offsetLeft)||0;"
+        + "var offsetTop=(viewport&&viewport.offsetTop)||0;"
+        + "var x=offsetLeft+(rawX*viewportWidth/Math.max(1,viewWidth));"
+        + "var y=offsetTop+(rawY*viewportHeight/Math.max(1,viewHeight));"
+        + "var element=document.elementFromPoint(x,y);"
+        + "var image=element&&(element.tagName==='IMG'?element:(element.closest&&element.closest('img')));"
+        + "if(!image||!image.currentSrc){return JSON.stringify({ok:false,reason:'not_image'});}"
+        + "var width=image.naturalWidth||image.width;"
+        + "var height=image.naturalHeight||image.height;"
+        + "if(!width||!height){return JSON.stringify({ok:false,reason:'empty_image'});}"
+        + "var canvas=document.createElement('canvas');"
+        + "canvas.width=width;"
+        + "canvas.height=height;"
+        + "var context=canvas.getContext('2d');"
+        + "context.drawImage(image,0,0,width,height);"
+        + "return JSON.stringify({ok:true,dataUrl:canvas.toDataURL('image/png')});"
+        + "}catch(err){return JSON.stringify({ok:false,reason:String(err&&err.message||err)});}"
+        + "})()",
+      rawX,
+      rawY,
+      viewWidth,
+      viewHeight
+    );
+  }
+
+  private String decodeJavascriptString(String value) {
+    if (value == null || value.equals("null")) {
+      return "";
+    }
+
+    try {
+      Object decoded = new JSONTokener(value).nextValue();
+      return decoded instanceof String ? (String) decoded : String.valueOf(decoded);
+    } catch (JSONException err) {
+      return "";
+    }
+  }
+
+  private void shareImageDataUrl(String dataUrl) {
+    if (dataUrl == null || !dataUrl.startsWith("data:image/")) {
+      Toast.makeText(this, "图片读取失败", Toast.LENGTH_SHORT).show();
+      return;
+    }
+
+    int separatorIndex = dataUrl.indexOf(',');
+    if (separatorIndex < 0) {
+      Toast.makeText(this, "图片读取失败", Toast.LENGTH_SHORT).show();
+      return;
+    }
+
+    try {
+      byte[] bytes = Base64.decode(dataUrl.substring(separatorIndex + 1), Base64.DEFAULT);
+      File shareDir = new File(getCacheDir(), "shared-images");
+      if (!shareDir.exists() && !shareDir.mkdirs()) {
+        throw new IOException("Unable to create shared image cache directory.");
+      }
+      clearSharedImageCache(shareDir);
+
+      File imageFile = new File(shareDir, "promptx-image-" + System.currentTimeMillis() + ".png");
+      try (FileOutputStream outputStream = new FileOutputStream(imageFile)) {
+        outputStream.write(bytes);
+      }
+
+      Uri imageUri = new Uri.Builder()
+        .scheme("content")
+        .authority(getPackageName() + ".sharedimage")
+        .appendPath(imageFile.getName())
+        .build();
+      Intent shareIntent = new Intent(Intent.ACTION_SEND);
+      shareIntent.setType("image/png");
+      shareIntent.putExtra(Intent.EXTRA_STREAM, imageUri);
+      shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+      startActivity(Intent.createChooser(shareIntent, "分享图片"));
+    } catch (IllegalArgumentException | IOException | ActivityNotFoundException err) {
+      Toast.makeText(this, "无法分享图片", Toast.LENGTH_SHORT).show();
+    }
+  }
+
+  private void clearSharedImageCache(File shareDir) {
+    File[] files = shareDir.listFiles();
+    if (files == null) {
+      return;
+    }
+
+    for (File file : files) {
+      if (file.isFile()) {
+        file.delete();
+      }
+    }
+  }
+
   private void openExternalUrl(String url) {
     try {
       startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
@@ -613,9 +780,14 @@ public class MainActivity extends Activity {
     Uri[] results = null;
     if (resultCode == RESULT_OK) {
       results = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+      if ((results == null || results.length == 0) && pendingCameraImageUri != null) {
+        results = new Uri[] { pendingCameraImageUri };
+      }
     }
     fileChooserCallback.onReceiveValue(results);
     fileChooserCallback = null;
+    preparedCameraImageUri = null;
+    pendingCameraImageUri = null;
   }
 
   @Override
@@ -704,15 +876,107 @@ public class MainActivity extends Activity {
         fileChooserCallback.onReceiveValue(null);
       }
       fileChooserCallback = filePathCallback;
+      preparedCameraImageUri = null;
+      pendingCameraImageUri = null;
+
+      Intent cameraIntent = acceptsImage(fileChooserParams.getAcceptTypes()) ? createCameraCaptureIntent() : null;
+      if (cameraIntent != null) {
+        showImageUploadSourceChooser(fileChooserParams.createIntent(), cameraIntent);
+        return true;
+      }
 
       Intent intent = fileChooserParams.createIntent();
+      return launchFileChooserIntent(intent, "没有可选择文件的应用");
+    }
+
+    private boolean launchFileChooserIntent(Intent intent, String errorMessage) {
       try {
         startActivityForResult(intent, FILE_CHOOSER_REQUEST_CODE);
         return true;
       } catch (ActivityNotFoundException err) {
         fileChooserCallback = null;
-        Toast.makeText(MainActivity.this, "没有可选择文件的应用", Toast.LENGTH_SHORT).show();
+        preparedCameraImageUri = null;
+        pendingCameraImageUri = null;
+        Toast.makeText(MainActivity.this, errorMessage, Toast.LENGTH_SHORT).show();
         return false;
+      }
+    }
+
+    private void showImageUploadSourceChooser(Intent contentIntent, Intent cameraIntent) {
+      new AlertDialog.Builder(MainActivity.this)
+        .setTitle("上传图片")
+        .setItems(new String[] { "拍照", "选择文件" }, (dialog, which) -> {
+          if (which == 0) {
+            pendingCameraImageUri = preparedCameraImageUri;
+            launchFileChooserIntent(cameraIntent, "没有可用的相机应用");
+            return;
+          }
+          preparedCameraImageUri = null;
+          pendingCameraImageUri = null;
+          launchFileChooserIntent(contentIntent, "没有可选择文件的应用");
+        })
+        .setOnCancelListener((dialog) -> cancelPendingFileChooser())
+        .show();
+    }
+
+    private void cancelPendingFileChooser() {
+      if (fileChooserCallback != null) {
+        fileChooserCallback.onReceiveValue(null);
+      }
+      fileChooserCallback = null;
+      preparedCameraImageUri = null;
+      pendingCameraImageUri = null;
+    }
+
+    private boolean acceptsImage(String[] acceptTypes) {
+      if (acceptTypes == null || acceptTypes.length == 0) {
+        return true;
+      }
+
+      for (String acceptType : acceptTypes) {
+        String value = acceptType == null ? "" : acceptType.trim().toLowerCase(Locale.US);
+        if (
+          value.isEmpty()
+            || value.equals("*/*")
+            || value.contains("image/")
+            || value.contains(".jpg")
+            || value.contains(".jpeg")
+            || value.contains(".png")
+            || value.contains(".webp")
+            || value.contains(".gif")
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    private Intent createCameraCaptureIntent() {
+      Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+      try {
+        File captureDir = new File(getCacheDir(), "captured-images");
+        if (!captureDir.exists() && !captureDir.mkdirs()) {
+          return null;
+        }
+        clearSharedImageCache(captureDir);
+
+        String fileName = "promptx-capture-" + System.currentTimeMillis() + ".jpg";
+        Uri imageUri = new Uri.Builder()
+          .scheme("content")
+          .authority(getPackageName() + ".sharedimage")
+          .appendPath("capture")
+          .appendPath(fileName)
+          .build();
+
+        cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, imageUri);
+        cameraIntent.setClipData(ClipData.newUri(getContentResolver(), "PromptX capture", imageUri));
+        cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        preparedCameraImageUri = imageUri;
+        return cameraIntent;
+      } catch (RuntimeException err) {
+        preparedCameraImageUri = null;
+        pendingCameraImageUri = null;
+        return null;
       }
     }
 

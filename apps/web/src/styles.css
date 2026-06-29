@@ -469,6 +469,47 @@ body {
     background: transparent;
   }
 
+  .response-image-export-card .codex-table-wrap {
+    overflow: visible;
+  }
+
+  .response-image-export-card.codex-markdown table,
+  .response-image-export-card .codex-markdown table {
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .response-image-export-card.codex-markdown th,
+  .response-image-export-card.codex-markdown td,
+  .response-image-export-card .codex-markdown th,
+  .response-image-export-card .codex-markdown td {
+    overflow-wrap: anywhere;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .response-image-export-card.codex-markdown pre,
+  .response-image-export-card .codex-markdown pre {
+    overflow-x: visible;
+  }
+
+  .response-image-export-card.codex-markdown .codex-code-block pre,
+  .response-image-export-card .codex-markdown .codex-code-block pre {
+    padding-right: 0.6rem;
+  }
+
+  .response-image-export-card.codex-markdown pre code,
+  .response-image-export-card .codex-markdown pre code {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .response-image-export-card.codex-markdown .codex-code-block__copy,
+  .response-image-export-card .codex-markdown .codex-code-block__copy {
+    display: none;
+  }
+
   .process-detail-panel {
     border: 1px dashed var(--theme-borderDefault);
     border-radius: var(--theme-processDetailRadius);
