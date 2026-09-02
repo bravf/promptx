@@ -1,171 +1,65 @@
-﻿import { execFileSync, spawn } from 'node:child_process'
-import process from 'node:process'
+import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 
-const DEFAULT_SERVER_PORT = 3001
-const DEFAULT_RUNNER_PORT = 3002
+const DEFAULT_DAEMON_PORT = 3001
 const DEFAULT_WEB_PORT = 5174
 const DEFAULT_HOST = '127.0.0.1'
 
 function resolvePnpmCommand() {
-  if (process.platform !== 'win32') {
-    return 'pnpm'
-  }
-
+  if (process.platform !== 'win32') return 'pnpm'
   try {
-    const output = execFileSync('where.exe', ['pnpm'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    }).trim()
-
-    if (!output) {
-      return 'pnpm'
-    }
-
-    const candidates = output
-      .split(/\r?\n/g)
-      .map((line) => line.trim())
-      .filter(Boolean)
-
-    return candidates.find((item) => /\.(cmd|bat)$/i.test(item))
-      || candidates.find((item) => /\.(exe|com)$/i.test(item))
-      || candidates[0]
-      || 'pnpm'
+    return execFileSync('where.exe', ['pnpm'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .trim().split(/\r?\n/).find((item) => /\.(cmd|bat|exe)$/i.test(item)) || 'pnpm'
   } catch {
     return 'pnpm'
   }
 }
 
-function spawnChild(command, args, env = {}) {
-  const isWindowsShellScript = process.platform === 'win32' && /\.(cmd|bat)$/i.test(path.basename(command))
-  const spawnCommand = isWindowsShellScript ? (process.env.ComSpec || 'cmd.exe') : command
-  const spawnArgs = isWindowsShellScript ? ['/d', '/s', '/c', command, ...args] : args
-
-  return spawn(spawnCommand, spawnArgs, {
+function spawnChild(command, args, env) {
+  const useShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(path.basename(command))
+  return spawn(useShell ? (process.env.ComSpec || 'cmd.exe') : command, useShell ? ['/d', '/s', '/c', command, ...args] : args, {
     cwd: process.cwd(),
     stdio: 'inherit',
     windowsHide: true,
-    env: {
-      ...process.env,
-      ...env,
-    },
+    env: { ...process.env, ...env },
     shell: false,
   })
 }
 
-function killChild(child) {
-  if (!child || child.killed) {
-    return
-  }
+const host = String(process.env.HOST || process.env.PROMPTX_DEV_HOST || DEFAULT_HOST).trim() || DEFAULT_HOST
+const daemonPort = Math.max(1, Number(process.env.PORT || process.env.PROMPTX_DAEMON_PORT) || DEFAULT_DAEMON_PORT)
+const webPort = Math.max(1, Number(process.env.WEB_PORT || process.env.PROMPTX_WEB_PORT) || DEFAULT_WEB_PORT)
+const pnpm = resolvePnpmCommand()
 
-  if (process.platform === 'win32') {
-    child.kill()
-    return
-  }
+console.log(`[promptx-dev] Web:   http://${host}:${webPort}`)
+console.log(`[promptx-dev] Daemon: http://${host}:${daemonPort}`)
+console.log('[promptx-dev] 按 Ctrl+C 可同时停止服务。')
 
-  child.kill('SIGTERM')
-}
-
-async function main() {
-  const host = String(process.env.HOST || process.env.PROMPTX_DEV_HOST || DEFAULT_HOST).trim() || DEFAULT_HOST
-  const serverPort = Math.max(
-    1,
-    Number(process.env.PORT || process.env.PROMPTX_SERVER_PORT) || DEFAULT_SERVER_PORT
-  )
-  const runnerPort = Math.max(
-    1,
-    Number(process.env.RUNNER_PORT || process.env.PROMPTX_RUNNER_PORT) || DEFAULT_RUNNER_PORT
-  )
-  const webPort = Math.max(
-    1,
-    Number(process.env.WEB_PORT || process.env.PROMPTX_WEB_PORT) || DEFAULT_WEB_PORT
-  )
-
-  console.log(`[promptx-dev] Web:    http://${host}:${webPort}`)
-  console.log(`[promptx-dev] Server: http://${host}:${serverPort}`)
-  console.log(`[promptx-dev] Runner: http://${host}:${runnerPort}`)
-  console.log('[promptx-dev] 按 Ctrl+C 可同时停止前后端和 runner。')
-
-  const pnpmCommand = resolvePnpmCommand()
-  const serverProcess = spawnChild(
-    pnpmCommand,
-    ['--filter', '@promptx/server', 'dev'],
-    {
-      HOST: host,
-      PORT: String(serverPort),
-      PROMPTX_SERVER_PORT: String(serverPort),
-      PROMPTX_RUNNER_PORT: String(runnerPort),
-      PROMPTX_RUNNER_BASE_URL: `http://${host}:${runnerPort}`,
-    }
-  )
-
-  const runnerProcess = spawnChild(
-    pnpmCommand,
-    ['--filter', '@promptx/runner', 'dev'],
-    {
-      HOST: host,
-      RUNNER_PORT: String(runnerPort),
-      PROMPTX_RUNNER_PORT: String(runnerPort),
-      PROMPTX_SERVER_PORT: String(serverPort),
-      PROMPTX_SERVER_BASE_URL: `http://${host}:${serverPort}`,
-    }
-  )
-
-  const webProcess = spawnChild(
-    pnpmCommand,
-    ['--filter', '@promptx/web', 'exec', 'vite', '--host', host, '--port', String(webPort)],
-    {
-      VITE_API_PORT: String(serverPort),
-      PROMPTX_SERVER_PORT: String(serverPort),
-      PROMPTX_WEB_PORT: String(webPort),
-    }
-  )
-
-  const children = [serverProcess, runnerProcess, webProcess]
-  let shuttingDown = false
-
-  const shutdown = (code = 0) => {
-    if (shuttingDown) {
-      return
-    }
-
-    shuttingDown = true
-    children.forEach(killChild)
-    setTimeout(() => {
-      process.exit(code)
-    }, 100)
-  }
-
-  process.on('SIGINT', () => shutdown(0))
-  process.on('SIGTERM', () => shutdown(0))
-
-  serverProcess.on('exit', (code, signal) => {
-    if (shuttingDown) {
-      return
-    }
-    console.error(`[promptx-dev] 后端已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`)
-    shutdown(Number(code) || 1)
-  })
-
-  runnerProcess.on('exit', (code, signal) => {
-    if (shuttingDown) {
-      return
-    }
-    console.error(`[promptx-dev] Runner 已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`)
-    shutdown(Number(code) || 1)
-  })
-
-  webProcess.on('exit', (code, signal) => {
-    if (shuttingDown) {
-      return
-    }
-    console.error(`[promptx-dev] 前端已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`)
-    shutdown(Number(code) || 1)
-  })
-}
-
-main().catch((error) => {
-  console.error(`[promptx-dev] ${error.message || error}`)
-  process.exitCode = 1
+const daemon = spawnChild(pnpm, ['--filter', '@promptx/daemon', 'dev'], {
+  HOST: host,
+  PORT: String(daemonPort),
+  PROMPTX_DAEMON_PORT: String(daemonPort),
 })
+const web = spawnChild(pnpm, ['--filter', '@promptx/web', 'exec', 'vite', '--host', host, '--port', String(webPort)], {
+  VITE_API_PORT: String(daemonPort),
+  PROMPTX_WEB_PORT: String(webPort),
+})
+const children = [daemon, web]
+let stopping = false
+
+function shutdown(code = 0) {
+  if (stopping) return
+  stopping = true
+  for (const child of children) if (!child.killed) child.kill('SIGTERM')
+  setTimeout(() => process.exit(code), 100).unref()
+}
+
+process.on('SIGINT', () => shutdown(0))
+process.on('SIGTERM', () => shutdown(0))
+for (const [label, child] of [['Daemon', daemon], ['Web', web]]) {
+  child.on('exit', (code, signal) => {
+    if (stopping) return
+    console.error(`[promptx-dev] ${label} 已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`)
+    shutdown(Number(code) || 1)
+  })
+}

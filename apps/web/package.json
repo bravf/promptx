@@ -16,6 +16,7 @@
   "dependencies": {
     "@fontsource/geist-mono": "^5.2.7",
     "@fontsource/geist-sans": "^5.2.5",
+    "@promptx/protocol": "workspace:*",
     "@promptx/shared": "workspace:*",
     "@tiptap/core": "^3.22.0",
     "@tiptap/extension-paragraph": "^3.22.0",

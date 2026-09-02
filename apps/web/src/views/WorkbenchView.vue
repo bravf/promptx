@@ -1,1167 +1,598 @@
 <script setup>
-import { BLOCK_TYPES } from '@promptx/shared'
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
-import EditTaskDialog from '../components/EditTaskDialog.vue'
-import WorkbenchActivityPanel from '../components/WorkbenchActivityPanel.vue'
-import WorkbenchAgentSelector from '../components/WorkbenchAgentSelector.vue'
-import WorkbenchEditorActions from '../components/WorkbenchEditorActions.vue'
-import WorkbenchInputPanel from '../components/WorkbenchInputPanel.vue'
-import WorkbenchMobileDetailHeader from '../components/WorkbenchMobileDetailHeader.vue'
-import WorkbenchTaskListPanel from '../components/WorkbenchTaskListPanel.vue'
-import WorkbenchTodoDialog from '../components/WorkbenchTodoDialog.vue'
-import TopToast from '../components/TopToast.vue'
-import { useI18n } from '../composables/useI18n.js'
-import { useWorkbenchMobileLayout } from '../composables/useWorkbenchMobileLayout.js'
-import { usePageTitle } from '../composables/usePageTitle.js'
-import { useToast } from '../composables/useToast.js'
-import { useWorkbenchTasks } from '../composables/useWorkbenchTasks.js'
-import { useWorkbenchPreferences } from '../lib/workbenchPreferences.js'
-import { createTextBlock } from '../components/tiptapBlockEditorModel.js'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
+import { ArrowDown, Bot, Brain, Check, CircleStop, FolderOpen, LoaderCircle, Palette, Plus, Search, Send, TerminalSquare, Trash2, Wrench, X } from 'lucide-vue-next'
+import { v2Api, agentEventsUrl } from '../lib/v2Api.js'
+import { isTimelineAtBottom } from '../lib/timelineViewport.js'
+import { useTheme } from '../composables/useTheme.js'
+import TimelineMarkdown from '../components/TimelineMarkdown.vue'
 
-const showClearDialog = ref(false)
-const showDeleteDialog = ref(false)
-const showDiffDialog = ref(false)
-const showSettingsDialog = ref(false)
-const showEditTaskDialog = ref(false)
-const showTodoDialog = ref(false)
-const showTodoDeleteConfirm = ref(false)
-const showTodoUseConfirm = ref(false)
-const pendingTodoDeleteId = ref('')
-const pendingTodoUseId = ref('')
-const editingTaskTitleSlug = ref('')
-const diffFocusToken = ref(0)
-const preferredDiffScope = ref('workspace')
-const preferredDiffRunId = ref('')
-const { t } = useI18n()
-const { toastMessage, toastType, flashToast, clearToast } = useToast()
-const { notificationSoundEnabled, sendBehavior } = useWorkbenchPreferences()
-const TaskDiffReviewDialog = defineAsyncComponent(() => import('../components/TaskDiffReviewDialog.vue'))
-const WorkbenchSettingsDialog = defineAsyncComponent(() => import('../components/WorkbenchSettingsDialog.vue'))
-const NOTIFICATION_SOUND_URL = '/sounds/notify-didi.wav?v=20260420-1'
-const NOTIFICATION_SOUND_THROTTLE_MS = 3000
+const { currentTheme, isDark, setTheme, themes } = useTheme()
+const workspaces = ref([])
+const providers = ref([])
+const agents = ref([])
+const rows = ref([])
+const activeWorkspaceId = ref('')
+const activeAgentId = ref('')
+const prompt = ref('')
+const loading = ref(true)
+const sending = ref(false)
+const error = ref('')
+const dialog = ref('')
+const timelineEpoch = ref('')
+const hasOlderHistory = ref(false)
+const loadingOlderHistory = ref(false)
+const followingTimeline = ref(true)
+const hasNewTimelineItems = ref(false)
+const workspacePath = ref('')
+const workspacePathInput = ref(null)
+const directorySuggestions = ref([])
+const directorySearchLoading = ref(false)
+const directorySearchError = ref('')
+const directorySuggestionsOpen = ref(false)
+const selectedDirectoryIndex = ref(-1)
+const agentProvider = ref('codex')
+const timelineElement = ref(null)
+let eventSource = null
+let timelineRequestVersion = 0
+let positioningTimeline = false
+let directorySearchTimer = null
+let directorySearchController = null
+let markdownScrollFrame = null
 
-const codexPanelRef = ref(null)
-const currentProjectAgentBindings = ref([])
-const SELECTED_AGENT_ENGINE_STORAGE_KEY = 'promptx:selected-agent-engine-map'
+const activeWorkspace = computed(() => workspaces.value.find((item) => item.id === activeWorkspaceId.value))
+const activeAgent = computed(() => agents.value.find((item) => item.id === activeAgentId.value))
+const isRunning = computed(() => activeAgent.value?.lifecycle === 'running')
+const entries = computed(() => projectTimelineRows(rows.value))
+const latestTurnId = computed(() => rows.value.findLast((row) => row.turnId)?.turnId || '')
 
-function getPersistedAgentEngineMap() {
+async function loadInitial() {
+  loading.value = true
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(SELECTED_AGENT_ENGINE_STORAGE_KEY) || '{}')
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed
-    }
-  } catch {
-    // ignore
+    const [workspaceResult, providerResult] = await Promise.all([v2Api.listWorkspaces(), v2Api.listProviders()])
+    workspaces.value = workspaceResult.workspaces
+    providers.value = providerResult.providers
+    if (workspaces.value.length) await selectWorkspace(workspaces.value[0].id)
+  } catch (cause) {
+    error.value = cause.message
+  } finally {
+    loading.value = false
   }
-  return {}
 }
 
-function persistAgentEngineMap(map) {
-  window.localStorage.setItem(SELECTED_AGENT_ENGINE_STORAGE_KEY, JSON.stringify(map))
+async function selectWorkspace(id) {
+  timelineRequestVersion += 1
+  positioningTimeline = true
+  activeWorkspaceId.value = id
+  activeAgentId.value = ''
+  rows.value = []
+  timelineEpoch.value = ''
+  hasOlderHistory.value = false
+  loadingOlderHistory.value = false
+  followingTimeline.value = true
+  hasNewTimelineItems.value = false
+  closeEvents()
+  const result = await v2Api.listAgents(id)
+  agents.value = result.agents
+  if (agents.value.length) await selectAgent(agents.value[0].id)
+  else positioningTimeline = false
 }
 
-const selectedAgentEngineMap = ref(getPersistedAgentEngineMap())
-let notificationAudio = null
-let notificationAudioPrimed = false
-let lastNotificationSoundAt = 0
-
-function normalizeSelectedAgentEngine(value = '', bindings = currentProjectAgentBindings.value) {
-  const normalized = String(value || '').trim()
-  if (!normalized) {
-    return ''
-  }
-
-  return bindings.some((item) => item?.engine === normalized) ? normalized : ''
-}
-
-function getDefaultAgentEngine(bindings = currentProjectAgentBindings.value) {
-  return bindings.find((item) => item?.isDefault)?.engine || bindings[0]?.engine || ''
-}
-
-const currentSelectedAgentEngine = computed({
-  get() {
-    const taskSlug = String(currentTaskSlug.value || '').trim()
-    if (!taskSlug) {
-      return ''
-    }
-
-    const saved = String(selectedAgentEngineMap.value[taskSlug] || '').trim()
-    if (saved) {
-      return saved
-    }
-
-    return getDefaultAgentEngine()
-  },
-  set(value) {
-    const taskSlug = String(currentTaskSlug.value || '').trim()
-    const normalized = String(value || '').trim()
-    if (!taskSlug || !normalized) {
-      return
-    }
-
-    selectedAgentEngineMap.value = {
-      ...selectedAgentEngineMap.value,
-      [taskSlug]: normalized,
-    }
-    persistAgentEngineMap(selectedAgentEngineMap.value)
-  },
-})
-
-function getCurrentPanelRef(currentTaskSlug) {
-  if (!currentTaskSlug) {
-    return null
-  }
-
-  return codexPanelRef.value
-}
-
-function scrollCurrentPanelToBottom() {
-  nextTick(() => {
-    getCurrentPanelRef(currentTaskSlug.value)?.scrollToBottom?.()
-  })
-}
-
-const {
-  addCurrentDraftToTodo,
-  applyTaskSettingsUpdate,
-  buildPromptForTask,
-  getPromptBlocksForTask,
-  clearCurrentTaskContent,
-  createTaskAndSelect,
-  creatingTask,
-  currentProjectSessionId,
-  currentTaskSendState,
-  currentTaskAutoTitle,
-  currentTaskDisplayTitle,
-  currentTaskSlug,
-  draft,
-  editorRef,
-  error,
-  handleImportPdfFiles,
-  handleImportTextFiles,
-  handleTaskSendingChange,
-  handleTaskSessionChange,
-  handleUpload,
-  hasCurrentDraftContent,
-  hasUnsavedChanges,
-  hasUnreadTaskUpdates,
-  initializeWorkbench,
-  isCurrentTaskSending,
-  loadingTask,
-  loadingTasks,
-  pageTitle,
-  prepareCodexPromptForTask,
-  currentTodoItems,
-  removeTodoItem,
-  removeCurrentTask,
-  reorderTaskList,
-  removingTask,
-  renderedTasks,
-  saveTask,
-  saving,
-  selectTask,
-  unreadNotificationVersion,
-  updateLastPromptPreview,
-  useTodoItem,
-  uploading,
-} = useWorkbenchTasks({
-  clearToast,
-  flashToast,
-  scrollCurrentPanelToBottom,
-})
-
-const currentRenderedTask = computed(() =>
-  renderedTasks.value.find((task) => task.slug === currentTaskSlug.value) || null
-)
-const effectivePageTitle = computed(() => (
-  hasUnreadTaskUpdates.value ? t('workbench.newMessageTitle') : pageTitle.value
-))
-const useRawPageTitle = computed(() => hasUnreadTaskUpdates.value)
-const currentTaskDiffSupported = computed(() => Boolean(currentRenderedTask.value?.workspaceDiffSummary?.supported))
-const currentTaskBuildPrompt = computed(() => {
-  const task = currentRenderedTask.value
-  if (!task) {
-    return null
-  }
-
-  return () => prepareCodexPromptForTask(task.slug)
-})
-const currentTaskBuildPromptBlocks = computed(() => {
-  const task = currentRenderedTask.value
-  if (!task) {
-    return null
-  }
-
-  return () => getPromptBlocksForTask(task.slug)
-})
-const taskListPanelProps = computed(() => ({
-  creatingTask: creatingTask.value,
-  currentTaskAutoTitle: draft.value.autoTitle || currentTaskAutoTitle.value,
-  currentTaskSlug: currentTaskSlug.value,
-  draftTitle: draft.value.title,
-  editingTaskTitleSlug: editingTaskTitleSlug.value,
-  error: error.value,
-  isCurrentTaskSending: isCurrentTaskSending.value,
-  loadingTask: loadingTask.value,
-  loadingTasks: loadingTasks.value,
-  removingTask: removingTask.value,
-  tasks: renderedTasks.value,
-  uploading: uploading.value,
-}))
-const activityPanelProps = computed(() => ({
-  buildPromptBlocks: currentTaskBuildPromptBlocks.value,
-  buildPrompt: currentTaskBuildPrompt.value,
-  diffSupported: currentTaskDiffSupported.value,
-  selectedAgentEngine: currentSelectedAgentEngine.value,
-  selectedSessionId: currentProjectSessionId.value,
-  sessionSelectionLockReason: currentRenderedTask.value?.sessionSelectionLockReason || '',
-  sessionSelectionLocked: Boolean(currentRenderedTask.value?.sessionSelectionLocked),
-  taskSlug: currentRenderedTask.value?.slug || '',
-  taskRunning: Boolean(currentRenderedTask.value?.running),
-}))
-const inputPanelProps = computed(() => ({
-  codexSessionId: currentProjectSessionId.value,
-  sendBehavior: sendBehavior.value,
-  loading: loadingTask.value,
-}))
-const mobileDetailHeaderProps = computed(() => ({
-  currentTaskAutoTitle: draft.value.autoTitle || currentTaskAutoTitle.value,
-  currentTaskSlug: currentTaskSlug.value,
-  editingTaskTitleSlug: editingTaskTitleSlug.value,
-  title: currentTaskDisplayTitle.value,
-  titleInputValue: draft.value.title,
-}))
-const {
-  enterMobileDetail,
-  isMobileLayout,
-  leaveMobileDetail,
-  mobileDetailTab,
-  mobileView,
-} = useWorkbenchMobileLayout({
-  currentTaskSlug,
-})
-
-function resolvePreferredMobileDetailTab(task) {
-  if (task?.sending || Number(task?.codexRunCount || 0) > 0) {
-    return 'activity'
-  }
-
-  return 'input'
-}
-
-usePageTitle(effectivePageTitle, {
-  raw: useRawPageTitle,
-})
-
-function ensureNotificationAudio() {
-  if (typeof window === 'undefined') {
-    return null
-  }
-
-  if (!notificationAudio) {
-    notificationAudio = new Audio(NOTIFICATION_SOUND_URL)
-    notificationAudio.preload = 'auto'
-    notificationAudio.volume = 0.7
-  }
-
-  return notificationAudio
-}
-
-function primeNotificationAudio() {
-  if (!notificationSoundEnabled.value) {
-    return
-  }
-
-  const audio = ensureNotificationAudio()
-  if (!audio || notificationAudioPrimed) {
-    return
-  }
-
+async function selectAgent(id) {
+  const requestVersion = ++timelineRequestVersion
+  positioningTimeline = true
+  activeAgentId.value = id
+  closeEvents()
+  rows.value = []
+  timelineEpoch.value = ''
+  hasOlderHistory.value = false
+  loadingOlderHistory.value = false
+  followingTimeline.value = true
+  hasNewTimelineItems.value = false
   try {
-    audio.muted = true
-    const playPromise = audio.play()
-    if (playPromise && typeof playPromise.then === 'function') {
-      playPromise
-        .then(() => {
-          audio.pause()
-          audio.currentTime = 0
-          audio.muted = false
-          notificationAudioPrimed = true
-        })
-        .catch(() => {
-          audio.muted = false
-        })
-      return
-    }
-
-    audio.pause()
-    audio.currentTime = 0
-    audio.muted = false
-    notificationAudioPrimed = true
-  } catch {
-    audio.muted = false
+    const result = await v2Api.getTimeline(id)
+    if (requestVersion !== timelineRequestVersion || activeAgentId.value !== id) return
+    rows.value = result.timeline.rows
+    timelineEpoch.value = result.timeline.epoch
+    hasOlderHistory.value = result.timeline.hasOlder
+    await scrollToBottom({ force: true })
+    if (requestVersion !== timelineRequestVersion || activeAgentId.value !== id) return
+    positioningTimeline = false
+    openEvents(id, result.timeline.epoch, result.timeline.window.maxSeq)
+    fillTimelineViewport()
+  } catch (cause) {
+    if (requestVersion === timelineRequestVersion) error.value = cause.message
+  } finally {
+    if (requestVersion === timelineRequestVersion) positioningTimeline = false
   }
 }
 
-function handleUserGestureForNotificationAudio() {
-  primeNotificationAudio()
-}
+async function loadOlderHistory() {
+  const agentId = activeAgentId.value
+  const epoch = timelineEpoch.value
+  const beforeSeq = rows.value[0]?.seq
+  if (!agentId || !epoch || !beforeSeq || !hasOlderHistory.value || loadingOlderHistory.value) return
 
-function playTurnFinishedNotificationSound() {
-  const audio = ensureNotificationAudio()
-  if (!audio || !notificationSoundEnabled.value) {
-    return
-  }
-
-  const now = Date.now()
-  if (now - lastNotificationSoundAt < NOTIFICATION_SOUND_THROTTLE_MS) {
-    return
-  }
-  lastNotificationSoundAt = now
-
+  const requestVersion = timelineRequestVersion
+  let shouldContinueFilling = false
+  loadingOlderHistory.value = true
   try {
-    audio.muted = false
-    audio.currentTime = 0
-    audio.play().catch(() => {})
-  } catch {
-    // Browser autoplay policies can still block notification sounds.
+    const result = await v2Api.getTimeline(agentId, {
+      direction: 'before',
+      cursor: `${epoch}:${beforeSeq}`,
+      limit: 300,
+    })
+    if (requestVersion !== timelineRequestVersion || activeAgentId.value !== agentId) return
+    if (result.timeline.reset || result.timeline.epoch !== epoch) {
+      await selectAgent(agentId)
+      return
+    }
+    const existingSeqs = new Set(rows.value.map((row) => row.seq))
+    const olderRows = result.timeline.rows.filter((row) => !existingSeqs.has(row.seq))
+    const element = timelineElement.value
+    const previousHeight = element?.scrollHeight || 0
+    const previousTop = element?.scrollTop || 0
+    positioningTimeline = true
+    rows.value = [...olderRows, ...rows.value]
+    hasOlderHistory.value = result.timeline.hasOlder
+    await nextTick()
+    if (element) {
+      element.scrollTop = previousTop + element.scrollHeight - previousHeight
+      shouldContinueFilling = olderRows.length > 0 && hasOlderHistory.value && element.scrollHeight <= element.clientHeight
+    }
+  } catch (cause) {
+    if (requestVersion === timelineRequestVersion) error.value = cause.message
+  } finally {
+    if (requestVersion === timelineRequestVersion) {
+      loadingOlderHistory.value = false
+      positioningTimeline = false
+      if (shouldContinueFilling) loadOlderHistory()
+    }
   }
 }
 
-function openTaskDiff(scope = 'workspace', runId = '') {
-  preferredDiffScope.value = scope === 'run' ? 'run' : scope === 'task' ? 'task' : 'workspace'
-  preferredDiffRunId.value = preferredDiffScope.value === 'run' ? String(runId || '') : ''
-  showDiffDialog.value = true
-  diffFocusToken.value += 1
+function fillTimelineViewport() {
+  const element = timelineElement.value
+  if (element && element.scrollHeight <= element.clientHeight) loadOlderHistory()
 }
 
-function closeTaskDiff() {
-  showDiffDialog.value = false
+function handleTimelineScroll(event) {
+  if (positioningTimeline) return
+  const element = event.currentTarget
+  const atBottom = isTimelineAtBottom(element)
+  followingTimeline.value = atBottom
+  if (atBottom) hasNewTimelineItems.value = false
+  if (element.scrollTop <= 64) loadOlderHistory()
 }
 
-function openSettingsDialog() {
-  showSettingsDialog.value = true
-}
-
-function closeSettingsDialog() {
-  showSettingsDialog.value = false
-}
-
-function openEditTaskDialog() {
-  if (!currentTaskSlug.value) {
-    return
-  }
-
-  showEditTaskDialog.value = true
-}
-
-function closeEditTaskDialog() {
-  showEditTaskDialog.value = false
-}
-
-function openTodoDialog() {
-  showTodoDialog.value = true
-}
-
-function closeTodoDialog() {
-  showTodoDialog.value = false
-  closeTodoDeleteConfirm()
-  closeTodoUseConfirm()
-}
-
-function closeTodoDeleteConfirm() {
-  showTodoDeleteConfirm.value = false
-  pendingTodoDeleteId.value = ''
-}
-
-function closeTodoUseConfirm() {
-  showTodoUseConfirm.value = false
-  pendingTodoUseId.value = ''
-}
-
-function handleTaskSettingsSaved(task) {
-  applyTaskSettingsUpdate(task)
-}
-
-function updateDraftTitle(value) {
-  draft.value.title = value
-}
-
-async function handleTaskTitleBlur() {
-  editingTaskTitleSlug.value = ''
-  if (hasUnsavedChanges.value) {
-    await saveTask({ auto: false, silent: true })
-  }
-}
-
-function beginTaskTitleEdit(taskSlug) {
-  if (taskSlug !== currentTaskSlug.value) {
-    return
-  }
-
-  editingTaskTitleSlug.value = taskSlug
-  nextTick(() => {
-    const element = document.querySelector('[data-task-title-input="current"]')
-    element?.focus?.()
-    element?.select?.()
+function openEvents(agentId, epoch, seq) {
+  eventSource = new EventSource(agentEventsUrl(agentId, seq ? `${epoch}:${seq}` : ''))
+  eventSource.addEventListener('timeline', (event) => {
+    const { row } = JSON.parse(event.data)
+    if (rows.value.some((item) => item.seq === row.seq)) return
+    const shouldFollow = isTimelineAtBottom(timelineElement.value)
+    rows.value.push(row)
+    followingTimeline.value = shouldFollow
+    if (shouldFollow) scrollToBottom()
+    else hasNewTimelineItems.value = true
+  })
+  eventSource.addEventListener('agent', (event) => {
+    const { agent } = JSON.parse(event.data)
+    const index = agents.value.findIndex((item) => item.id === agent.id)
+    if (index >= 0) agents.value[index] = agent
+    sending.value = agent.lifecycle === 'running'
+  })
+  eventSource.addEventListener('reset', (event) => {
+    const { timeline } = JSON.parse(event.data)
+    rows.value = timeline.rows
+    timelineEpoch.value = timeline.epoch
+    hasOlderHistory.value = timeline.hasOlder
+    if (followingTimeline.value) scrollToBottom()
+    else hasNewTimelineItems.value = true
   })
 }
 
-async function handleTaskTitleClick(taskSlug) {
-  if (isMobileLayout.value) {
-    await handleTaskSelect(taskSlug)
-    return
-  }
-
-  if (taskSlug !== currentTaskSlug.value) {
-    await handleTaskSelect(taskSlug)
-    return
-  }
-
-  beginTaskTitleEdit(taskSlug)
+function closeEvents() {
+  eventSource?.close()
+  eventSource = null
 }
 
-function openDeleteDialog() {
-  showDeleteDialog.value = true
+function cancelDirectorySearch() {
+  if (directorySearchTimer) clearTimeout(directorySearchTimer)
+  directorySearchTimer = null
+  directorySearchController?.abort()
+  directorySearchController = null
 }
 
-function closeDeleteDialog() {
-  if (removingTask.value) {
-    return
-  }
-
-  showDeleteDialog.value = false
-}
-
-async function confirmRemoveCurrentTask() {
-  await removeCurrentTask()
-  showDeleteDialog.value = false
-  if (isMobileLayout.value) {
-    leaveMobileDetail({ useHistory: false })
-  }
-}
-
-function openClearDialog() {
-  showClearDialog.value = true
-}
-
-function closeClearDialog() {
-  showClearDialog.value = false
-}
-
-function clearAllContent() {
-  showClearDialog.value = false
-  clearCurrentTaskContent()
-}
-
-function handleCurrentTaskSendingChange(nextSending) {
-  const task = currentRenderedTask.value
-  if (!task) {
-    return
-  }
-
-  handleTaskSendingChange(task.slug, nextSending)
-}
-
-function handleCurrentTaskSessionChange(nextSessionId) {
-  const task = currentRenderedTask.value
-  if (!task) {
-    return
-  }
-
-  handleTaskSessionChange(task.slug, nextSessionId)
-}
-
-function handleCurrentAgentBindingsChange(payload = {}) {
-  const sessionId = String(payload?.sessionId || '').trim()
-  const activeProjectSessionId = currentProjectSessionId.value
-  if (sessionId && sessionId !== activeProjectSessionId) {
-    return
-  }
-
-  const bindings = Array.isArray(payload?.bindings) ? payload.bindings : []
-  currentProjectAgentBindings.value = bindings
-
-  const taskSlug = String(currentTaskSlug.value || '').trim()
-  if (!taskSlug) {
-    return
-  }
-
-  // 优先恢复该任务之前保存的选择
-  const saved = String(selectedAgentEngineMap.value[taskSlug] || '').trim()
-  if (saved && bindings.some((item) => item?.engine === saved)) {
-    if (currentSelectedAgentEngine.value !== saved) {
-      currentSelectedAgentEngine.value = saved
+async function searchDirectorySuggestions(query = workspacePath.value) {
+  directorySearchController?.abort()
+  const controller = new AbortController()
+  directorySearchController = controller
+  directorySearchLoading.value = true
+  directorySearchError.value = ''
+  selectedDirectoryIndex.value = -1
+  try {
+    const result = await v2Api.searchDirectories(query.trim(), { limit: 20, signal: controller.signal })
+    if (directorySearchController !== controller) return
+    directorySuggestions.value = result.items || []
+    directorySuggestionsOpen.value = true
+  } catch (cause) {
+    if (cause.name === 'AbortError' || directorySearchController !== controller) return
+    directorySuggestions.value = []
+    directorySuggestionsOpen.value = true
+    directorySearchError.value = cause.message
+  } finally {
+    if (directorySearchController === controller) {
+      directorySearchController = null
+      directorySearchLoading.value = false
     }
-    return
-  }
-
-  const nextEngine = normalizeSelectedAgentEngine(payload?.selectedEngine, bindings)
-    || getDefaultAgentEngine(bindings)
-  if (nextEngine && currentSelectedAgentEngine.value !== nextEngine) {
-    currentSelectedAgentEngine.value = nextEngine
   }
 }
 
-watch(
-  currentProjectSessionId,
-  (value, previousValue) => {
-    if (String(value || '').trim() === String(previousValue || '').trim()) {
-      return
-    }
-
-    currentProjectAgentBindings.value = []
-  }
-)
-
-function handleCurrentAgentEngineChange(value) {
-  currentSelectedAgentEngine.value = value
+function scheduleDirectorySearch() {
+  if (directorySearchTimer) clearTimeout(directorySearchTimer)
+  directorySearchController?.abort()
+  directorySuggestionsOpen.value = true
+  selectedDirectoryIndex.value = -1
+  directorySearchTimer = setTimeout(() => {
+    directorySearchTimer = null
+    searchDirectorySuggestions()
+  }, 250)
 }
 
-function handleActivityToast(message) {
-  flashToast(message)
-
-  if (!isMobileLayout.value || !currentTaskSlug.value) {
-    return
-  }
-
-  mobileDetailTab.value = 'activity'
-}
-
-async function flushCurrentEditorInput() {
-  if (typeof document !== 'undefined' && editorRef.value?.isComposing?.()) {
-    document.activeElement?.blur?.()
-  }
-
-  editorRef.value?.flushPendingInput?.()
+async function openWorkspaceDialog() {
+  workspacePath.value = ''
+  directorySuggestions.value = []
+  directorySearchError.value = ''
+  directorySuggestionsOpen.value = true
+  selectedDirectoryIndex.value = -1
+  dialog.value = 'workspace'
   await nextTick()
-  editorRef.value?.flushPendingInput?.()
+  workspacePathInput.value?.focus()
+  searchDirectorySuggestions('')
+}
+
+function closeWorkspaceDialog() {
+  cancelDirectorySearch()
+  directorySuggestionsOpen.value = false
+  dialog.value = ''
+}
+
+function selectDirectory(directory) {
+  workspacePath.value = directory.path
+  selectedDirectoryIndex.value = -1
+  directorySuggestionsOpen.value = false
+  workspacePathInput.value?.focus()
+}
+
+async function revealSelectedDirectory() {
   await nextTick()
+  document.getElementById(`directory-suggestion-${selectedDirectoryIndex.value}`)?.scrollIntoView({ block: 'nearest' })
 }
 
-async function copyCodexPrompt() {
-  await flushCurrentEditorInput()
-  await navigator.clipboard.writeText(buildPromptForTask(currentTaskSlug.value))
-  flashToast({ message: t('workbench.promptCopied'), type: 'info' })
-}
-
-async function handleCreateTask() {
-  const created = await createTaskAndSelect()
-  if (created && isMobileLayout.value) {
-    mobileDetailTab.value = 'input'
-    enterMobileDetail()
-  }
-}
-
-async function handleTaskSelect(taskSlug) {
-  const targetSlug = String(taskSlug || '').trim()
-  if (!targetSlug) {
-    return
-  }
-
-  if (targetSlug !== currentTaskSlug.value) {
-    await selectTask(targetSlug)
-  }
-
-  if (isMobileLayout.value && currentTaskSlug.value === targetSlug) {
-    mobileDetailTab.value = resolvePreferredMobileDetailTab(currentRenderedTask.value)
-    enterMobileDetail()
-  }
-}
-
-async function handleTaskReorder(slugs = []) {
-  await reorderTaskList(slugs)
-}
-
-async function handleAddTodo() {
-  await flushCurrentEditorInput()
-  addCurrentDraftToTodo()
-}
-
-function getCodeContextRangeLabel(context = {}) {
-  const explicit = String(context?.rangeLabel || '').trim()
-  if (explicit) {
-    return explicit
-  }
-
-  const start = Math.max(0, Number(context?.lineStart) || 0)
-  const end = Math.max(0, Number(context?.lineEnd) || 0)
-  if (start && end && start !== end) {
-    return `L${start}-L${end}`
-  }
-  if (start || end) {
-    return `L${start || end}`
-  }
-  return ''
-}
-
-function getCodeContextFileName(filePath = '') {
-  const name = String(filePath || '').trim().split('/').filter(Boolean).pop() || 'code'
-  return `code-context-${name}.md`
-}
-
-function buildCodeContextBlock(context = {}) {
-  const filePath = String(context?.filePath || '').trim()
-  const code = String(context?.content || '').replace(/\r\n/g, '\n').trimEnd()
-  if (!filePath || !code.trim()) {
-    return null
-  }
-
-  const language = String(context?.language || '').trim()
-  const rangeLabel = getCodeContextRangeLabel(context)
-  const sourceLabel = String(context?.source || '').trim() === 'diff'
-    ? t('workbench.codeContextSourceDiff')
-    : t('workbench.codeContextSourceFile')
-  const fence = language ? `\`\`\`${language}` : '```'
-  const lines = [
-    t('workbench.codeContextTitle'),
-    t('workbench.codeContextFile', { path: filePath }),
-    rangeLabel ? t('workbench.codeContextRange', { range: rangeLabel }) : '',
-    t('workbench.codeContextSource', { source: sourceLabel }),
-    '',
-    fence,
-    code,
-    '```',
-  ].filter((line) => line !== '')
-
-  return {
-    type: BLOCK_TYPES.IMPORTED_TEXT,
-    content: lines.join('\n'),
-    meta: {
-      fileName: getCodeContextFileName(filePath),
-      collapsed: false,
-    },
-  }
-}
-
-async function insertBlocksIntoEditor(blocks = [], method = 'insertBlocks') {
-  const normalizedBlocks = Array.isArray(blocks) ? blocks.filter(Boolean) : []
-  if (!normalizedBlocks.length) {
-    return false
-  }
-
-  await flushCurrentEditorInput()
-  editorRef.value?.[method]?.(normalizedBlocks)
-  await nextTick()
-  editorRef.value?.focusEditor?.()
-
-  if (isMobileLayout.value && currentTaskSlug.value) {
-    mobileDetailTab.value = 'input'
-  }
-
-  flashToast({
-    message: t('taskActions.insertedToEditor'),
-    type: 'success',
-  })
-
-  return true
-}
-
-async function handleInsertCodeContext(context = {}) {
-  const source = String(context?.source || '').trim()
-  const blocks = Array.isArray(context?.blocks) ? context.blocks.filter(Boolean) : []
-  const responseContent = String(context?.content || '').replace(/\r\n/g, '\n').trim()
-
-  if (source === 'response') {
-    if (blocks.length) {
-      await insertBlocksIntoEditor(blocks, 'insertBlocks')
-      return
-    }
-
-    if (!responseContent) {
-      return
-    }
-
-    await insertBlocksIntoEditor([createTextBlock(responseContent)], 'insertBlocks')
-    return
-  }
-
-  const block = buildCodeContextBlock(context)
-  if (!block) {
-    return
-  }
-
-  await insertBlocksIntoEditor([block], 'insertImportedBlocks')
-}
-
-function handleDeleteTodo(todoId) {
-  pendingTodoDeleteId.value = String(todoId || '').trim()
-  showTodoDeleteConfirm.value = Boolean(pendingTodoDeleteId.value)
-}
-
-function confirmDeleteTodo() {
-  if (!pendingTodoDeleteId.value) {
-    return
-  }
-
-  removeTodoItem(pendingTodoDeleteId.value)
-  closeTodoDeleteConfirm()
-}
-
-async function applyTodoToEditor(todoId = pendingTodoUseId.value) {
-  const normalizedTodoId = String(todoId || '').trim()
-  if (!normalizedTodoId) {
-    return false
-  }
-
-  const appliedTodo = useTodoItem(normalizedTodoId)
-  if (!appliedTodo) {
-    return false
-  }
-
-  closeTodoUseConfirm()
-  closeTodoDialog()
-  return true
-}
-
-async function handleUseTodo(todoId) {
-  await flushCurrentEditorInput()
-  const normalizedTodoId = String(todoId || '').trim()
-  if (!normalizedTodoId) {
-    return
-  }
-
-  if (!hasCurrentDraftContent.value) {
-    await applyTodoToEditor(normalizedTodoId)
-    return
-  }
-
-  pendingTodoUseId.value = normalizedTodoId
-  showTodoUseConfirm.value = true
-}
-
-async function sendToCodex() {
-  const taskSlug = currentTaskSlug.value
-  if (!taskSlug) {
-    return
-  }
-
-  const shouldPreserveDraftAfterSend = Boolean(currentRenderedTask.value?.automation?.enabled)
-  await flushCurrentEditorInput()
-  updateLastPromptPreview(taskSlug, buildPromptForTask(taskSlug))
-  const didSend = await getCurrentPanelRef(taskSlug)?.send?.()
-  if (!didSend || taskSlug !== currentTaskSlug.value) {
-    return
-  }
-
-  if (isMobileLayout.value) {
-    mobileDetailTab.value = 'activity'
-  }
-
-  if (!shouldPreserveDraftAfterSend) {
-    clearCurrentTaskContent({ silent: true })
-  }
-  await saveTask({ auto: false, silent: true })
-}
-
-function focusMobileEditorIfNeeded() {
-  if (!isMobileLayout.value || mobileView.value !== 'detail' || mobileDetailTab.value !== 'input' || !currentTaskSlug.value) {
-    return
-  }
-
-  nextTick(() => {
-    editorRef.value?.focusEditor?.()
-  })
-}
-
-function handleBeforeUnload(event) {
-  if (!hasUnsavedChanges.value && !uploading.value && !saving.value) {
-    return
-  }
-
-  event.preventDefault()
-  event.returnValue = ''
-}
-
-function closeTopWorkbenchDialog() {
-  if (showTodoUseConfirm.value) {
-    closeTodoUseConfirm()
-    return true
-  }
-
-  if (showTodoDeleteConfirm.value) {
-    closeTodoDeleteConfirm()
-    return true
-  }
-
-  if (showClearDialog.value) {
-    closeClearDialog()
-    return true
-  }
-
-  if (showDeleteDialog.value) {
-    closeDeleteDialog()
-    return true
-  }
-
-  if (showEditTaskDialog.value) {
-    closeEditTaskDialog()
-    return true
-  }
-
-  if (showTodoDialog.value) {
-    closeTodoDialog()
-    return true
-  }
-
-  if (showDiffDialog.value) {
-    closeTaskDiff()
-    return true
-  }
-
-  if (showSettingsDialog.value) {
-    closeSettingsDialog()
-    return true
-  }
-
-  if (getCurrentPanelRef(currentTaskSlug.value)?.closeTopDialog?.()) {
-    return true
-  }
-
-  return false
-}
-
-function handleWindowKeydown(event) {
-  const key = String(event.key || '')
-  const keyLower = key.toLowerCase()
-  const commandPressed = event.metaKey || event.ctrlKey
-
-  if (key === 'Escape') {
-    if (closeTopWorkbenchDialog()) {
+function handleDirectoryKeydown(event) {
+  if (event.key === 'Escape') {
+    if (directorySuggestionsOpen.value) {
       event.preventDefault()
-      event.stopImmediatePropagation?.()
+      directorySuggestionsOpen.value = false
     }
     return
   }
 
-  if (!commandPressed) {
-    return
+  if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return
+  if (!directorySuggestionsOpen.value) {
+    if (event.key === 'Enter') return
+    directorySuggestionsOpen.value = true
   }
+  if (!directorySuggestions.value.length) return
 
-  if (keyLower === 's') {
+  if (event.key === 'ArrowDown') {
     event.preventDefault()
-    saveTask({ auto: false })
-    return
-  }
-
-  if (event.shiftKey && key === 'Backspace') {
+    selectedDirectoryIndex.value = (selectedDirectoryIndex.value + 1) % directorySuggestions.value.length
+    revealSelectedDirectory()
+  } else if (event.key === 'ArrowUp') {
     event.preventDefault()
-    openClearDialog()
-    return
-  }
-
-  if (event.isComposing) {
-    return
-  }
-
-  if (event.shiftKey && event.code === 'Comma') {
+    selectedDirectoryIndex.value = selectedDirectoryIndex.value <= 0
+      ? directorySuggestions.value.length - 1
+      : selectedDirectoryIndex.value - 1
+    revealSelectedDirectory()
+  } else if (selectedDirectoryIndex.value >= 0) {
     event.preventDefault()
-    openSettingsDialog()
-    return
-  }
-
-  if (event.shiftKey && keyLower === 'k') {
-    event.preventDefault()
-    getCurrentPanelRef(currentTaskSlug.value)?.openProjectManager?.()
-    return
-  }
-
-  if (event.shiftKey && keyLower === 'o') {
-    event.preventDefault()
-    getCurrentPanelRef(currentTaskSlug.value)?.openSourceBrowser?.()
-    return
-  }
-
-  if (event.shiftKey && keyLower === 'd') {
-    event.preventDefault()
-    if (currentTaskDiffSupported.value) {
-      openTaskDiff('workspace')
-    }
+    selectDirectory(directorySuggestions.value[selectedDirectoryIndex.value])
   }
 }
 
-onMounted(() => {
-  initializeWorkbench()
-  window.addEventListener('beforeunload', handleBeforeUnload)
-  window.addEventListener('keydown', handleWindowKeydown)
-  window.addEventListener('pointerdown', handleUserGestureForNotificationAudio, { passive: true })
-})
+async function createWorkspace() {
+  try {
+    const { workspace } = await v2Api.createWorkspace({ cwd: workspacePath.value })
+    if (!workspaces.value.some((item) => item.id === workspace.id)) workspaces.value.push(workspace)
+    workspacePath.value = ''
+    closeWorkspaceDialog()
+    await selectWorkspace(workspace.id)
+  } catch (cause) {
+    error.value = cause.message
+  }
+}
 
+async function removeAgent(agent) {
+  if (!window.confirm(`确定删除 Agent“${agent.title}”？它的 Timeline 数据也会一并删除。`)) return
+  const removedIndex = agents.value.findIndex((item) => item.id === agent.id)
+  try {
+    await v2Api.deleteAgent(agent.id)
+    agents.value = agents.value.filter((item) => item.id !== agent.id)
+    if (activeAgentId.value !== agent.id) return
+    closeEvents()
+    timelineRequestVersion += 1
+    activeAgentId.value = ''
+    rows.value = []
+    timelineEpoch.value = ''
+    hasOlderHistory.value = false
+    followingTimeline.value = true
+    hasNewTimelineItems.value = false
+    sending.value = false
+    const fallback = agents.value[Math.min(removedIndex, agents.value.length - 1)]
+    if (fallback) await selectAgent(fallback.id)
+  } catch (cause) {
+    error.value = cause.message
+  }
+}
+
+async function createAgent() {
+  try {
+    const provider = providers.value.find((item) => item.id === agentProvider.value)
+    const { agent } = await v2Api.createAgent(activeWorkspaceId.value, { providerId: agentProvider.value, title: `${provider?.label || agentProvider.value} Agent` })
+    agents.value.unshift(agent)
+    dialog.value = ''
+    await selectAgent(agent.id)
+  } catch (cause) {
+    error.value = cause.message
+  }
+}
+
+async function removeWorkspace(workspace) {
+  if (!window.confirm(`确定移除工作区“${workspace.title}”？Agent 和 Timeline 数据会一并删除。`)) return
+  await v2Api.deleteWorkspace(workspace.id)
+  workspaces.value = workspaces.value.filter((item) => item.id !== workspace.id)
+  if (activeWorkspaceId.value !== workspace.id) return
+  closeEvents()
+  timelineRequestVersion += 1
+  agents.value = []
+  rows.value = []
+  timelineEpoch.value = ''
+  hasOlderHistory.value = false
+  loadingOlderHistory.value = false
+  followingTimeline.value = true
+  hasNewTimelineItems.value = false
+  activeWorkspaceId.value = ''
+  activeAgentId.value = ''
+  if (workspaces.value.length) await selectWorkspace(workspaces.value[0].id)
+}
+
+async function submitPrompt() {
+  const text = prompt.value.trim()
+  if (!text || !activeAgentId.value || isRunning.value) return
+  prompt.value = ''
+  sending.value = true
+  error.value = ''
+  try {
+    await v2Api.startTurn(activeAgentId.value, text, crypto.randomUUID())
+  } catch (cause) {
+    sending.value = false
+    error.value = cause.message
+  }
+}
+
+function handlePromptKeydown(event) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    submitPrompt()
+  }
+}
+
+async function scrollToBottom({ force = false, behavior = 'auto' } = {}) {
+  await nextTick()
+  if (!force && !followingTimeline.value) return
+  const element = timelineElement.value
+  element?.scrollTo({ top: element.scrollHeight, behavior })
+  followingTimeline.value = true
+  hasNewTimelineItems.value = false
+}
+
+function jumpToLatest() {
+  followingTimeline.value = true
+  scrollToBottom({ force: true, behavior: 'smooth' })
+}
+
+function handleMarkdownRendered() {
+  if (!followingTimeline.value || markdownScrollFrame) return
+  markdownScrollFrame = requestAnimationFrame(() => {
+    markdownScrollFrame = null
+    scrollToBottom()
+  })
+}
+
+function cycleTheme() {
+  const index = themes.value.findIndex((item) => item.id === currentTheme.value.id)
+  setTheme(themes.value[(index + 1) % themes.value.length].id)
+}
+
+onMounted(loadInitial)
 onBeforeUnmount(() => {
-  window.removeEventListener('beforeunload', handleBeforeUnload)
-  window.removeEventListener('keydown', handleWindowKeydown)
-  window.removeEventListener('pointerdown', handleUserGestureForNotificationAudio)
+  closeEvents()
+  cancelDirectorySearch()
+  if (markdownScrollFrame) cancelAnimationFrame(markdownScrollFrame)
 })
-
-watch(
-  [isMobileLayout, mobileView, mobileDetailTab, currentTaskSlug],
-  ([mobile, view, tab, taskSlug]) => {
-    if (!mobile || view !== 'detail' || tab !== 'input' || !taskSlug) {
-      return
-    }
-    focusMobileEditorIfNeeded()
-  }
-)
-
-watch(unreadNotificationVersion, (version, previousVersion) => {
-  if (Number(version) <= Number(previousVersion || 0)) {
-    return
-  }
-
-  playTurnFinishedNotificationSound()
-})
-
-const taskListPanelListeners = {
-  'update:draftTitle': updateDraftTitle,
-  'cancel-title-edit': () => {
-    editingTaskTitleSlug.value = ''
-  },
-  'create-task': handleCreateTask,
-  'edit-task': openEditTaskDialog,
-  'delete-task': openDeleteDialog,
-  'open-settings': openSettingsDialog,
-  'reorder-task': handleTaskReorder,
-  'select-task': handleTaskSelect,
-  'title-blur': handleTaskTitleBlur,
-  'title-click': handleTaskTitleClick,
-}
-
-const activityPanelListeners = {
-  'agent-bindings-change': handleCurrentAgentBindingsChange,
-  'insert-code-context': handleInsertCodeContext,
-  'open-diff': ({ scope, runId }) => openTaskDiff(scope, runId),
-  'project-created': () => flashToast({ message: t('workbench.projectCreated'), type: 'success' }),
-  'selected-session-change': handleCurrentTaskSessionChange,
-  'update:selectedAgentEngine': handleCurrentAgentEngineChange,
-  'sending-change': handleCurrentTaskSendingChange,
-  toast: handleActivityToast,
-}
-
-const inputPanelListeners = {
-  'clear-request': openClearDialog,
-  'file-feedback': (message) => flashToast({ message, type: 'warning' }),
-  'import-pdf-files': handleImportPdfFiles,
-  'import-text-files': handleImportTextFiles,
-  'send-request': sendToCodex,
-  'upload-files': handleUpload,
-}
-
-const mobileDetailHeaderListeners = {
-  'begin-edit': () => beginTaskTitleEdit(currentTaskSlug.value),
-  'back': leaveMobileDetail,
-  'cancel-title-edit': () => {
-    editingTaskTitleSlug.value = ''
-  },
-  'title-blur': handleTaskTitleBlur,
-  'update:titleInputValue': updateDraftTitle,
-}
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col overflow-hidden">
-    <TopToast :message="toastMessage" :type="toastType" />
+  <div class="v2-shell panel grid h-full min-h-0 overflow-hidden">
+    <aside class="workspace-sidebar flex min-h-0 flex-col border-r">
+      <header class="flex h-14 shrink-0 items-center justify-between border-b px-3">
+        <div class="flex min-w-0 items-center gap-2">
+          <div class="brand-mark flex h-7 w-7 items-center justify-center rounded-sm"><TerminalSquare class="h-4 w-4" /></div>
+          <span class="text-sm font-semibold">PromptX</span><span class="theme-muted-text text-[10px]">V2</span>
+        </div>
+        <button class="tool-button h-8 w-8" title="新增工作区" @click="openWorkspaceDialog"><Plus class="h-4 w-4" /></button>
+      </header>
+      <div class="min-h-0 flex-1 overflow-y-auto p-2">
+        <button v-for="workspace in workspaces" :key="workspace.id" class="workspace-row group mb-1 flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left" :class="workspace.id === activeWorkspaceId ? 'row-active' : ''" @click="selectWorkspace(workspace.id)">
+          <FolderOpen class="h-4 w-4 shrink-0" />
+          <span class="row-copy min-w-0 flex-1"><span class="block truncate text-xs font-medium">{{ workspace.title }}</span><span class="theme-muted-text block truncate font-mono text-[10px]">{{ workspace.cwd }}</span></span>
+          <span class="row-action h-6 w-6 items-center justify-center" title="移除工作区" @click.stop="removeWorkspace(workspace)"><Trash2 class="h-3.5 w-3.5" /></span>
+        </button>
+        <div v-if="!workspaces.length && !loading" class="theme-muted-text px-3 py-8 text-center text-xs">还没有工作区</div>
+      </div>
+      <footer class="flex items-center justify-between border-t p-2"><span class="theme-muted-text truncate px-1 text-[10px]">{{ currentTheme.shortName }}</span><button class="tool-button h-8 w-8" title="切换主题" @click="cycleTheme"><Palette class="h-4 w-4" /></button></footer>
+    </aside>
 
-    <ConfirmDialog
-      :open="showClearDialog"
-      :title="t('workbench.confirmClearTitle')"
-      :description="t('workbench.confirmClearDescription')"
-      :confirm-text="t('workbench.confirmClearAction')"
-      :cancel-text="t('workbench.continueEditing')"
-      @cancel="closeClearDialog"
-      @confirm="clearAllContent"
-    />
-    <ConfirmDialog
-      :open="showDeleteDialog"
-      :title="t('workbench.confirmDeleteTitle')"
-      :description="t('workbench.confirmDeleteDescription', { title: currentTaskDisplayTitle })"
-      :confirm-text="t('workbench.confirmDeleteAction')"
-      :cancel-text="t('workbench.keepForNow')"
-      :loading="removingTask"
-      danger
-      @cancel="closeDeleteDialog"
-      @confirm="confirmRemoveCurrentTask"
-    />
-    <ConfirmDialog
-      :open="showTodoDeleteConfirm"
-      :title="t('workbench.confirmDeleteTodoTitle')"
-      :description="t('workbench.confirmDeleteTodoDescription')"
-      :confirm-text="t('workbench.confirmDeleteAction')"
-      :cancel-text="t('workbench.keepForNow')"
-      danger
-      @cancel="closeTodoDeleteConfirm"
-      @confirm="confirmDeleteTodo"
-    />
-    <ConfirmDialog
-      :open="showTodoUseConfirm"
-      :title="t('workbench.replaceEditorTitle')"
-      :description="t('workbench.replaceEditorDescription')"
-      :confirm-text="t('workbench.confirmReplaceAction')"
-      :cancel-text="t('workbench.dontReplaceYet')"
-      @cancel="closeTodoUseConfirm"
-      @confirm="applyTodoToEditor()"
-    />
-    <WorkbenchTodoDialog
-      :open="showTodoDialog"
-      :items="currentTodoItems"
-      @close="closeTodoDialog"
-      @delete="handleDeleteTodo"
-      @use="handleUseTodo"
-    />
-    <TaskDiffReviewDialog
-      :open="showDiffDialog"
-      :task-slug="currentTaskSlug"
-      :task-title="currentTaskDisplayTitle"
-      :preferred-scope="preferredDiffScope"
-      :preferred-run-id="preferredDiffRunId"
-      :focus-token="diffFocusToken"
-      @insert-code-context="handleInsertCodeContext"
-      @close="closeTaskDiff"
-    />
-    <WorkbenchSettingsDialog :open="showSettingsDialog" @close="closeSettingsDialog" />
-    <EditTaskDialog
-      :open="showEditTaskDialog"
-      :task-slug="currentTaskSlug"
-      :task-title="currentTaskDisplayTitle"
-      @close="closeEditTaskDialog"
-      @saved="handleTaskSettingsSaved"
-    />
+    <main class="flex min-h-0 min-w-0 flex-col">
+      <header class="flex h-14 shrink-0 items-center justify-between border-b px-4">
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm font-semibold">{{ activeWorkspace?.title || '选择一个工作区' }}</div>
+          <div v-if="activeWorkspace" class="theme-muted-text truncate font-mono text-[10px]">{{ activeWorkspace.cwd }}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <div v-if="activeAgent" class="status-chip flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
+        </div>
+      </header>
 
-    <div v-if="!isMobileLayout" class="workbench-desktop-layout grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-1">
-      <WorkbenchTaskListPanel
-        v-bind="taskListPanelProps"
-        v-on="taskListPanelListeners"
-      />
+      <div v-if="activeWorkspace" class="agent-tabs flex h-10 shrink-0 items-center border-b px-1">
+        <div class="min-w-0 flex-1 overflow-x-auto">
+          <div class="flex min-w-max items-center gap-1 px-1">
+            <div v-for="agent in agents" :key="agent.id" class="agent-tab group flex h-8 max-w-44 items-center rounded-sm" :class="agent.id === activeAgentId ? 'row-active' : ''">
+              <button class="flex min-w-0 flex-1 items-center gap-1.5 py-1 pl-2 text-left" :title="agent.title" @click="selectAgent(agent.id)">
+                <span class="provider-mark flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-[8px] font-semibold">{{ agent.providerId.slice(0, 2).toUpperCase() }}</span>
+                <span class="truncate text-xs font-medium">{{ agent.title }}</span>
+                <LoaderCircle v-if="agent.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
+              </button>
+              <button class="agent-close flex h-7 w-7 shrink-0 items-center justify-center" :title="`删除 ${agent.title}`" @click="removeAgent(agent)"><X class="h-3 w-3" /></button>
+            </div>
+            <button class="tool-button h-8 w-8 shrink-0" title="新建 Agent" @click="dialog = 'agent'"><Plus class="h-4 w-4" /></button>
+          </div>
+        </div>
+      </div>
 
-      <div class="workbench-detail-layout grid min-h-0 gap-4 overflow-hidden lg:grid-cols-2 lg:grid-rows-1">
-        <div class="min-h-0 min-w-0 overflow-hidden">
-          <WorkbenchActivityPanel
-            v-if="currentRenderedTask"
-            ref="codexPanelRef"
-            v-bind="activityPanelProps"
-            v-on="activityPanelListeners"
+      <div class="relative min-h-0 flex-1">
+        <div ref="timelineElement" class="timeline h-full overflow-y-auto" @scroll.passive="handleTimelineScroll">
+          <div v-if="!activeAgent || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeAgent ? '开始一段新的协作' : (activeWorkspace ? '创建第一个 Agent' : '添加一个工作区') }}</p><p v-if="activeAgent" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
+          <div v-else class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
+            <article v-for="entry in entries" :key="`${entry.seqStart}-${entry.item.callId || ''}`" class="mb-5" :data-timeline-seq="entry.seqEnd">
+              <div v-if="entry.item.type === 'user_message'" class="flex justify-end"><div class="user-message max-w-[85%] whitespace-pre-wrap rounded-sm border px-3 py-2 text-sm">{{ entry.item.content.map((block) => block.text || block.name).join('\n') }}</div></div>
+              <div v-else-if="entry.item.type === 'assistant_message'" class="flex gap-3">
+                <Bot class="mt-1 h-4 w-4 shrink-0" />
+                <TimelineMarkdown
+                  class="min-w-0 flex-1"
+                  :text="entry.item.text"
+                  :is-dark="isDark"
+                  :streaming="isRunning && entry.turnId === latestTurnId"
+                  @rendered="handleMarkdownRendered"
+                />
+              </div>
+              <details v-else-if="entry.item.type === 'reasoning'" class="process-row ml-7 rounded-sm border border-dashed px-3 py-2"><summary class="theme-muted-text cursor-pointer text-xs"><Brain class="mr-1 inline h-3.5 w-3.5" />思考过程</summary><div class="theme-muted-text mt-2 whitespace-pre-wrap text-xs leading-5">{{ entry.item.text }}</div></details>
+              <div v-else-if="entry.item.type === 'tool_call'" class="process-row ml-7 flex items-start gap-2 rounded-sm border border-dashed px-3 py-2"><Wrench class="theme-muted-text mt-0.5 h-3.5 w-3.5 shrink-0" /><div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-2 text-xs"><span class="truncate font-medium">{{ entry.item.name }}</span><Check v-if="entry.item.status === 'completed'" class="h-3.5 w-3.5" /></div><div class="theme-muted-text mt-1 truncate font-mono text-[10px]">{{ entry.item.detail?.command || entry.item.detail?.type }}</div></div></div>
+              <div v-else-if="entry.item.type === 'error'" class="error-row ml-7 rounded-sm border px-3 py-2 text-xs">{{ entry.item.message }}</div>
+            </article>
+            <div v-if="isRunning" class="theme-muted-text ml-7 flex items-center gap-2 py-2 text-xs"><LoaderCircle class="h-3.5 w-3.5 animate-spin" />Agent 正在处理</div>
+          </div>
+        </div>
+        <div v-if="loadingOlderHistory" class="panel pointer-events-none absolute left-1/2 top-3 z-10 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-sm border shadow-sm" role="status" aria-label="正在加载更早记录">
+          <LoaderCircle class="theme-muted-text h-3.5 w-3.5 animate-spin" />
+        </div>
+        <button v-if="hasNewTimelineItems" class="new-message-button tool-button absolute bottom-3 left-1/2 z-10 h-9 -translate-x-1/2 gap-1.5 px-3 text-xs shadow-sm" @click="jumpToLatest"><ArrowDown class="h-3.5 w-3.5" />有新消息</button>
+      </div>
+
+      <footer v-if="activeAgent" class="composer-wrap shrink-0 border-t p-3 sm:p-4">
+        <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
+        <div class="composer mx-auto flex max-w-3xl items-end gap-2 rounded-sm border p-2"><textarea v-model="prompt" class="min-h-10 max-h-40 flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none" rows="1" placeholder="向 Agent 发送消息" :disabled="isRunning" @keydown="handlePromptKeydown" /><button v-if="isRunning" class="tool-button h-9 w-9 shrink-0" title="停止" @click="v2Api.cancel(activeAgentId)"><CircleStop class="h-4 w-4" /></button><button v-else class="tool-button tool-button-primary h-9 w-9 shrink-0" title="发送" :disabled="!prompt.trim() || sending" @click="submitPrompt"><Send class="h-4 w-4" /></button></div>
+      </footer>
+    </main>
+
+    <div v-if="dialog" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4" @click.self="dialog === 'workspace' ? closeWorkspaceDialog() : (dialog = '')">
+      <form v-if="dialog === 'workspace'" class="panel w-full max-w-md p-4" @submit.prevent="createWorkspace">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold">添加工作区</h2>
+          <button type="button" class="tool-button h-8 w-8" title="关闭" @click="closeWorkspaceDialog"><X class="h-4 w-4" /></button>
+        </div>
+        <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">本机目录</label>
+        <div class="relative mt-1">
+          <Search class="theme-muted-text pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2" />
+          <input
+            id="workspace-path"
+            ref="workspacePathInput"
+            v-model="workspacePath"
+            class="tool-input w-full pl-9 pr-9 font-mono"
+            placeholder="搜索目录名称或输入绝对路径"
+            autocomplete="off"
+            role="combobox"
+            aria-controls="directory-suggestions"
+            :aria-expanded="directorySuggestionsOpen"
+            :aria-activedescendant="selectedDirectoryIndex >= 0 ? `directory-suggestion-${selectedDirectoryIndex}` : undefined"
+            @input="scheduleDirectorySearch"
+            @focus="directorySuggestionsOpen = true"
+            @click="directorySuggestionsOpen = true"
+            @keydown="handleDirectoryKeydown"
           />
-        </div>
-
-        <div class="min-h-0 min-w-0 overflow-hidden">
-          <div class="workbench-input-shell panel flex h-full min-h-0 flex-col overflow-hidden">
-            <div class="workbench-panel-header theme-divider theme-muted-panel shrink-0 border-b p-3">
-              <div class="flex flex-col gap-2">
-                <WorkbenchEditorActions
-                  :can-add-todo="hasCurrentDraftContent"
-                  :is-current-task-sending="isCurrentTaskSending"
-                  :send-state="currentTaskSendState"
-                  :todo-count="currentTodoItems.length"
-                  :uploading="uploading"
-                  @add-todo="handleAddTodo"
-                  @open-file-picker="editorRef?.openFilePicker?.()"
-                  @clear-request="openClearDialog"
-                  @copy-request="copyCodexPrompt"
-                  @manage-todo="openTodoDialog"
-                  @send-request="sendToCodex"
-                />
-                <WorkbenchAgentSelector
-                  :agent-bindings="currentProjectAgentBindings"
-                  :selected-agent-engine="currentSelectedAgentEngine"
-                  align="end"
-                  @update:selected-agent-engine="handleCurrentAgentEngineChange"
-                />
-              </div>
-            </div>
-            <div class="min-h-0 flex-1 overflow-hidden">
-              <WorkbenchInputPanel
-                ref="editorRef"
-                v-model="draft.blocks"
-                v-bind="inputPanelProps"
-                v-on="inputPanelListeners"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div v-else class="min-h-0 flex-1 overflow-hidden">
-      <WorkbenchTaskListPanel
-        v-if="mobileView === 'tasks'"
-        v-bind="taskListPanelProps"
-        mobile
-        v-on="taskListPanelListeners"
-      />
-
-      <div v-else class="workbench-mobile-detail-layout flex h-full min-h-0 flex-col gap-1.5 overflow-hidden">
-        <WorkbenchMobileDetailHeader
-          v-bind="mobileDetailHeaderProps"
-          v-on="mobileDetailHeaderListeners"
-        />
-
-        <section class="workbench-mobile-tabs-panel shrink-0">
-          <div class="workbench-mobile-tabs grid grid-cols-2 gap-2">
+          <LoaderCircle v-if="directorySearchLoading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" />
+          <div
+            v-if="directorySuggestionsOpen"
+            id="directory-suggestions"
+            class="directory-suggestions theme-popover absolute left-0 right-0 top-[calc(100%+0.375rem)] z-20 max-h-64 overflow-y-auto rounded-sm border shadow-lg"
+            role="listbox"
+          >
             <button
+              v-for="(directory, index) in directorySuggestions"
+              :id="`directory-suggestion-${index}`"
+              :key="directory.path"
               type="button"
-              class="tool-button px-3 py-1.5 text-sm"
-              :class="mobileDetailTab === 'activity' ? 'tool-button-accent-subtle' : ''"
-              @click="mobileDetailTab = 'activity'"
+              class="directory-suggestion flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left"
+              :class="index === selectedDirectoryIndex ? 'row-active' : ''"
+              role="option"
+              :aria-selected="index === selectedDirectoryIndex"
+              @mouseenter="selectedDirectoryIndex = index"
+              @mousedown.prevent
+              @click="selectDirectory(directory)"
             >
-              {{ t('workbench.activity') }}
+              <FolderOpen class="h-4 w-4 shrink-0" />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-xs font-medium">{{ directory.name }}</span>
+                <span class="theme-muted-text block truncate font-mono text-[10px]">{{ directory.path }}</span>
+              </span>
             </button>
-            <button
-              type="button"
-              class="tool-button px-3 py-1.5 text-sm"
-              :class="mobileDetailTab === 'input' ? 'tool-button-accent-subtle' : ''"
-              @click="mobileDetailTab = 'input'"
-            >
-              {{ t('workbench.input') }}
-            </button>
-          </div>
-        </section>
-
-        <div class="min-h-0 flex-1 overflow-hidden">
-          <div v-show="mobileDetailTab === 'activity'" class="h-full min-h-0">
-            <WorkbenchActivityPanel
-              ref="codexPanelRef"
-              v-bind="activityPanelProps"
-              :empty-message="t('workbench.selectTask')"
-              v-on="activityPanelListeners"
-            />
-          </div>
-
-          <div v-show="mobileDetailTab === 'input'" class="h-full min-h-0">
-            <div class="workbench-input-shell panel flex h-full min-h-0 flex-col overflow-hidden">
-              <div class="workbench-panel-header theme-divider theme-muted-panel shrink-0 border-b px-3 py-3">
-                <div class="flex flex-col gap-2">
-                  <WorkbenchEditorActions
-                    :can-add-todo="hasCurrentDraftContent"
-                    :is-current-task-sending="isCurrentTaskSending"
-                    :send-state="currentTaskSendState"
-                    :todo-count="currentTodoItems.length"
-                    :uploading="uploading"
-                    @add-todo="handleAddTodo"
-                    @open-file-picker="editorRef?.openFilePicker?.()"
-                    @clear-request="openClearDialog"
-                    @copy-request="copyCodexPrompt"
-                    @manage-todo="openTodoDialog"
-                    @send-request="sendToCodex"
-                  />
-                  <WorkbenchAgentSelector
-                    :agent-bindings="currentProjectAgentBindings"
-                    :selected-agent-engine="currentSelectedAgentEngine"
-                    @update:selected-agent-engine="handleCurrentAgentEngineChange"
-                  />
-                </div>
-              </div>
-              <div class="min-h-0 flex-1 overflow-hidden">
-                <WorkbenchInputPanel
-                  ref="editorRef"
-                  v-model="draft.blocks"
-                  v-bind="inputPanelProps"
-                  v-on="inputPanelListeners"
-                />
-              </div>
-            </div>
+            <div v-if="directorySearchError" class="error-row m-2 rounded-sm border px-3 py-2 text-xs">{{ directorySearchError }}</div>
+            <div v-else-if="!directorySearchLoading && !directorySuggestions.length" class="theme-muted-text px-3 py-5 text-center text-xs">没有找到匹配目录</div>
           </div>
         </div>
-      </div>
+        <div class="mt-4 flex justify-end"><button class="tool-button tool-button-primary h-9 px-4 text-xs" :disabled="!workspacePath.trim()">添加</button></div>
+      </form>
+      <form v-else class="panel w-full max-w-md p-4" @submit.prevent="createAgent"><div class="flex items-center justify-between"><h2 class="text-sm font-semibold">新建 Agent</h2><button type="button" class="tool-button h-8 w-8" @click="dialog = ''"><X class="h-4 w-4" /></button></div><label class="theme-muted-text mt-4 block text-xs">Provider</label><select v-model="agentProvider" class="tool-input mt-1"><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option></select><div class="mt-4 flex justify-end"><button class="tool-button tool-button-primary h-9 px-4 text-xs">创建</button></div></form>
     </div>
   </div>
 </template>
+
+<style scoped>
+.v2-shell { grid-template-columns: 220px minmax(0, 1fr); }
+.workspace-sidebar, .agent-tabs, header, footer, .composer-wrap { border-color: var(--theme-borderDefault); }
+.brand-mark, .provider-mark { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
+.workspace-row:hover, .agent-tab:hover { background: var(--theme-appPanelHover); }
+.row-active { background: var(--theme-appPanelInset); }
+.row-action { display: none; color: var(--theme-textMuted); }
+.group:hover .row-action { display: flex; }
+.agent-tabs { background: var(--theme-appPanelMuted); }
+.agent-close { color: var(--theme-textMuted); opacity: 0; }
+.agent-tab:hover .agent-close, .agent-tab.row-active .agent-close { opacity: 1; }
+.agent-close:hover { color: var(--theme-dangerText); }
+.status-chip, .composer { border-color: var(--theme-borderDefault); background: var(--theme-appPanelStrong); }
+.status-dot { background: var(--theme-success); }
+.status-dot-running { background: var(--theme-warning); }
+.timeline { background: var(--theme-appPanel); }
+.user-message { border-color: var(--theme-promptBorder); background: var(--theme-promptBg); color: var(--theme-promptText); }
+.process-row { border-color: var(--theme-processBorder); background: var(--theme-processBg); color: var(--theme-processText); }
+.error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
+.composer-wrap { background: var(--theme-appPanelMuted); }
+.modal-backdrop { background: var(--theme-modalBackdrop); }
+.directory-suggestions { background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
+.directory-suggestion:hover { background: var(--theme-appPanelHover); }
+textarea::placeholder { color: var(--theme-textMuted); }
+@media (max-width: 900px) { .v2-shell { grid-template-columns: 64px minmax(0, 1fr); } .workspace-sidebar header span, .workspace-sidebar footer span, .workspace-sidebar .row-copy { display: none; } .workspace-sidebar header, .workspace-sidebar footer, .workspace-row { justify-content: center; } }
+@media (max-width: 640px) { .status-text { display: none; } .agent-tab { max-width: 136px; } }
+</style>

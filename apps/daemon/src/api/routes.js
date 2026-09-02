@@ -1,0 +1,136 @@
+import {
+  CreateAgentInputSchema,
+  CreateTurnInputSchema,
+  CreateWorkspaceInputSchema,
+  ProviderIds,
+  UpdateWorkspaceInputSchema,
+} from '../../../../packages/protocol/src/index.js'
+import { searchDirectories } from '../workspaces/directorySearch.js'
+
+function parseCursor(value) {
+  if (!value) return null
+  const [epoch, seq] = String(value).split(':')
+  return epoch && Number.isInteger(Number(seq)) ? { epoch, seq: Number(seq) } : null
+}
+
+function sseWrite(raw, event) {
+  if (event.type === 'timeline') raw.write(`id: ${event.epoch}:${event.row.seq}\n`)
+  raw.write(`event: ${event.type}\n`)
+  raw.write(`data: ${JSON.stringify(event)}\n\n`)
+}
+
+export function createSseHeaders(origin = '') {
+  return {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Access-Control-Allow-Origin': origin || '*',
+    Vary: 'Origin',
+  }
+}
+
+export function registerRoutes(app, context) {
+  const { repository, timelineStore, providerRegistry, agentManager, eventHub } = context
+
+  app.get('/api/v2/health', async () => ({ ok: true, version: 2 }))
+  app.get('/api/v2/providers', async () => ({ providers: providerRegistry.list() }))
+  app.get('/api/v2/directories/search', async (request) => searchDirectories({
+    query: request.query.q,
+    limit: request.query.limit,
+  }))
+
+  app.get('/api/v2/workspaces', async () => ({ workspaces: repository.listWorkspaces() }))
+  app.post('/api/v2/workspaces', async (request, reply) => {
+    const input = CreateWorkspaceInputSchema.parse(request.body)
+    const workspace = repository.createWorkspace(input)
+    let [agent] = repository.listAgents(workspace.id)
+    if (!agent) {
+      const provider = providerRegistry.get(ProviderIds.CODEX)
+      agent = repository.createAgent(workspace.id, {
+        providerId: provider.id,
+        title: `${provider.label} Agent`,
+      }, provider.capabilities)
+      agent = repository.updateAgent(agent.id, { lifecycle: 'ready' })
+    }
+    reply.code(201)
+    return { workspace, agent }
+  })
+  app.patch('/api/v2/workspaces/:workspaceId', async (request) => ({
+    workspace: repository.updateWorkspace(request.params.workspaceId, UpdateWorkspaceInputSchema.parse(request.body)),
+  }))
+  app.delete('/api/v2/workspaces/:workspaceId', async (request, reply) => {
+    for (const agent of repository.listAgents(request.params.workspaceId, true)) agentManager.close(agent.id)
+    if (!repository.deleteWorkspace(request.params.workspaceId)) return reply.code(404).send({ error: 'workspace_not_found' })
+    return reply.code(204).send()
+  })
+
+  app.get('/api/v2/workspaces/:workspaceId/agents', async (request) => ({
+    agents: repository.listAgents(request.params.workspaceId, request.query.includeArchived === 'true'),
+  }))
+  app.post('/api/v2/workspaces/:workspaceId/agents', async (request, reply) => {
+    const workspace = repository.getWorkspace(request.params.workspaceId)
+    if (!workspace) return reply.code(404).send({ error: 'workspace_not_found' })
+    const input = CreateAgentInputSchema.parse(request.body)
+    const provider = providerRegistry.get(input.providerId)
+    const agent = repository.createAgent(workspace.id, input, provider.capabilities)
+    repository.updateAgent(agent.id, { lifecycle: 'ready' })
+    reply.code(201)
+    return { agent: repository.getAgent(agent.id) }
+  })
+
+  app.get('/api/v2/agents/:agentId', async (request, reply) => {
+    const agent = repository.getAgent(request.params.agentId)
+    return agent ? { agent } : reply.code(404).send({ error: 'agent_not_found' })
+  })
+  app.post('/api/v2/agents/:agentId/turns', async (request, reply) => {
+    const input = CreateTurnInputSchema.parse(request.body)
+    const turn = await agentManager.startTurn(request.params.agentId, input)
+    reply.code(202)
+    return { turn }
+  })
+  app.post('/api/v2/agents/:agentId/cancel', async (request) => ({ canceled: await agentManager.cancel(request.params.agentId) }))
+  app.post('/api/v2/agents/:agentId/close', async (request) => ({ agent: agentManager.close(request.params.agentId) }))
+  app.post('/api/v2/agents/:agentId/archive', async (request, reply) => {
+    const agent = repository.getAgent(request.params.agentId)
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    await agentManager.cancel(agent.id)
+    agentManager.close(agent.id)
+    return { agent: repository.updateAgent(agent.id, { lifecycle: 'archived', archivedAt: new Date().toISOString() }) }
+  })
+  app.delete('/api/v2/agents/:agentId', async (request, reply) => {
+    agentManager.close(request.params.agentId)
+    if (!repository.deleteAgent(request.params.agentId)) return reply.code(404).send({ error: 'agent_not_found' })
+    return reply.code(204).send()
+  })
+
+  app.get('/api/v2/agents/:agentId/timeline', async (request) => ({
+    timeline: timelineStore.fetch(request.params.agentId, {
+      direction: request.query.direction,
+      limit: request.query.limit,
+      mode: request.query.mode,
+      cursor: parseCursor(request.query.cursor),
+    }),
+  }))
+
+  app.get('/api/v2/agents/:agentId/events', (request, reply) => {
+    const agentId = request.params.agentId
+    const agent = repository.getAgent(agentId)
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    reply.hijack()
+    const raw = reply.raw
+    raw.writeHead(200, createSseHeaders(request.headers.origin))
+    const unsubscribe = eventHub.subscribe(agentId, (event) => sseWrite(raw, event))
+    const cursor = parseCursor(request.headers['last-event-id'] || request.query.cursor)
+    const snapshot = timelineStore.fetch(agentId, { direction: cursor ? 'after' : 'tail', cursor })
+    if (snapshot.reset) sseWrite(raw, { type: 'reset', timeline: snapshot })
+    else snapshot.rows.forEach((row) => sseWrite(raw, { type: 'timeline', epoch: snapshot.epoch, row }))
+    sseWrite(raw, { type: 'agent', agent: repository.getAgent(agentId) })
+    const heartbeat = setInterval(() => raw.write(': heartbeat\n\n'), 15000)
+    heartbeat.unref?.()
+    raw.on('close', () => {
+      clearInterval(heartbeat)
+      unsubscribe()
+    })
+  })
+}
