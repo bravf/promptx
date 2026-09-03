@@ -41,6 +41,40 @@ export const CreateAgentInputSchema = z.object({
   providerConfig: z.record(z.string(), z.unknown()).optional().default({}),
 })
 
+export const AgentModelOptionSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string().optional().default(''),
+  reasoningEfforts: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    description: z.string().optional().default(''),
+  })).optional().default([]),
+  defaultReasoningEffort: z.string().optional().default(''),
+})
+
+export const AgentContextUsageSchema = z.object({
+  usedTokens: z.number().int().nonnegative(),
+  maxTokens: z.number().int().positive(),
+  percentage: z.number().min(0).max(100),
+  updatedAt: z.string(),
+})
+
+export const AgentControlStateSchema = z.object({
+  models: z.array(AgentModelOptionSchema),
+  currentModelId: z.string(),
+  reasoningEfforts: AgentModelOptionSchema.shape.reasoningEfforts,
+  currentReasoningEffort: z.string(),
+  contextUsage: AgentContextUsageSchema.nullable(),
+})
+
+export const UpdateAgentSettingsInputSchema = z.object({
+  modelId: z.string().trim().min(1).optional(),
+  reasoningEffort: z.string().trim().min(1).optional(),
+}).refine((input) => input.modelId !== undefined || input.reasoningEffort !== undefined, {
+  message: '至少需要提供一项 Agent 设置。',
+})
+
 export const PromptContentBlockSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string() }),
   z.object({
@@ -48,6 +82,14 @@ export const PromptContentBlockSchema = z.discriminatedUnion('type', [
     assetId: z.string().min(1),
     mimeType: z.string().min(1),
     name: z.string().min(1),
+    size: z.number().int().nonnegative(),
+  }),
+  z.object({
+    type: z.literal('file'),
+    assetId: z.string().min(1),
+    mimeType: z.string().min(1),
+    name: z.string().min(1),
+    size: z.number().int().nonnegative(),
   }),
 ])
 

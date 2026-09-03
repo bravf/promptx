@@ -1,10 +1,11 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
+import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { openDatabase } from './db/database.js'
+import { openDatabase, resolveDaemonPaths } from './db/database.js'
 import { createRepository } from './db/repository.js'
 import { TimelineStore } from './timeline/timelineStore.js'
 import { EventHub } from './events/eventHub.js'
@@ -19,7 +20,15 @@ export async function createApp(options = {}) {
     origin: true,
     methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'],
   })
+  await app.register(multipart, {
+    limits: {
+      fileSize: 50 * 1024 * 1024,
+      files: 1,
+    },
+  })
   const db = options.db || openDatabase(options.databasePath)
+  const assetsDir = path.resolve(options.assetsDir || resolveDaemonPaths().assetsDir)
+  fs.mkdirSync(assetsDir, { recursive: true })
   const repository = createRepository(db)
   const timelineStore = new TimelineStore(repository)
   const eventHub = new EventHub()
@@ -27,7 +36,7 @@ export async function createApp(options = {}) {
   const agentManager = new AgentManager({ repository, timelineStore, providerRegistry, eventHub })
   app.decorate('sqliteRepository', repository)
   repository.failActiveTurnsOnStartup()
-  registerRoutes(app, { repository, timelineStore, eventHub, providerRegistry, agentManager })
+  registerRoutes(app, { repository, timelineStore, eventHub, providerRegistry, agentManager, assetsDir })
   const relay = new RelayService({
     localBaseUrl: options.localBaseUrl || `http://127.0.0.1:${process.env.PORT || process.env.PROMPTX_DAEMON_PORT || 3001}`,
     logger: app.log,

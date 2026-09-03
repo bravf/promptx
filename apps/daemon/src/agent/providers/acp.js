@@ -2,6 +2,42 @@ import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { Readable, Writable } from 'node:stream'
 import { ClientSideConnection, PROTOCOL_VERSION, ndJsonStream } from '@agentclientprotocol/sdk'
+import { filePromptText, imageBase64 } from '../promptAttachments.js'
+import { createControlState, effortLabel, flattenAcpOptions, normalizeContextUsage } from '../controlState.js'
+
+export async function buildAcpPrompt(content) {
+  return Promise.all(content.map(async (block) => {
+    if (block.type === 'text') return { type: 'text', text: block.text }
+    if (block.type === 'file') return { type: 'text', text: filePromptText(block) }
+    return { type: 'image', data: await imageBase64(block), mimeType: block.mimeType }
+  }))
+}
+
+function findConfigOption(options = [], category) {
+  return options.find((option) => option.type === 'select' && option.category === category)
+}
+
+export function normalizeAcpControls({ models: modelState, configOptions = [] } = {}, requestedModelId = '', requestedReasoningEffort = '', contextUsage = null) {
+  const modelConfig = findConfigOption(configOptions, 'model')
+  const modelItems = modelState?.availableModels?.length
+    ? modelState.availableModels.map((model) => ({ id: model.modelId, label: model.name || model.modelId, description: model.description || '' }))
+    : flattenAcpOptions(modelConfig ? [modelConfig] : []).map((model) => ({ id: model.value, label: model.name || model.value, description: model.description || '' }))
+  const thoughtConfig = findConfigOption(configOptions, 'thought_level')
+  const reasoningEfforts = flattenAcpOptions(thoughtConfig ? [thoughtConfig] : []).map((option) => ({
+    id: option.value,
+    label: option.name || effortLabel(option.value),
+    description: option.description || '',
+  }))
+  const currentModelId = requestedModelId || modelState?.currentModelId || modelConfig?.currentValue || ''
+  const currentReasoningEffort = requestedReasoningEffort || thoughtConfig?.currentValue || ''
+  return createControlState({
+    models: modelItems.map((model) => ({ ...model, reasoningEfforts })),
+    requestedModelId: currentModelId,
+    requestedReasoningEffort: currentReasoningEffort,
+    fallbackReasoningEfforts: reasoningEfforts,
+    contextUsage,
+  })
+}
 
 function selectPermission(options = []) {
   const option = options.find((item) => item.kind === 'allow_always')
@@ -19,58 +55,151 @@ function contentText(content) {
 }
 
 export class AcpRuntime extends EventEmitter {
-  constructor({ cwd, nativeHandle = {}, command = 'kimi', args = ['acp'] }) {
+  constructor({ cwd, nativeHandle = {}, modelId = '', config = {}, command = 'kimi', args = ['acp'] }) {
     super()
     this.cwd = cwd
     this.sessionId = nativeHandle.sessionId || ''
     this.command = command
     this.args = args
+    this.modelId = modelId
+    this.reasoningEffort = config.reasoningEffort || ''
     this.child = null
     this.connection = null
+    this.connected = false
+    this.connectPromise = null
     this.acceptUpdates = false
     this.hasTurnOutput = false
+    this.sessionControls = config.acpSessionControls || { models: null, configOptions: [] }
+    this.controlState = createControlState({ requestedModelId: modelId, requestedReasoningEffort: this.reasoningEffort })
   }
 
   async connect() {
-    if (this.connection) return
-    this.child = spawn(this.command, this.args, {
+    if (this.connection && this.connected) return
+    if (this.connectPromise) return this.connectPromise
+    this.connectPromise = this.connectInternal()
+    try {
+      await this.connectPromise
+    } finally {
+      this.connectPromise = null
+    }
+  }
+
+  async connectInternal() {
+    const child = spawn(this.command, this.args, {
       cwd: this.cwd,
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     })
-    this.child.stderr.on('data', (chunk) => this.emit('stderr', chunk.toString()))
-    this.child.on('exit', () => {
+    this.child = child
+    child.stderr.on('data', (chunk) => this.emit('stderr', chunk.toString()))
+    child.on('exit', () => {
+      if (this.child !== child) return
       this.connection = null
       this.child = null
+      this.connected = false
       this.emit('runtimeExit')
     })
-    const stream = ndJsonStream(Writable.toWeb(this.child.stdin), Readable.toWeb(this.child.stdout))
-    this.connection = new ClientSideConnection(() => ({
+    const stream = ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout))
+    const connection = new ClientSideConnection(() => ({
       requestPermission: async (params) => selectPermission(params.options),
       sessionUpdate: async (params) => {
-        if (this.acceptUpdates) this.onSessionUpdate(params.update)
+        if (this.connection === connection && this.acceptUpdates) this.onSessionUpdate(params.update)
       },
     }), stream)
-    await this.connection.initialize({
-      protocolVersion: PROTOCOL_VERSION,
-      clientInfo: { name: 'promptx', title: 'PromptX', version: '2.0.0' },
-      clientCapabilities: {},
-    })
-    const result = this.sessionId
-      ? await this.connection.loadSession({ sessionId: this.sessionId, cwd: this.cwd, mcpServers: [] })
-      : await this.connection.newSession({ cwd: this.cwd, mcpServers: [] })
-    this.sessionId = result.sessionId || this.sessionId
-    this.emit('handle', { sessionId: this.sessionId })
-    this.acceptUpdates = true
+    this.connection = connection
+    this.acceptUpdates = false
+    try {
+      await connection.initialize({
+        protocolVersion: PROTOCOL_VERSION,
+        clientInfo: { name: 'promptx', title: 'PromptX', version: '2.0.0' },
+        clientCapabilities: {},
+      })
+      const result = this.sessionId
+        ? await connection.loadSession({ sessionId: this.sessionId, cwd: this.cwd, mcpServers: [] })
+        : await connection.newSession({ cwd: this.cwd, mcpServers: [] })
+      this.sessionId = result.sessionId || this.sessionId
+      this.emit('handle', { sessionId: this.sessionId })
+      this.sessionControls = {
+        models: result.models || this.sessionControls.models || null,
+        configOptions: result.configOptions?.length ? result.configOptions : (this.sessionControls.configOptions || []),
+      }
+      await this.applyStoredSettings()
+      this.refreshControlState()
+      this.persistSessionControls()
+      this.acceptUpdates = true
+      this.connected = true
+    } catch (error) {
+      if (this.connection === connection) {
+        this.connection = null
+        this.child = null
+      }
+      this.connected = false
+      this.acceptUpdates = false
+      if (!child.killed) child.kill('SIGTERM')
+      throw error
+    }
+  }
+
+  async applyStoredSettings() {
+    const { models, configOptions } = this.sessionControls
+    const modelConfig = findConfigOption(configOptions, 'model')
+    const currentModelId = models?.currentModelId || modelConfig?.currentValue || ''
+    if (this.modelId && this.modelId !== currentModelId) {
+      if (models?.availableModels?.some((model) => model.modelId === this.modelId)) {
+        await this.connection.unstable_setSessionModel({ sessionId: this.sessionId, modelId: this.modelId })
+        this.sessionControls.models = { ...models, currentModelId: this.modelId }
+      } else if (modelConfig) {
+        const result = await this.connection.setSessionConfigOption({ sessionId: this.sessionId, configId: modelConfig.id, value: this.modelId })
+        this.sessionControls.configOptions = result.configOptions || this.sessionControls.configOptions
+      }
+    }
+    const thoughtConfig = findConfigOption(this.sessionControls.configOptions, 'thought_level')
+    if (this.reasoningEffort && thoughtConfig && this.reasoningEffort !== thoughtConfig.currentValue) {
+      const result = await this.connection.setSessionConfigOption({
+        sessionId: this.sessionId,
+        configId: thoughtConfig.id,
+        value: this.reasoningEffort,
+      })
+      this.sessionControls.configOptions = result.configOptions || this.sessionControls.configOptions
+    }
+  }
+
+  refreshControlState() {
+    this.controlState = normalizeAcpControls(
+      this.sessionControls,
+      this.modelId,
+      this.reasoningEffort,
+      this.controlState.contextUsage,
+    )
+    this.modelId = this.controlState.currentModelId
+    this.reasoningEffort = this.controlState.currentReasoningEffort
+    this.emit('controlState', this.controlState)
+  }
+
+  persistSessionControls() {
+    this.emit('providerConfig', { acpSessionControls: this.sessionControls })
+  }
+
+  async getControlState() {
+    await this.connect()
+    return this.controlState
+  }
+
+  async updateSettings({ modelId = this.modelId, reasoningEffort = this.reasoningEffort } = {}) {
+    await this.connect()
+    this.modelId = modelId
+    this.reasoningEffort = reasoningEffort
+    await this.applyStoredSettings()
+    this.refreshControlState()
+    this.persistSessionControls()
+    return this.controlState
   }
 
   async startTurn(content, clientMessageId) {
     await this.connect()
     this.hasTurnOutput = false
-    const prompt = content.map((block) => block.type === 'text'
-      ? { type: 'text', text: block.text }
-      : { type: 'image', data: block.data || '', mimeType: block.mimeType })
+    const prompt = await buildAcpPrompt(content)
     this.emit('turnStarted', { nativeTurnId: clientMessageId })
     this.connection.prompt({ sessionId: this.sessionId, prompt, messageId: clientMessageId })
       .then((result) => {
@@ -85,11 +214,18 @@ export class AcpRuntime extends EventEmitter {
   }
 
   onSessionUpdate(update) {
-    if (update.sessionUpdate === 'agent_message_chunk') {
+    if (update.sessionUpdate === 'usage_update') {
+      this.controlState = { ...this.controlState, contextUsage: normalizeContextUsage(update.used, update.size) }
+      this.emit('controlState', this.controlState)
+    } else if (update.sessionUpdate === 'config_option_update') {
+      this.sessionControls.configOptions = update.configOptions || []
+      this.refreshControlState()
+      this.persistSessionControls()
+    } else if (update.sessionUpdate === 'agent_message_chunk') {
       const text = contentText(update.content)
       if (text) {
         this.hasTurnOutput = true
-        this.emit('timeline', { type: 'assistant_message', text })
+        this.emit('timeline', { type: 'assistant_message', phase: 'final_answer', text })
       }
     } else if (update.sessionUpdate === 'agent_thought_chunk') {
       const text = contentText(update.content)
@@ -120,16 +256,19 @@ export class AcpRuntime extends EventEmitter {
   }
 
   close() {
-    if (this.child && !this.child.killed) this.child.kill('SIGTERM')
+    const child = this.child
     this.child = null
     this.connection = null
+    this.connected = false
+    this.acceptUpdates = false
+    if (child && !child.killed) child.kill('SIGTERM')
   }
 }
 
 export const kimiProvider = {
   id: 'kimi',
   label: 'Kimi',
-  capabilities: { resume: true, cancel: true, images: true, protocol: 'acp' },
+  capabilities: { resume: true, cancel: true, images: true, models: true, reasoningEffort: true, contextUsage: true, protocol: 'acp' },
   createRuntime(options) {
     return new AcpRuntime({ ...options, command: 'kimi', args: ['acp'] })
   },

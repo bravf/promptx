@@ -13,6 +13,7 @@ export class AgentManager {
     this.eventHub = eventHub
     this.runtimes = new Map()
     this.activeTurns = new Map()
+    this.controlStates = new Map()
     this.coalescer = new TimelineCoalescer((payload) => this.commitTimeline(payload))
   }
 
@@ -30,6 +31,14 @@ export class AgentManager {
       nativeHandle,
       lifecycle: this.activeTurns.has(agent.id) ? 'running' : 'ready',
     }))
+    runtime.on('providerConfig', (providerConfig) => {
+      const current = this.repository.getAgent(agent.id)
+      if (current) this.repository.updateAgent(agent.id, { config: { ...current.config, ...providerConfig } })
+    })
+    runtime.on('controlState', (control) => {
+      this.controlStates.set(agent.id, control)
+      this.eventHub.publish(agent.id, { type: 'control', control })
+    })
     runtime.on('timeline', (item) => {
       const turn = this.activeTurns.get(agent.id)
       if (turn) this.coalescer.push(agent.id, { agentId: agent.id, turnId: turn.id, item })
@@ -39,7 +48,7 @@ export class AgentManager {
     runtime.on('turnFailed', (error) => this.finish(agent.id, 'failed', { error }))
     runtime.on('turnCanceled', () => this.finish(agent.id, 'canceled'))
     runtime.on('runtimeExit', () => {
-      this.runtimes.delete(agent.id)
+      if (this.runtimes.get(agent.id) === runtime) this.runtimes.delete(agent.id)
       if (this.activeTurns.has(agent.id)) this.finish(agent.id, 'failed', { error: new Error('Agent 运行时意外退出。') })
     })
     runtime.on('error', (error) => this.finish(agent.id, 'failed', { error }))
@@ -53,22 +62,96 @@ export class AgentManager {
     if (agent.archivedAt) throw new Error('已归档的 Agent 不能发送消息。')
     const existing = this.repository.getTurnByClientMessage(agentId, input.clientMessageId)
     if (existing) return existing
+    const providerContent = input.input.content.map((block) => {
+      if (block.type === 'text') return block
+      const asset = this.repository.getAsset(block.assetId)
+      if (!asset || asset.workspaceId !== agent.workspaceId) throw new Error(`附件不存在或不属于当前工作区：${block.name}`)
+      if (block.type === 'image' && !asset.mimeType.startsWith('image/')) throw new Error(`附件不是图片：${asset.name}`)
+      return {
+        ...block,
+        name: asset.name,
+        mimeType: asset.mimeType,
+        size: asset.size,
+        absolutePath: asset.storagePath,
+      }
+    })
+    const timelineContent = providerContent.map(({ absolutePath, ...block }) => block)
     const turn = this.repository.createTurn(agentId, input.clientMessageId)
     this.activeTurns.set(agentId, turn)
     this.commitTimeline({
       agentId,
       turnId: turn.id,
-      item: { type: 'user_message', clientMessageId: input.clientMessageId, content: input.input.content },
+      item: { type: 'user_message', clientMessageId: input.clientMessageId, content: timelineContent },
     })
     this.markStarted(agentId)
     try {
-      const result = await this.getRuntime(agent).startTurn(input.input.content, input.clientMessageId)
+      const result = await this.getRuntime(agent).startTurn(providerContent, input.clientMessageId)
       if (result?.nativeTurnId) this.markStarted(agentId, result.nativeTurnId)
       return this.repository.getTurn(turn.id)
     } catch (error) {
       this.finish(agentId, 'failed', { error })
       throw error
     }
+  }
+
+  async getControlState(agentId) {
+    const agent = this.repository.getAgent(agentId)
+    if (!agent) throw new Error('Agent 不存在。')
+    const control = await this.getRuntime(agent).getControlState()
+    this.controlStates.set(agentId, control)
+    return control
+  }
+
+  async updateSettings(agentId, input) {
+    const agent = this.repository.getAgent(agentId)
+    if (!agent) throw new Error('Agent 不存在。')
+    if (this.activeTurns.has(agentId)) {
+      const error = new Error('Agent 运行期间不能切换模型或思考强度。')
+      error.statusCode = 409
+      throw error
+    }
+    const control = await this.getControlState(agentId)
+    const modelId = input.modelId || agent.modelId || control.currentModelId
+    const selectedModel = control.models.find((model) => model.id === modelId)
+    if (input.modelId && !selectedModel) {
+      const error = new Error(`当前 Agent 不支持模型：${input.modelId}`)
+      error.statusCode = 400
+      throw error
+    }
+    const availableEfforts = selectedModel?.reasoningEfforts?.length
+      ? selectedModel.reasoningEfforts
+      : control.reasoningEfforts
+    let reasoningEffort = input.reasoningEffort || agent.config.reasoningEffort || control.currentReasoningEffort
+    if (input.modelId && !availableEfforts.some((effort) => effort.id === reasoningEffort)) {
+      reasoningEffort = selectedModel?.defaultReasoningEffort || availableEfforts[0]?.id || ''
+    }
+    if (input.reasoningEffort && !availableEfforts.some((effort) => effort.id === input.reasoningEffort)) {
+      const error = new Error(`当前模型不支持思考强度：${input.reasoningEffort}`)
+      error.statusCode = 400
+      throw error
+    }
+    const runtime = this.runtimes.get(agentId)
+    if (typeof runtime?.updateSettings === 'function') {
+      const nextControl = await runtime.updateSettings({ modelId, reasoningEffort })
+      const current = this.repository.getAgent(agentId)
+      const updated = this.repository.updateAgent(agentId, {
+        modelId,
+        config: { ...current.config, reasoningEffort },
+      })
+      this.controlStates.set(agentId, nextControl)
+      this.eventHub.publish(agentId, { type: 'agent', agent: updated })
+      return { agent: updated, control: nextControl }
+    }
+    const updated = this.repository.updateAgent(agentId, {
+      modelId,
+      config: { ...agent.config, reasoningEffort },
+    })
+    this.runtimes.delete(agentId)
+    runtime?.close()
+    this.controlStates.delete(agentId)
+    this.eventHub.publish(agentId, { type: 'agent', agent: updated })
+    const nextControl = await this.getControlState(agentId)
+    return { agent: this.repository.getAgent(agentId), control: nextControl }
   }
 
   markStarted(agentId, nativeTurnId = '') {
@@ -81,6 +164,7 @@ export class AgentManager {
     })
     this.activeTurns.set(agentId, updated)
     this.repository.updateAgent(agentId, { lifecycle: 'running', lastActiveAt: nowIso() })
+    this.eventHub.publish(agentId, { type: 'turn', turn: updated })
     this.eventHub.publish(agentId, { type: 'agent', agent: this.repository.getAgent(agentId) })
   }
 
@@ -121,6 +205,7 @@ export class AgentManager {
   close(agentId) {
     this.runtimes.get(agentId)?.close()
     this.runtimes.delete(agentId)
+    this.controlStates.delete(agentId)
     return this.repository.updateAgent(agentId, { lifecycle: 'ready' })
   }
 
@@ -128,5 +213,6 @@ export class AgentManager {
     this.coalescer.flushAll()
     for (const runtime of this.runtimes.values()) runtime.close()
     this.runtimes.clear()
+    this.controlStates.clear()
   }
 }

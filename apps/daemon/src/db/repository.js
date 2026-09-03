@@ -66,6 +66,20 @@ function mapTurn(row) {
   }
 }
 
+function mapAsset(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    name: row.file_name,
+    mimeType: row.mime_type,
+    size: row.byte_size,
+    sha256: row.sha256,
+    storagePath: row.storage_path,
+    createdAt: row.created_at,
+  }
+}
+
 export function normalizeWorkspacePath(input) {
   const resolved = fs.realpathSync(path.resolve(String(input || '').trim()))
   if (!fs.statSync(resolved).isDirectory()) throw new Error('工作区路径不是目录。')
@@ -118,6 +132,23 @@ export function createRepository(db) {
     },
     deleteWorkspace(id) {
       return db.prepare('DELETE FROM workspaces WHERE id = ?').run(id).changes > 0
+    },
+    createAsset(workspaceId, input) {
+      const id = input.id || randomUUID()
+      const createdAt = input.createdAt || nowIso()
+      db.prepare(`INSERT INTO workspace_assets
+        (id, workspace_id, file_name, mime_type, byte_size, sha256, storage_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, workspaceId, input.name, input.mimeType, input.size, input.sha256, input.storagePath, createdAt)
+      return this.getAsset(id)
+    },
+    getAsset(id) {
+      return mapAsset(db.prepare('SELECT * FROM workspace_assets WHERE id = ?').get(id))
+    },
+    listWorkspaceAssets(workspaceId) {
+      return db.prepare('SELECT * FROM workspace_assets WHERE workspace_id = ? ORDER BY created_at DESC')
+        .all(workspaceId)
+        .map(mapAsset)
     },
     listAgents(workspaceId, includeArchived = false) {
       const sql = includeArchived

@@ -1,22 +1,26 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, Bot, Brain, Check, CircleStop, FolderOpen, LoaderCircle, Palette, Plus, Search, Send, TerminalSquare, Trash2, Wrench, X } from 'lucide-vue-next'
+import { ArrowDown, Bot, FolderOpen, LoaderCircle, Palette, Plus, Search, TerminalSquare, Trash2, X } from 'lucide-vue-next'
 import { v2Api, agentEventsUrl } from '../lib/v2Api.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
+import { createTurnTimingMap, groupTimelineTurns } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
-import TimelineMarkdown from '../components/TimelineMarkdown.vue'
+import AgentComposer from '../components/AgentComposer.vue'
+import TimelineTurn from '../components/TimelineTurn.vue'
 
 const { currentTheme, isDark, setTheme, themes } = useTheme()
 const workspaces = ref([])
 const providers = ref([])
 const agents = ref([])
 const rows = ref([])
+const turns = ref([])
 const activeWorkspaceId = ref('')
 const activeAgentId = ref('')
-const prompt = ref('')
 const loading = ref(true)
 const sending = ref(false)
+const agentControl = ref(null)
+const settingsLoading = ref(false)
 const error = ref('')
 const dialog = ref('')
 const timelineEpoch = ref('')
@@ -43,8 +47,22 @@ let markdownScrollFrame = null
 const activeWorkspace = computed(() => workspaces.value.find((item) => item.id === activeWorkspaceId.value))
 const activeAgent = computed(() => agents.value.find((item) => item.id === activeAgentId.value))
 const isRunning = computed(() => activeAgent.value?.lifecycle === 'running')
-const entries = computed(() => projectTimelineRows(rows.value))
+const entries = computed(() => groupTimelineTurns(projectTimelineRows(rows.value)))
+const turnTimings = computed(() => createTurnTimingMap(rows.value, turns.value))
 const latestTurnId = computed(() => rows.value.findLast((row) => row.turnId)?.turnId || '')
+
+function upsertTurn(turn) {
+  if (!turn?.id) return
+  const index = turns.value.findIndex((item) => item.id === turn.id)
+  if (index >= 0) turns.value[index] = turn
+  else turns.value.unshift(turn)
+}
+
+function processIsRunning(entry) {
+  const timing = turnTimings.value.get(entry.turnId)
+  return timing?.status === 'queued' || timing?.status === 'running'
+    || ((isRunning.value || sending.value) && entry.turnId === latestTurnId.value)
+}
 
 async function loadInitial() {
   loading.value = true
@@ -65,7 +83,9 @@ async function selectWorkspace(id) {
   positioningTimeline = true
   activeWorkspaceId.value = id
   activeAgentId.value = ''
+  agentControl.value = null
   rows.value = []
+  turns.value = []
   timelineEpoch.value = ''
   hasOlderHistory.value = false
   loadingOlderHistory.value = false
@@ -82,28 +102,42 @@ async function selectAgent(id) {
   const requestVersion = ++timelineRequestVersion
   positioningTimeline = true
   activeAgentId.value = id
+  agentControl.value = null
+  settingsLoading.value = false
   closeEvents()
   rows.value = []
+  turns.value = []
   timelineEpoch.value = ''
   hasOlderHistory.value = false
   loadingOlderHistory.value = false
   followingTimeline.value = true
   hasNewTimelineItems.value = false
   try {
-    const result = await v2Api.getTimeline(id)
+    const [result, turnResult] = await Promise.all([v2Api.getTimeline(id), v2Api.listTurns(id, 1000)])
     if (requestVersion !== timelineRequestVersion || activeAgentId.value !== id) return
     rows.value = result.timeline.rows
+    turns.value = turnResult.turns
     timelineEpoch.value = result.timeline.epoch
     hasOlderHistory.value = result.timeline.hasOlder
     await scrollToBottom({ force: true })
     if (requestVersion !== timelineRequestVersion || activeAgentId.value !== id) return
     positioningTimeline = false
     openEvents(id, result.timeline.epoch, result.timeline.window.maxSeq)
+    loadAgentControl(id, requestVersion)
     fillTimelineViewport()
   } catch (cause) {
     if (requestVersion === timelineRequestVersion) error.value = cause.message
   } finally {
     if (requestVersion === timelineRequestVersion) positioningTimeline = false
+  }
+}
+
+async function loadAgentControl(agentId, requestVersion = timelineRequestVersion) {
+  try {
+    const result = await v2Api.getAgentControl(agentId)
+    if (requestVersion === timelineRequestVersion && activeAgentId.value === agentId) agentControl.value = result.control
+  } catch (cause) {
+    if (requestVersion === timelineRequestVersion && activeAgentId.value === agentId) error.value = cause.message
   }
 }
 
@@ -181,6 +215,12 @@ function openEvents(agentId, epoch, seq) {
     const index = agents.value.findIndex((item) => item.id === agent.id)
     if (index >= 0) agents.value[index] = agent
     sending.value = agent.lifecycle === 'running'
+  })
+  eventSource.addEventListener('turn', (event) => {
+    upsertTurn(JSON.parse(event.data).turn)
+  })
+  eventSource.addEventListener('control', (event) => {
+    agentControl.value = JSON.parse(event.data).control
   })
   eventSource.addEventListener('reset', (event) => {
     const { timeline } = JSON.parse(event.data)
@@ -324,7 +364,9 @@ async function removeAgent(agent) {
     closeEvents()
     timelineRequestVersion += 1
     activeAgentId.value = ''
+    agentControl.value = null
     rows.value = []
+    turns.value = []
     timelineEpoch.value = ''
     hasOlderHistory.value = false
     followingTimeline.value = true
@@ -358,6 +400,7 @@ async function removeWorkspace(workspace) {
   timelineRequestVersion += 1
   agents.value = []
   rows.value = []
+  turns.value = []
   timelineEpoch.value = ''
   hasOlderHistory.value = false
   loadingOlderHistory.value = false
@@ -365,27 +408,38 @@ async function removeWorkspace(workspace) {
   hasNewTimelineItems.value = false
   activeWorkspaceId.value = ''
   activeAgentId.value = ''
+  agentControl.value = null
   if (workspaces.value.length) await selectWorkspace(workspaces.value[0].id)
 }
 
-async function submitPrompt() {
-  const text = prompt.value.trim()
-  if (!text || !activeAgentId.value || isRunning.value) return
-  prompt.value = ''
+async function submitPrompt(content) {
+  if (!content.length || !activeAgentId.value || isRunning.value) return
   sending.value = true
   error.value = ''
   try {
-    await v2Api.startTurn(activeAgentId.value, text, crypto.randomUUID())
+    const result = await v2Api.startTurn(activeAgentId.value, content, crypto.randomUUID())
+    upsertTurn(result.turn)
   } catch (cause) {
-    sending.value = false
     error.value = cause.message
+    throw cause
+  } finally {
+    sending.value = false
   }
 }
 
-function handlePromptKeydown(event) {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault()
-    submitPrompt()
+async function updateAgentSettings(input) {
+  if (!activeAgentId.value || settingsLoading.value || isRunning.value) return
+  settingsLoading.value = true
+  error.value = ''
+  try {
+    const result = await v2Api.updateAgentSettings(activeAgentId.value, input)
+    const index = agents.value.findIndex((agent) => agent.id === result.agent.id)
+    if (index >= 0) agents.value[index] = result.agent
+    agentControl.value = result.control
+  } catch (cause) {
+    error.value = cause.message
+  } finally {
+    settingsLoading.value = false
   }
 }
 
@@ -476,23 +530,11 @@ onBeforeUnmount(() => {
         <div ref="timelineElement" class="timeline h-full overflow-y-auto" @scroll.passive="handleTimelineScroll">
           <div v-if="!activeAgent || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeAgent ? '开始一段新的协作' : (activeWorkspace ? '创建第一个 Agent' : '添加一个工作区') }}</p><p v-if="activeAgent" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
-            <article v-for="entry in entries" :key="`${entry.seqStart}-${entry.item.callId || ''}`" class="mb-5" :data-timeline-seq="entry.seqEnd">
-              <div v-if="entry.item.type === 'user_message'" class="flex justify-end"><div class="user-message max-w-[85%] whitespace-pre-wrap rounded-sm border px-3 py-2 text-sm">{{ entry.item.content.map((block) => block.text || block.name).join('\n') }}</div></div>
-              <div v-else-if="entry.item.type === 'assistant_message'" class="flex gap-3">
-                <Bot class="mt-1 h-4 w-4 shrink-0" />
-                <TimelineMarkdown
-                  class="min-w-0 flex-1"
-                  :text="entry.item.text"
-                  :is-dark="isDark"
-                  :streaming="isRunning && entry.turnId === latestTurnId"
-                  @rendered="handleMarkdownRendered"
-                />
-              </div>
-              <details v-else-if="entry.item.type === 'reasoning'" class="process-row ml-7 rounded-sm border border-dashed px-3 py-2"><summary class="theme-muted-text cursor-pointer text-xs"><Brain class="mr-1 inline h-3.5 w-3.5" />思考过程</summary><div class="theme-muted-text mt-2 whitespace-pre-wrap text-xs leading-5">{{ entry.item.text }}</div></details>
-              <div v-else-if="entry.item.type === 'tool_call'" class="process-row ml-7 flex items-start gap-2 rounded-sm border border-dashed px-3 py-2"><Wrench class="theme-muted-text mt-0.5 h-3.5 w-3.5 shrink-0" /><div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-2 text-xs"><span class="truncate font-medium">{{ entry.item.name }}</span><Check v-if="entry.item.status === 'completed'" class="h-3.5 w-3.5" /></div><div class="theme-muted-text mt-1 truncate font-mono text-[10px]">{{ entry.item.detail?.command || entry.item.detail?.type }}</div></div></div>
-              <div v-else-if="entry.item.type === 'error'" class="error-row ml-7 rounded-sm border px-3 py-2 text-xs">{{ entry.item.message }}</div>
-            </article>
-            <div v-if="isRunning" class="theme-muted-text ml-7 flex items-center gap-2 py-2 text-xs"><LoaderCircle class="h-3.5 w-3.5 animate-spin" />Agent 正在处理</div>
+            <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
+              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" @rendered="handleMarkdownRendered" />
+              <article v-else-if="entry.item?.type === 'error'" class="error-row mb-5 ml-7 rounded-sm border px-3 py-2 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.message }}</article>
+              <article v-else-if="entry.item?.type === 'system_notice'" class="theme-muted-text mb-5 ml-7 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.text }}</article>
+            </template>
           </div>
         </div>
         <div v-if="loadingOlderHistory" class="panel pointer-events-none absolute left-1/2 top-3 z-10 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-sm border shadow-sm" role="status" aria-label="正在加载更早记录">
@@ -503,7 +545,16 @@ onBeforeUnmount(() => {
 
       <footer v-if="activeAgent" class="composer-wrap shrink-0 border-t p-3 sm:p-4">
         <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
-        <div class="composer mx-auto flex max-w-3xl items-end gap-2 rounded-sm border p-2"><textarea v-model="prompt" class="min-h-10 max-h-40 flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none" rows="1" placeholder="向 Agent 发送消息" :disabled="isRunning" @keydown="handlePromptKeydown" /><button v-if="isRunning" class="tool-button h-9 w-9 shrink-0" title="停止" @click="v2Api.cancel(activeAgentId)"><CircleStop class="h-4 w-4" /></button><button v-else class="tool-button tool-button-primary h-9 w-9 shrink-0" title="发送" :disabled="!prompt.trim() || sending" @click="submitPrompt"><Send class="h-4 w-4" /></button></div>
+        <AgentComposer
+          :workspace-id="activeWorkspaceId"
+          :running="isRunning"
+          :sending="sending"
+          :control="agentControl"
+          :settings-loading="settingsLoading"
+          :on-submit="submitPrompt"
+          :on-settings-change="updateAgentSettings"
+          @cancel="v2Api.cancel(activeAgentId)"
+        />
       </footer>
     </main>
 
@@ -581,18 +632,16 @@ onBeforeUnmount(() => {
 .agent-close { color: var(--theme-textMuted); opacity: 0; }
 .agent-tab:hover .agent-close, .agent-tab.row-active .agent-close { opacity: 1; }
 .agent-close:hover { color: var(--theme-dangerText); }
-.status-chip, .composer { border-color: var(--theme-borderDefault); background: var(--theme-appPanelStrong); }
+.status-chip { border-color: var(--theme-borderDefault); background: var(--theme-appPanelStrong); }
 .status-dot { background: var(--theme-success); }
 .status-dot-running { background: var(--theme-warning); }
 .timeline { background: var(--theme-appPanel); }
-.user-message { border-color: var(--theme-promptBorder); background: var(--theme-promptBg); color: var(--theme-promptText); }
 .process-row { border-color: var(--theme-processBorder); background: var(--theme-processBg); color: var(--theme-processText); }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .composer-wrap { background: var(--theme-appPanelMuted); }
 .modal-backdrop { background: var(--theme-modalBackdrop); }
 .directory-suggestions { background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
 .directory-suggestion:hover { background: var(--theme-appPanelHover); }
-textarea::placeholder { color: var(--theme-textMuted); }
 @media (max-width: 900px) { .v2-shell { grid-template-columns: 64px minmax(0, 1fr); } .workspace-sidebar header span, .workspace-sidebar footer span, .workspace-sidebar .row-copy { display: none; } .workspace-sidebar header, .workspace-sidebar footer, .workspace-row { justify-content: center; } }
 @media (max-width: 640px) { .status-text { display: none; } .agent-tab { max-width: 136px; } }
 </style>

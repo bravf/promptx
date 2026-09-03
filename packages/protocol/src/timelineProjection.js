@@ -74,12 +74,15 @@ export function projectTimelineRows(rows = []) {
     const sameMessage = row.item.type !== 'assistant_message'
       || !row.item.messageId
       || row.item.messageId === previous?.item?.messageId
+    const samePhase = row.item.type !== 'assistant_message'
+      || row.item.phase === previous?.item?.phase
     if (
       textKind
       && previous?.item?.type === row.item.type
       && previous.turnId === row.turnId
       && previous.seqEnd + 1 === row.seq
       && sameMessage
+      && samePhase
     ) {
       previous.item = { ...previous.item, text: `${previous.item.text}${row.item.text}` }
       previous.timestamp = row.timestamp

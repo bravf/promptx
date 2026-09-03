@@ -3,9 +3,13 @@ import {
   CreateTurnInputSchema,
   CreateWorkspaceInputSchema,
   ProviderIds,
+  UpdateAgentSettingsInputSchema,
   UpdateWorkspaceInputSchema,
 } from '../../../../packages/protocol/src/index.js'
+import fs from 'node:fs'
+import path from 'node:path'
 import { searchDirectories } from '../workspaces/directorySearch.js'
+import { publicAsset, removeStoredAssets, storeAsset } from '../assets/assetStorage.js'
 
 function parseCursor(value) {
   if (!value) return null
@@ -31,7 +35,7 @@ export function createSseHeaders(origin = '') {
 }
 
 export function registerRoutes(app, context) {
-  const { repository, timelineStore, providerRegistry, agentManager, eventHub } = context
+  const { repository, timelineStore, providerRegistry, agentManager, eventHub, assetsDir } = context
 
   app.get('/api/v2/health', async () => ({ ok: true, version: 2 }))
   app.get('/api/v2/providers', async () => ({ providers: providerRegistry.list() }))
@@ -60,9 +64,36 @@ export function registerRoutes(app, context) {
     workspace: repository.updateWorkspace(request.params.workspaceId, UpdateWorkspaceInputSchema.parse(request.body)),
   }))
   app.delete('/api/v2/workspaces/:workspaceId', async (request, reply) => {
+    const assets = repository.listWorkspaceAssets(request.params.workspaceId)
     for (const agent of repository.listAgents(request.params.workspaceId, true)) agentManager.close(agent.id)
     if (!repository.deleteWorkspace(request.params.workspaceId)) return reply.code(404).send({ error: 'workspace_not_found' })
+    removeStoredAssets(assets)
+    fs.rmSync(path.join(assetsDir, request.params.workspaceId), { recursive: true, force: true })
     return reply.code(204).send()
+  })
+
+  app.post('/api/v2/workspaces/:workspaceId/assets', async (request, reply) => {
+    const workspace = repository.getWorkspace(request.params.workspaceId)
+    if (!workspace) return reply.code(404).send({ error: 'workspace_not_found', message: '工作区不存在。' })
+    const part = await request.file()
+    if (!part) return reply.code(400).send({ error: 'file_missing', message: '没有收到附件。' })
+    const asset = await storeAsset({ part, workspaceId: workspace.id, assetsDir, repository })
+    reply.code(201)
+    return { asset: publicAsset(asset) }
+  })
+
+  app.get('/api/v2/assets/:assetId/content', async (request, reply) => {
+    const asset = repository.getAsset(request.params.assetId)
+    if (!asset || !fs.existsSync(asset.storagePath)) {
+      return reply.code(404).send({ error: 'asset_not_found', message: '附件不存在。' })
+    }
+    const inline = asset.mimeType.startsWith('image/')
+    reply.header('Content-Type', asset.mimeType)
+    reply.header('Content-Length', String(asset.size))
+    reply.header('X-Content-Type-Options', 'nosniff')
+    reply.header('Content-Security-Policy', "default-src 'none'; sandbox")
+    reply.header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(asset.name)}`)
+    return reply.send(fs.createReadStream(asset.storagePath))
   })
 
   app.get('/api/v2/workspaces/:workspaceId/agents', async (request) => ({
@@ -82,6 +113,23 @@ export function registerRoutes(app, context) {
   app.get('/api/v2/agents/:agentId', async (request, reply) => {
     const agent = repository.getAgent(request.params.agentId)
     return agent ? { agent } : reply.code(404).send({ error: 'agent_not_found' })
+  })
+  app.get('/api/v2/agents/:agentId/control', async (request, reply) => {
+    const agent = repository.getAgent(request.params.agentId)
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    return { control: await agentManager.getControlState(agent.id) }
+  })
+  app.patch('/api/v2/agents/:agentId/settings', async (request, reply) => {
+    const agent = repository.getAgent(request.params.agentId)
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    return agentManager.updateSettings(agent.id, UpdateAgentSettingsInputSchema.parse(request.body))
+  })
+  app.get('/api/v2/agents/:agentId/turns', async (request, reply) => {
+    const agent = repository.getAgent(request.params.agentId)
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    const requestedLimit = Number(request.query.limit || 300)
+    const limit = Math.min(1000, Math.max(1, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 300))
+    return { turns: repository.listTurns(agent.id, limit) }
   })
   app.post('/api/v2/agents/:agentId/turns', async (request, reply) => {
     const input = CreateTurnInputSchema.parse(request.body)
@@ -126,6 +174,8 @@ export function registerRoutes(app, context) {
     if (snapshot.reset) sseWrite(raw, { type: 'reset', timeline: snapshot })
     else snapshot.rows.forEach((row) => sseWrite(raw, { type: 'timeline', epoch: snapshot.epoch, row }))
     sseWrite(raw, { type: 'agent', agent: repository.getAgent(agentId) })
+    const control = agentManager.controlStates.get(agentId)
+    if (control) sseWrite(raw, { type: 'control', control })
     const heartbeat = setInterval(() => raw.write(': heartbeat\n\n'), 15000)
     heartbeat.unref?.()
     raw.on('close', () => {

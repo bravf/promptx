@@ -8,6 +8,14 @@ const ImageContentBlockSchema = z.object({
   assetId: z.string(),
   mimeType: z.string(),
   name: z.string(),
+  size: z.number().int().nonnegative(),
+})
+const FileContentBlockSchema = z.object({
+  type: z.literal('file'),
+  assetId: z.string(),
+  mimeType: z.string(),
+  name: z.string(),
+  size: z.number().int().nonnegative(),
 })
 
 const ToolDetailSchema = z.object({ type: z.string().min(1) }).passthrough()
@@ -16,11 +24,12 @@ export const TimelineItemSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('user_message'),
     clientMessageId: z.string(),
-    content: z.array(z.union([TextContentBlockSchema, ImageContentBlockSchema])),
+    content: z.array(z.union([TextContentBlockSchema, ImageContentBlockSchema, FileContentBlockSchema])),
   }),
   z.object({
     type: z.literal('assistant_message'),
     messageId: z.string().optional(),
+    phase: z.enum(['commentary', 'final_answer', 'unknown']),
     text: z.string(),
   }),
   z.object({

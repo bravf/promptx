@@ -4,8 +4,8 @@ import { projectTimelineRows } from './timeline.js'
 
 test('projectTimelineRows 合并文本增量和工具生命周期', () => {
   const rows = [
-    { seq: 1, timestamp: '1', turnId: 't1', item: { type: 'assistant_message', messageId: 'm1', text: '你' } },
-    { seq: 2, timestamp: '2', turnId: 't1', item: { type: 'assistant_message', messageId: 'm1', text: '好' } },
+    { seq: 1, timestamp: '1', turnId: 't1', item: { type: 'assistant_message', messageId: 'm1', phase: 'final_answer', text: '你' } },
+    { seq: 2, timestamp: '2', turnId: 't1', item: { type: 'assistant_message', messageId: 'm1', phase: 'final_answer', text: '好' } },
     { seq: 3, timestamp: '3', turnId: 't1', item: { type: 'tool_call', callId: 'c1', name: 'shell', status: 'running', detail: { type: 'shell', output: '' } } },
     { seq: 4, timestamp: '4', turnId: 't1', item: { type: 'tool_call', callId: 'c1', name: 'shell', status: 'completed', detail: { type: 'shell', output: 'ok' } } },
   ]
@@ -17,10 +17,20 @@ test('projectTimelineRows 合并文本增量和工具生命周期', () => {
   assert.equal(projected[1].item.detail.output, 'ok')
 })
 
+test('projectTimelineRows 不合并阶段不同的 Assistant 消息', () => {
+  const projected = projectTimelineRows([
+    { seq: 1, timestamp: '1', turnId: 't1', item: { type: 'assistant_message', messageId: 'm1', phase: 'commentary', text: '先检查。' } },
+    { seq: 2, timestamp: '2', turnId: 't1', item: { type: 'assistant_message', messageId: 'm1', phase: 'final_answer', text: '检查完成。' } },
+  ])
+
+  assert.equal(projected.length, 2)
+  assert.deepEqual(projected.map((entry) => entry.item.phase), ['commentary', 'final_answer'])
+})
+
 test('projectTimelineRows 合并同一 Turn 中重复的 Assistant 错误和 Error', () => {
   const message = 'API Error: 503 No available accounts.'
   const projected = projectTimelineRows([
-    { seq: 1, timestamp: '1', turnId: 't1', item: { type: 'assistant_message', messageId: 'm1', text: ` ${message}\n` } },
+    { seq: 1, timestamp: '1', turnId: 't1', item: { type: 'assistant_message', messageId: 'm1', phase: 'final_answer', text: ` ${message}\n` } },
     { seq: 2, timestamp: '2', turnId: 't1', item: { type: 'error', code: 'provider_error', message } },
   ])
 
@@ -34,7 +44,7 @@ test('projectTimelineRows 合并同一 Turn 中重复的 Assistant 错误和 Err
 
 test('projectTimelineRows 保留内容不同的 Assistant 消息和 Error', () => {
   const projected = projectTimelineRows([
-    { seq: 1, timestamp: '1', turnId: 't1', item: { type: 'assistant_message', messageId: 'm1', text: '已经完成部分工作。' } },
+    { seq: 1, timestamp: '1', turnId: 't1', item: { type: 'assistant_message', messageId: 'm1', phase: 'final_answer', text: '已经完成部分工作。' } },
     { seq: 2, timestamp: '2', turnId: 't1', item: { type: 'error', code: 'provider_error', message: '连接中断。' } },
   ])
 
