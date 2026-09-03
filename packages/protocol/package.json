@@ -8,7 +8,7 @@
     "./timeline-projection": "./src/timelineProjection.js"
   },
   "scripts": {
-    "build": "node --check src/index.js && node --check src/agent.js && node --check src/timeline.js && node --check src/timelineProjection.js && node --check src/workspace.js",
+    "build": "node --check src/index.js && node --check src/agent.js && node --check src/timeline.js && node --check src/timelineProjection.js && node --check src/workspace.js && node --check src/workspaceInspection.js",
     "lint": "node -e \"console.log('protocol: nothing to lint')\"",
     "test": "node --test"
   },

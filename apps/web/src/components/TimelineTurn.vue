@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Bot, Check, ChevronRight, Circle, CircleDot, LoaderCircle, Wrench } from 'lucide-vue-next'
+import { Bot, Check, ChevronRight, Circle, CircleDot, FileDiff, FileText, LoaderCircle, Wrench } from 'lucide-vue-next'
 import { formatElapsedTime, getTurnActivityState, userMessageCopyText } from '../lib/timelinePresentation.js'
+import { workspaceLinksForTool } from '../lib/timelineWorkspaceLinks.js'
 import TimelineMarkdown from './TimelineMarkdown.vue'
 import TimelineMessageMeta from './TimelineMessageMeta.vue'
 import TimelineUserMessage from './TimelineUserMessage.vue'
@@ -11,8 +12,9 @@ const props = defineProps({
   timing: { type: Object, default: null },
   running: { type: Boolean, default: false },
   isDark: { type: Boolean, default: false },
+  workspaceCwd: { type: String, default: '' },
 })
-const emit = defineEmits(['rendered'])
+const emit = defineEmits(['rendered', 'open-workspace-path'])
 
 const expanded = ref(props.running)
 const clock = ref(Date.now())
@@ -49,6 +51,10 @@ function syncClock() {
   }
 }
 
+function toolLinks(entry) {
+  return workspaceLinksForTool(entry.item, props.workspaceCwd)
+}
+
 watch(() => props.running, (running, wasRunning) => {
   if (running && !wasRunning) expanded.value = true
   else if (!running && wasRunning) expanded.value = false
@@ -73,13 +79,20 @@ onBeforeUnmount(() => clearInterval(clockTimer))
       </button>
       <div v-if="expanded && hasProcessEntries" class="process-content pb-1 pl-5 pt-1">
         <div v-for="entry in visibleProcessEntries" :key="`${entry.seqStart}-${entry.item.callId || entry.item.type}`" class="process-entry py-1.5 text-xs">
-          <TimelineMarkdown v-if="entry.item.type === 'assistant_message'" class="theme-secondary-text" :text="entry.item.text" :is-dark="isDark" :streaming="running" @rendered="emit('rendered')" />
+          <TimelineMarkdown v-if="entry.item.type === 'assistant_message'" class="theme-secondary-text" :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
           <div v-else-if="entry.item.type === 'reasoning'" class="theme-secondary-text whitespace-pre-wrap leading-5">{{ entry.item.text }}</div>
           <div v-else-if="entry.item.type === 'tool_call'" class="flex min-w-0 items-start gap-2">
             <Wrench class="theme-muted-text mt-0.5 h-3.5 w-3.5 shrink-0" />
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2"><span class="truncate font-medium">{{ entry.item.name }}</span><Check v-if="entry.item.status === 'completed'" class="h-3.5 w-3.5 shrink-0" /><LoaderCircle v-else-if="entry.item.status === 'running'" class="h-3.5 w-3.5 shrink-0 animate-spin" /></div>
               <div v-if="entry.item.detail?.command || entry.item.detail?.type" class="theme-muted-text mt-0.5 truncate font-mono text-[10px]">{{ entry.item.detail?.command || entry.item.detail?.type }}</div>
+              <div v-if="toolLinks(entry).length" class="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1">
+                <button v-for="link in toolLinks(entry)" :key="`${link.intent}:${link.path}`" type="button" class="workspace-path-link flex min-w-0 items-center gap-1 text-left font-mono text-[10px]" :title="link.path" @click="emit('open-workspace-path', link)">
+                  <FileDiff v-if="link.intent === 'diff'" class="h-3 w-3 shrink-0" />
+                  <FileText v-else class="h-3 w-3 shrink-0" />
+                  <span class="truncate">{{ link.path }}<template v-if="link.line">:{{ link.line }}</template></span>
+                </button>
+              </div>
               <div v-if="entry.item.error?.message" class="theme-danger-text mt-1">{{ entry.item.error.message }}</div>
             </div>
           </div>
@@ -103,7 +116,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
       <div v-if="entry.item.type === 'assistant_message'" class="flex gap-3">
         <Bot class="mt-1 h-4 w-4 shrink-0" />
         <div class="min-w-0 flex-1">
-          <TimelineMarkdown :text="entry.item.text" :is-dark="isDark" :streaming="running" @rendered="emit('rendered')" />
+          <TimelineMarkdown :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
           <TimelineMessageMeta :text="entry.item.text" :timestamp="entry.timestamp" />
         </div>
       </div>
@@ -115,4 +128,6 @@ onBeforeUnmount(() => clearInterval(clockTimer))
 
 <style scoped>
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
+.workspace-path-link { color: var(--theme-accentText); }
+.workspace-path-link:hover { text-decoration: underline; }
 </style>

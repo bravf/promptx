@@ -56,7 +56,7 @@ export async function createApp(options = {}) {
     request.log.error(error)
     const statusCode = error.name === 'ZodError' ? 400 : (error.statusCode || 500)
     reply.code(statusCode).send({
-      error: statusCode === 400 ? 'invalid_request' : 'internal_error',
+      error: error.code || (statusCode === 400 ? 'invalid_request' : 'internal_error'),
       message: error.message,
     })
   })

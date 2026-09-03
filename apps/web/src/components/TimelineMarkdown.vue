@@ -16,8 +16,12 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  workspaceCwd: {
+    type: String,
+    default: '',
+  },
 })
-const emit = defineEmits(['rendered'])
+const emit = defineEmits(['rendered', 'open-workspace-path'])
 
 const renderedMessage = computed(() => capTimelineMarkdown(props.text))
 const blocks = computed(() => splitTimelineMarkdownBlocks(renderedMessage.value.text))
@@ -33,7 +37,9 @@ const formattedLimit = new Intl.NumberFormat('zh-CN').format(TIMELINE_MARKDOWN_C
       :text="block"
       :is-dark="isDark"
       :streaming="streaming && index === blocks.length - 1"
+      :workspace-cwd="workspaceCwd"
       @rendered="emit('rendered')"
+      @open-workspace-path="emit('open-workspace-path', $event)"
     />
     <p v-if="renderedMessage.capped" class="theme-muted-text mt-3 text-xs italic">
       消息内容过长，仅展示前 {{ formattedLimit }} 个字符。

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, Bot, ChevronRight, FolderOpen, LoaderCircle, Palette, Plus, Search, TerminalSquare, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, Bot, ChevronRight, FileDiff, Files, FolderOpen, LoaderCircle, Palette, Plus, Search, TerminalSquare, Trash2, X } from 'lucide-vue-next'
 import { v2Api, agentEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupTimelineTurns } from '../lib/timelinePresentation.js'
@@ -9,6 +9,7 @@ import { useTheme } from '../composables/useTheme.js'
 import AgentComposer from '../components/AgentComposer.vue'
 import SessionTitleMarquee from '../components/SessionTitleMarquee.vue'
 import TimelineTurn from '../components/TimelineTurn.vue'
+import WorkspaceInspector from '../components/WorkspaceInspector.vue'
 
 const { currentTheme, isDark, setTheme, themes } = useTheme()
 const workspaces = ref([])
@@ -40,14 +41,20 @@ const selectedDirectoryIndex = ref(-1)
 const agentProvider = ref('codex')
 const creating = ref(false)
 const timelineElement = ref(null)
+const workspaceInspector = ref(null)
+const drawerMode = ref(null)
+const mobileView = ref('sidebar')
+const isMobile = ref(false)
 let eventSource = null
 let globalEventSource = null
+let mobileMediaQuery = null
 const attentionClearPending = new Set()
 let timelineRequestVersion = 0
 let positioningTimeline = false
 let directorySearchTimer = null
 let directorySearchController = null
 let markdownScrollFrame = null
+let inspectorRefreshTimer = null
 
 const activeWorkspace = computed(() => workspaces.value.find((item) => item.id === activeWorkspaceId.value))
 const agents = computed(() => agentsForWorkspace(activeWorkspaceId.value))
@@ -160,7 +167,7 @@ async function loadInitial() {
   }
 }
 
-async function selectWorkspace(id) {
+async function selectWorkspace(id, { navigate = false } = {}) {
   activeWorkspaceId.value = id
   setWorkspaceExpanded(id)
   if (!(id in agentsByWorkspace.value)) {
@@ -168,16 +175,17 @@ async function selectWorkspace(id) {
     setWorkspaceAgents(id, result.agents)
   }
   const workspaceAgents = agentsForWorkspace(id)
-  if (workspaceAgents.length) await selectAgent(workspaceAgents[0].id)
+  if (workspaceAgents.length) await selectAgent(workspaceAgents[0].id, { navigate })
   else {
     resetTimelineSelection()
     positioningTimeline = false
   }
 }
 
-async function selectAgent(id) {
+async function selectAgent(id, { navigate = false } = {}) {
   const agent = Object.values(agentsByWorkspace.value).flat().find((item) => item.id === id)
   if (!agent) return
+  if (navigate) mobileView.value = 'timeline'
   activeWorkspaceId.value = agent.workspaceId
   setWorkspaceExpanded(agent.workspaceId)
   const requestVersion = ++timelineRequestVersion
@@ -287,6 +295,7 @@ function openEvents(agentId, epoch, seq) {
     if (rows.value.some((item) => item.seq === row.seq)) return
     const shouldFollow = isTimelineAtBottom(timelineElement.value)
     rows.value.push(row)
+    if (row.item?.type === 'tool_call' && ['completed', 'failed', 'canceled'].includes(row.item.status)) scheduleInspectorRefresh()
     followingTimeline.value = shouldFollow
     if (shouldFollow) scrollToBottom()
     else hasNewTimelineItems.value = true
@@ -298,7 +307,9 @@ function openEvents(agentId, epoch, seq) {
     sending.value = agent.lifecycle === 'running'
   })
   eventSource.addEventListener('turn', (event) => {
-    upsertTurn(JSON.parse(event.data).turn)
+    const turn = JSON.parse(event.data).turn
+    upsertTurn(turn)
+    if (['completed', 'failed', 'canceled'].includes(turn.status)) scheduleInspectorRefresh()
   })
   eventSource.addEventListener('control', (event) => {
     agentControl.value = JSON.parse(event.data).control
@@ -311,6 +322,34 @@ function openEvents(agentId, epoch, seq) {
     if (followingTimeline.value) scrollToBottom()
     else hasNewTimelineItems.value = true
   })
+}
+
+function scheduleInspectorRefresh() {
+  if (!drawerMode.value) return
+  if (inspectorRefreshTimer) clearTimeout(inspectorRefreshTimer)
+  inspectorRefreshTimer = setTimeout(() => {
+    inspectorRefreshTimer = null
+    workspaceInspector.value?.refreshGit({ preserveDiff: true })
+  }, 250)
+}
+
+async function openWorkspacePath(target) {
+  drawerMode.value = target.intent === 'diff' ? 'diff' : 'files'
+  await nextTick()
+  workspaceInspector.value?.openPath(target)
+}
+
+function toggleDrawer(mode) {
+  drawerMode.value = drawerMode.value === mode ? null : mode
+}
+
+function showMobileSidebar() {
+  drawerMode.value = null
+  mobileView.value = 'sidebar'
+}
+
+function handleGlobalKeydown(event) {
+  if (event.key === 'Escape' && !dialog.value && drawerMode.value) drawerMode.value = null
 }
 
 function openGlobalEvents() {
@@ -457,7 +496,7 @@ async function createConversation() {
     workspacePath.value = ''
     closeDialog()
     setWorkspaceExpanded(workspace.id)
-    await selectAgent(agent.id)
+    await selectAgent(agent.id, { navigate: true })
   } catch (cause) {
     error.value = cause.message
   } finally {
@@ -555,21 +594,37 @@ function cycleTheme() {
   setTheme(themes.value[(index + 1) % themes.value.length].id)
 }
 
+function updateMobileState(event) {
+  isMobile.value = event.matches
+}
+
 onMounted(async () => {
+  window.addEventListener('keydown', handleGlobalKeydown)
+  mobileMediaQuery = window.matchMedia('(max-width: 720px)')
+  updateMobileState(mobileMediaQuery)
+  mobileMediaQuery.addEventListener('change', updateMobileState)
   await loadInitial()
   openGlobalEvents()
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  mobileMediaQuery?.removeEventListener('change', updateMobileState)
   closeEvents()
   closeGlobalEvents()
   cancelDirectorySearch()
   if (markdownScrollFrame) cancelAnimationFrame(markdownScrollFrame)
+  if (inspectorRefreshTimer) clearTimeout(inspectorRefreshTimer)
 })
 </script>
 
 <template>
-  <div class="v2-shell panel grid h-full min-h-0 overflow-hidden">
-    <aside class="workspace-sidebar flex min-h-0 flex-col border-r">
+  <div class="v2-shell panel relative grid h-full min-h-0 overflow-hidden">
+    <aside
+      class="workspace-sidebar flex min-h-0 flex-col border-r"
+      :class="mobileView === 'sidebar' ? 'mobile-panel-active' : 'mobile-panel-hidden'"
+      :inert="isMobile && mobileView !== 'sidebar'"
+      :aria-hidden="isMobile ? mobileView !== 'sidebar' : undefined"
+    >
       <header class="flex h-14 shrink-0 items-center border-b px-3">
         <div class="flex min-w-0 items-center gap-2">
           <div class="brand-mark flex h-7 w-7 items-center justify-center rounded-sm"><TerminalSquare class="h-4 w-4" /></div>
@@ -598,7 +653,7 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="expandedWorkspaceIds.has(workspace.id)" class="agent-list ml-6 mt-0.5">
             <div v-for="agent in agentsForWorkspace(workspace.id)" :key="agent.id" class="agent-row group flex min-w-0 items-center rounded-sm" :class="agent.id === activeAgentId ? 'row-active' : ''">
-              <button class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${agent.title} · ${providerLabel(agent.providerId)}`" @click="selectAgent(agent.id)">
+              <button class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${agent.title} · ${providerLabel(agent.providerId)}`" @click="selectAgent(agent.id, { navigate: true })">
                 <span v-if="agentStatusClass(agent)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(agent)" />
                 <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="agent.title" />
                 <LoaderCircle v-if="agent.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
@@ -610,13 +665,23 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="!workspaces.length && !loading" class="theme-muted-text px-3 py-8 text-center text-xs">还没有工作区</div>
       </div>
-      <footer class="flex items-center justify-between border-t p-2"><span class="theme-muted-text truncate px-1 text-[10px]">{{ currentTheme.shortName }}</span><button class="tool-button h-8 w-8" title="切换主题" @click="cycleTheme"><Palette class="h-4 w-4" /></button></footer>
+      <footer class="flex items-center justify-between border-t p-2"><span class="theme-muted-text truncate px-1 text-[10px]">{{ currentTheme.shortName }}</span><button class="quiet-icon-button h-8 w-8" title="切换主题" @click="cycleTheme"><Palette class="h-4 w-4" /></button></footer>
     </aside>
 
-    <main class="flex min-h-0 min-w-0 flex-col">
-      <header class="flex h-14 shrink-0 items-center justify-end border-b px-4">
+    <main
+      class="timeline-pane flex min-h-0 min-w-0 flex-col"
+      :class="mobileView === 'timeline' ? 'mobile-panel-active' : 'mobile-panel-hidden'"
+      :inert="isMobile && mobileView !== 'timeline'"
+      :aria-hidden="isMobile ? mobileView !== 'timeline' : undefined"
+    >
+      <header class="timeline-header flex h-14 shrink-0 items-center justify-between border-b px-4">
+        <button class="mobile-back-button quiet-icon-button h-8 w-8" title="返回项目列表" aria-label="返回项目列表" @click="showMobileSidebar">
+          <ArrowLeft class="h-4 w-4" />
+        </button>
         <div class="flex items-center gap-2">
-          <div v-if="activeAgent" class="status-chip flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
+          <div v-if="activeAgent" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
+          <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :title="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></button>
+          <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :title="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></button>
         </div>
       </header>
 
@@ -625,7 +690,7 @@ onBeforeUnmount(() => {
           <div v-if="!activeAgent || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeAgent ? '开始一段新的协作' : '新建一条对话' }}</p><p v-if="activeAgent" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
-              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" @rendered="handleMarkdownRendered" />
+              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" :workspace-cwd="activeWorkspace?.cwd" @rendered="handleMarkdownRendered" @open-workspace-path="openWorkspacePath" />
               <article v-else-if="entry.item?.type === 'error'" class="error-row mb-5 ml-7 rounded-sm border px-3 py-2 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.message }}</article>
               <article v-else-if="entry.item?.type === 'system_notice'" class="theme-muted-text mb-5 ml-7 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.text }}</article>
             </template>
@@ -652,11 +717,24 @@ onBeforeUnmount(() => {
       </footer>
     </main>
 
+    <Transition name="workspace-drawer">
+      <WorkspaceInspector
+        v-if="activeWorkspace"
+        v-show="drawerMode"
+        ref="workspaceInspector"
+        :workspace-id="activeWorkspace.id"
+        :workspace-cwd="activeWorkspace.cwd"
+        :is-dark="isDark"
+        :mode="drawerMode || 'files'"
+        @close="drawerMode = null"
+      />
+    </Transition>
+
     <div v-if="dialog === 'conversation'" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4" @click.self="closeDialog">
       <form class="panel w-full max-w-md p-4" @submit.prevent="createConversation">
         <div class="flex items-center justify-between">
           <h2 class="text-sm font-semibold">新对话</h2>
-          <button type="button" class="tool-button h-8 w-8" title="关闭" @click="closeDialog"><X class="h-4 w-4" /></button>
+          <button type="button" class="quiet-icon-button h-8 w-8" title="关闭" @click="closeDialog"><X class="h-4 w-4" /></button>
         </div>
         <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
         <div class="relative mt-1">
@@ -717,6 +795,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .v2-shell { grid-template-columns: 240px minmax(0, 1fr); }
+.v2-shell :deep(.workspace-inspector) { bottom: 0; left: 240px; position: absolute; right: 0; top: 3.5rem; z-index: 20; }
 .workspace-sidebar, header, footer, .composer-wrap { border-color: var(--theme-borderDefault); }
 .brand-mark { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
 .sidebar-primary-action { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
@@ -735,7 +814,7 @@ onBeforeUnmount(() => {
 .agent-dot-finished { background: var(--theme-success); }
 .agent-dot-failed { background: var(--theme-danger); }
 .row-active { background: var(--theme-appPanelInset); }
-.status-chip { border-color: var(--theme-borderDefault); background: var(--theme-appPanelStrong); }
+.status-chip { color: var(--theme-textMuted); }
 .status-dot { background: var(--theme-success); }
 .status-dot-running { background: var(--theme-warning); }
 .timeline { background: var(--theme-appPanel); }
@@ -745,15 +824,44 @@ onBeforeUnmount(() => {
 .modal-backdrop { background: var(--theme-modalBackdrop); }
 .directory-suggestions { background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
 .directory-suggestion:hover { background: var(--theme-appPanelHover); }
-@media (max-width: 900px) { .v2-shell { grid-template-columns: 200px minmax(0, 1fr); } }
-@media (max-width: 640px) {
-  .v2-shell { grid-template-columns: minmax(136px, 38vw) minmax(0, 1fr); }
-  .workspace-sidebar header { padding-inline: 0.5rem; }
-  .workspace-sidebar header .theme-muted-text, .workspace-sidebar footer span { display: none; }
-  .workspace-sidebar footer { justify-content: flex-end; }
+.sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion {
+  transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease, transform 140ms ease;
+}
+.workspace-toggle:active, .workspace-action:active, .agent-delete:active { transform: scale(0.9); }
+.drawer-trigger.is-active { background: var(--theme-accentSoft); color: var(--theme-accentText); }
+.workspace-drawer-enter-active { transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease; }
+.workspace-drawer-leave-active { transition: transform 180ms ease-in, opacity 150ms ease; }
+.workspace-drawer-enter-from, .workspace-drawer-leave-to { transform: translateX(100%); opacity: 0.35; }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .drawer-trigger,
+  .workspace-sidebar, .timeline-pane, .workspace-drawer-enter-active, .workspace-drawer-leave-active { transition: none; }
+}
+@media (max-width: 900px) {
+  .v2-shell { grid-template-columns: 200px minmax(0, 1fr); }
+  .v2-shell :deep(.workspace-inspector) { left: 200px; }
+}
+@media (max-width: 720px) {
+  .v2-shell { display: block; border: 0; border-radius: 0; }
+  .workspace-sidebar, .timeline-pane {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    background: var(--theme-appPanel);
+    transition: transform 220ms cubic-bezier(0.25, 0.1, 0.25, 1), opacity 180ms ease;
+  }
+  .workspace-sidebar { z-index: 1; border-right: 0; }
+  .timeline-pane { z-index: 2; }
+  .workspace-sidebar.mobile-panel-hidden { transform: translateX(-18%); opacity: 0.78; pointer-events: none; }
+  .timeline-pane.mobile-panel-hidden { transform: translateX(100%); pointer-events: none; }
+  .mobile-panel-active { transform: translateX(0); opacity: 1; pointer-events: auto; }
+  .mobile-back-button { display: inline-flex; }
+  .v2-shell :deep(.workspace-inspector) { left: 0; }
   .workspace-action, .agent-delete { opacity: 1; }
   .workspace-delete { display: none; }
-  .agent-list { margin-left: 0.75rem; }
   .status-text { display: none; }
+}
+
+@media (min-width: 721px) {
+  .mobile-back-button { display: none; }
 }
 </style>

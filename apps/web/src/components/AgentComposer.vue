@@ -207,15 +207,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="composer mx-auto max-w-3xl rounded-sm border"
+    class="composer mx-auto max-w-3xl rounded-sm"
     :class="dragging ? 'composer-dragging' : ''"
     @dragenter.prevent="dragging = true"
     @dragover.prevent="dragging = true"
     @dragleave.self="dragging = false"
     @drop.prevent="handleDrop"
   >
-    <div v-if="attachments.length" class="attachment-list flex gap-2 overflow-x-auto border-b p-2">
-      <div v-for="item in attachments" :key="item.localId" class="attachment-pill relative flex h-14 min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-sm border p-1.5 pr-8">
+    <div v-if="attachments.length" class="attachment-list flex gap-2 overflow-x-auto p-2">
+      <div v-for="item in attachments" :key="item.localId" class="attachment-pill relative flex h-14 min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-sm p-1.5 pr-8">
         <button v-if="item.objectUrl" type="button" class="attachment-preview h-10 w-10 shrink-0 overflow-hidden rounded-sm" title="预览图片" @click="preview = item">
           <img :src="item.objectUrl" :alt="item.file.name" class="h-full w-full object-cover" />
         </button>
@@ -291,7 +291,7 @@ onBeforeUnmount(() => {
             <circle v-if="contextUsage" class="context-ring-progress" :class="contextUsageTone" cx="8" cy="8" r="6" fill="none" stroke-width="2" stroke-linecap="round" :style="contextProgressStyle" />
           </svg>
         </div>
-        <button v-if="running" type="button" class="tool-button h-8 w-8" title="停止" @click="emit('cancel')"><CircleStop class="h-4 w-4" /></button>
+        <button v-if="running" type="button" class="quiet-icon-button h-8 w-8" title="停止" @click="emit('cancel')"><CircleStop class="h-4 w-4" /></button>
         <button v-else type="button" class="tool-button tool-button-primary h-8 w-8" title="发送" :disabled="sendDisabled" @click="submit">
           <LoaderCircle v-if="submitting || sending" class="h-4 w-4 animate-spin" />
           <Send v-else class="h-4 w-4" />
@@ -307,10 +307,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.composer { border-color: var(--theme-borderDefault); background: var(--theme-appPanelStrong); }
-.composer-dragging { border-color: var(--theme-primaryBorder); background: var(--theme-primaryBg); }
-.attachment-list { border-color: var(--theme-borderDefault); }
-.attachment-pill { border-color: var(--theme-borderDefault); background: var(--theme-appPanelInset); }
+.composer { background: var(--theme-appPanelStrong); box-shadow: 0 1px 4px color-mix(in srgb, var(--theme-textPrimary) 10%, transparent); }
+.composer-dragging { background: var(--theme-primaryBg); box-shadow: 0 0 0 2px var(--theme-primaryBorder); }
+.attachment-pill { background: var(--theme-appPanelInset); }
 .attachment-preview, .attachment-file { background: var(--theme-appPanelMuted); color: var(--theme-textMuted); }
 .attachment-action { display: flex; align-items: center; justify-content: center; color: var(--theme-textMuted); }
 .attachment-action:hover { color: var(--theme-dangerText); }
@@ -320,7 +319,7 @@ onBeforeUnmount(() => {
 .composer-control-button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 9999px; color: var(--theme-textMuted); transition: background-color 120ms ease, color 120ms ease; }
 .composer-control-button:hover:not(:disabled), .composer-select-wrap:hover, .effort-control:hover { background: var(--theme-appPanelMuted); }
 .composer-control-button:disabled { cursor: not-allowed; opacity: 0.5; }
-.composer-select { border: 0; background: transparent; color: var(--theme-textMuted); cursor: pointer; }
+.composer-select { width: auto; max-width: 100%; border: 0; background: transparent; color: var(--theme-textMuted); cursor: pointer; field-sizing: content; }
 .composer-select:focus { background: var(--theme-appPanelMuted); color: var(--theme-textPrimary); }
 .composer-select:disabled { cursor: not-allowed; opacity: 0.5; }
 .context-usage { color: var(--theme-textMuted); }
@@ -333,10 +332,10 @@ onBeforeUnmount(() => {
 .modal-backdrop { background: var(--theme-modalBackdrop); }
 @media (max-width: 640px) {
   .composer-input { min-height: 38px; padding-top: 0.5rem; }
-  .composer-toolbar { align-items: flex-end; }
-  .composer-controls { flex-basis: 100%; }
-  .model-select { max-width: none; flex: 1 1 0; }
+  .composer-toolbar { flex-wrap: nowrap; }
+  .composer-controls { flex-basis: auto; }
+  .model-select { width: auto; max-width: min(7.5rem, 34vw); flex: 0 1 auto; }
   .effort-control { flex: 0 0 auto; }
-  .composer-actions { margin-left: auto; }
+  .composer-actions { gap: 0.25rem; margin-left: auto; }
 }
 </style>

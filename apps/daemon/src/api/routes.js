@@ -8,6 +8,13 @@ import {
 import fs from 'node:fs'
 import path from 'node:path'
 import { searchDirectories } from '../workspaces/directorySearch.js'
+import {
+  getWorkspaceGitDiff,
+  getWorkspaceGitStatus,
+  listWorkspaceDirectory,
+  openWorkspaceFileStream,
+  readWorkspaceFile,
+} from '../workspaces/workspaceInspection.js'
 import { publicAsset, removeStoredAssets, storeAsset } from '../assets/assetStorage.js'
 import { DEFAULT_AGENT_TITLE } from '../agent/sessionTitle.js'
 
@@ -45,6 +52,36 @@ export function registerRoutes(app, context) {
   }))
 
   app.get('/api/v2/workspaces', async () => ({ workspaces: repository.listWorkspaces() }))
+  app.get('/api/v2/workspaces/:workspaceId/files', async (request, reply) => {
+    const workspace = repository.getWorkspace(request.params.workspaceId)
+    if (!workspace) return reply.code(404).send({ error: 'workspace_not_found', message: '工作区不存在。' })
+    return { directory: listWorkspaceDirectory(workspace.cwd, request.query.path) }
+  })
+  app.get('/api/v2/workspaces/:workspaceId/file', async (request, reply) => {
+    const workspace = repository.getWorkspace(request.params.workspaceId)
+    if (!workspace) return reply.code(404).send({ error: 'workspace_not_found', message: '工作区不存在。' })
+    return { file: readWorkspaceFile(workspace.cwd, request.query.path) }
+  })
+  app.get('/api/v2/workspaces/:workspaceId/file/content', async (request, reply) => {
+    const workspace = repository.getWorkspace(request.params.workspaceId)
+    if (!workspace) return reply.code(404).send({ error: 'workspace_not_found', message: '工作区不存在。' })
+    const file = openWorkspaceFileStream(workspace.cwd, request.query.path)
+    reply.header('Content-Type', file.mimeType)
+    reply.header('Content-Length', String(file.size))
+    reply.header('X-Content-Type-Options', 'nosniff')
+    reply.header('Content-Security-Policy', "default-src 'none'; sandbox")
+    return reply.send(file.stream)
+  })
+  app.get('/api/v2/workspaces/:workspaceId/git/status', async (request, reply) => {
+    const workspace = repository.getWorkspace(request.params.workspaceId)
+    if (!workspace) return reply.code(404).send({ error: 'workspace_not_found', message: '工作区不存在。' })
+    return { git: await getWorkspaceGitStatus(workspace.cwd) }
+  })
+  app.get('/api/v2/workspaces/:workspaceId/git/diff', async (request, reply) => {
+    const workspace = repository.getWorkspace(request.params.workspaceId)
+    if (!workspace) return reply.code(404).send({ error: 'workspace_not_found', message: '工作区不存在。' })
+    return { diff: await getWorkspaceGitDiff(workspace.cwd, request.query.path) }
+  })
   app.get('/api/v2/events', (request, reply) => {
     reply.hijack()
     const raw = reply.raw

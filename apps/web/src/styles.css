@@ -150,6 +150,34 @@ body {
     --tw-ring-color: var(--theme-focusRing);
   }
 
+  .quiet-icon-button {
+    @apply inline-flex items-center justify-center rounded-sm disabled:cursor-not-allowed disabled:opacity-50;
+    border: 0;
+    background: transparent;
+    color: var(--theme-textMuted);
+    transition: background-color 140ms ease, color 140ms ease, transform 140ms ease;
+  }
+
+  .quiet-icon-button:hover:not(:disabled) {
+    background: var(--theme-appPanelHover);
+    color: var(--theme-textPrimary);
+  }
+
+  .quiet-icon-button:active:not(:disabled) {
+    transform: scale(0.92);
+  }
+
+  .quiet-icon-button:focus-visible {
+    outline: 2px solid var(--theme-focusRing);
+    outline-offset: -2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .quiet-icon-button {
+      transition: none;
+    }
+  }
+
   .image-preview-overlay__button {
     border-color: color-mix(in srgb, var(--theme-borderDefault) 42%, rgba(255, 255, 255, 0.18));
     background: color-mix(in srgb, var(--theme-appPanelStrong) 84%, rgba(22, 22, 22, 0.7));

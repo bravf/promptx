@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
+import { spawnSync } from 'node:child_process'
 import { test } from 'node:test'
 import { createApp } from './app.js'
 
@@ -121,6 +122,54 @@ test('Workspace、Agent 和 Timeline API 形成完整基础链路', async () => 
   assert.equal(turnsResponse.json().turns[0].finishedAt, '2026-01-01T00:00:09.000Z')
 
   await app.close()
+})
+
+test('Workspace inspection API 提供文件、Git 状态并拒绝路径逃逸', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v2-inspection-api-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  fs.writeFileSync(path.join(root, 'README.md'), '# Before\n')
+  for (const args of [
+    ['init', '-q'],
+    ['config', 'user.email', 'promptx@example.com'],
+    ['config', 'user.name', 'PromptX Test'],
+    ['add', 'README.md'],
+    ['commit', '-qm', 'initial'],
+  ]) {
+    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+  }
+  fs.writeFileSync(path.join(root, 'README.md'), '# After\n')
+
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false })
+  try {
+    const conversation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/conversations',
+      payload: { cwd: root, providerId: 'codex' },
+    })
+    const { workspace } = conversation.json()
+    const files = await app.inject({ method: 'GET', url: `/api/v2/workspaces/${workspace.id}/files?path=` })
+    assert.equal(files.statusCode, 200)
+    assert.deepEqual(files.json().directory.entries.map((entry) => entry.name), ['README.md'])
+
+    const file = await app.inject({ method: 'GET', url: `/api/v2/workspaces/${workspace.id}/file?path=README.md` })
+    assert.equal(file.statusCode, 200)
+    assert.equal(file.json().file.content, '# After\n')
+
+    const status = await app.inject({ method: 'GET', url: `/api/v2/workspaces/${workspace.id}/git/status` })
+    assert.equal(status.statusCode, 200)
+    assert.equal(status.json().git.files[0].path, 'README.md')
+
+    const diff = await app.inject({ method: 'GET', url: `/api/v2/workspaces/${workspace.id}/git/diff?path=README.md` })
+    assert.equal(diff.statusCode, 200)
+    assert.match(diff.json().diff.unstaged, /\+\# After/)
+
+    const escaped = await app.inject({ method: 'GET', url: `/api/v2/workspaces/${workspace.id}/file?path=../secret.txt` })
+    assert.equal(escaped.statusCode, 403)
+    assert.equal(escaped.json().error, 'path_outside_workspace')
+  } finally {
+    await app.close()
+  }
 })
 
 test('同一路径的新对话复用 Workspace，并创建独立 Agent', async () => {

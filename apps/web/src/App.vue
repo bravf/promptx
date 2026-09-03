@@ -7,3 +7,9 @@
     </main>
   </div>
 </template>
+
+<style scoped>
+@media (max-width: 720px) {
+  .app-main { padding: 0; }
+}
+</style>

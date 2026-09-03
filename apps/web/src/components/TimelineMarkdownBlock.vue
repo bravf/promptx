@@ -1,6 +1,7 @@
 <script setup>
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { renderCodexMarkdown, renderPlainCodexMarkdown } from '../lib/codexMarkdown.js'
+import { workspaceLinkForHref } from '../lib/timelineWorkspaceLinks.js'
 
 const props = defineProps({
   text: {
@@ -15,8 +16,12 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  workspaceCwd: {
+    type: String,
+    default: '',
+  },
 })
-const emit = defineEmits(['rendered'])
+const emit = defineEmits(['rendered', 'open-workspace-path'])
 
 const html = ref('')
 let renderTimer = null
@@ -81,6 +86,18 @@ async function copyCode(event) {
   }
 }
 
+function handleContentClick(event) {
+  const anchor = event.target?.closest?.('a[href]')
+  const target = anchor && workspaceLinkForHref(anchor.getAttribute('href'), props.workspaceCwd)
+  if (target) {
+    event.preventDefault()
+    event.stopPropagation()
+    emit('open-workspace-path', target)
+    return
+  }
+  copyCode(event)
+}
+
 watch(() => [props.text, props.isDark, props.streaming], scheduleRender, { immediate: true })
 
 onBeforeUnmount(() => {
@@ -90,5 +107,5 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="prose-like codex-markdown" @click="copyCode" v-html="html" />
+  <div class="prose-like codex-markdown" @click="handleContentClick" v-html="html" />
 </template>

@@ -13,6 +13,11 @@ export const v2Api = {
     })
   },
   listWorkspaces: () => request('/api/v2/workspaces'),
+  listWorkspaceFiles: (workspaceId, filePath = '') => request(`/api/v2/workspaces/${workspaceId}/files?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
+  readWorkspaceFile: (workspaceId, filePath) => request(`/api/v2/workspaces/${workspaceId}/file?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
+  workspaceFileContentUrl: (workspaceId, filePath) => resolveAssetUrl(`/api/v2/workspaces/${encodeURIComponent(workspaceId)}/file/content?${new URLSearchParams({ path: filePath })}`),
+  getWorkspaceGitStatus: (workspaceId) => request(`/api/v2/workspaces/${workspaceId}/git/status`, { cache: 'no-store' }),
+  getWorkspaceGitDiff: (workspaceId, filePath) => request(`/api/v2/workspaces/${workspaceId}/git/diff?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
   createConversation: (input) => request('/api/v2/conversations', { method: 'POST', body: JSON.stringify(input) }),
   deleteWorkspace: (id) => request(`/api/v2/workspaces/${id}`, { method: 'DELETE' }),
   uploadAsset: (workspaceId, file, options = {}) => {
