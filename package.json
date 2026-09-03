@@ -48,6 +48,7 @@
     "status": "node scripts/service.mjs status",
     "doctor": "node scripts/doctor.mjs",
     "relay:start": "node scripts/relay.mjs",
+    "deploy:relay:aliyun": "bash scripts/deploy-relay-aliyun.sh",
     "release:check": "node scripts/release.mjs check",
     "release:check:imports": "node scripts/check-package-runtime-imports.mjs",
     "release": "node scripts/release.mjs publish",

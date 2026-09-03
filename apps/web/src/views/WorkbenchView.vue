@@ -4,8 +4,9 @@ import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
 import { ArrowDown, ArrowLeft, Bot, ChevronRight, FileDiff, Files, FolderOpen, LoaderCircle, Plus, Search, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
 import { v2Api, agentEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
 import { createEventSource } from '../lib/eventSource.js'
+import { createMobileTimelineHistoryState, hasMobileTimelineHistoryState } from '../lib/mobileTimelineHistory.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
-import { createTurnTimingMap, groupTimelineTurns } from '../lib/timelinePresentation.js'
+import { createTurnTimingMap, groupTimelineTurns, isTimelineTurnRunning } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
 import AgentComposer from '../components/AgentComposer.vue'
 import SessionTitleMarquee from '../components/SessionTitleMarquee.vue'
@@ -51,6 +52,7 @@ let eventSource = null
 let globalEventSource = null
 let mobileMediaQuery = null
 const attentionClearPending = new Set()
+const turnReconcilePending = new Set()
 let timelineRequestVersion = 0
 let positioningTimeline = false
 let directorySearchTimer = null
@@ -149,8 +151,31 @@ function upsertTurn(turn) {
 
 function processIsRunning(entry) {
   const timing = turnTimings.value.get(entry.turnId)
-  return timing?.status === 'queued' || timing?.status === 'running'
-    || ((isRunning.value || sending.value) && entry.turnId === latestTurnId.value)
+  return isTimelineTurnRunning({
+    agentRunning: isRunning.value || sending.value,
+    latestTurnId: latestTurnId.value,
+    turnId: entry.turnId,
+    turnStatus: timing?.status,
+  })
+}
+
+async function reconcileTerminalAgentTurns(agent) {
+  if (!agent || agent.id !== activeAgentId.value || agent.lifecycle === 'running') return
+  if (!turns.value.some((turn) => ['queued', 'running'].includes(turn.status))) return
+  if (turnReconcilePending.has(agent.id)) return
+
+  const requestVersion = timelineRequestVersion
+  turnReconcilePending.add(agent.id)
+  try {
+    const result = await v2Api.listTurns(agent.id, 1000)
+    if (requestVersion === timelineRequestVersion && activeAgentId.value === agent.id) {
+      turns.value = result.turns
+    }
+  } catch (cause) {
+    if (requestVersion === timelineRequestVersion && activeAgentId.value === agent.id) error.value = cause.message
+  } finally {
+    turnReconcilePending.delete(agent.id)
+  }
 }
 
 async function loadInitial() {
@@ -191,7 +216,7 @@ async function selectWorkspace(id, { navigate = false } = {}) {
 async function selectAgent(id, { navigate = false } = {}) {
   const agent = Object.values(agentsByWorkspace.value).flat().find((item) => item.id === id)
   if (!agent) return
-  if (navigate) mobileView.value = 'timeline'
+  if (navigate) enterMobileTimeline()
   activeWorkspaceId.value = agent.workspaceId
   setWorkspaceExpanded(agent.workspaceId)
   const requestVersion = ++timelineRequestVersion
@@ -311,6 +336,7 @@ function openEvents(agentId, epoch, seq) {
     upsertAgent(agent)
     clearViewedAgentAttention(agent)
     sending.value = agent.lifecycle === 'running'
+    reconcileTerminalAgentTurns(agent)
   })
   eventSource.addEventListener('turn', (event) => {
     const turn = JSON.parse(event.data).turn
@@ -351,7 +377,25 @@ function toggleDrawer(mode) {
 
 function showMobileSidebar() {
   drawerMode.value = null
+  if (isMobile.value && hasMobileTimelineHistoryState(window.history.state)) {
+    window.history.back()
+    return
+  }
   mobileView.value = 'sidebar'
+}
+
+function enterMobileTimeline() {
+  mobileView.value = 'timeline'
+  if (!isMobile.value || hasMobileTimelineHistoryState(window.history.state)) return
+  window.history.pushState(createMobileTimelineHistoryState(window.history.state), '')
+}
+
+function handleMobileHistoryPop(event) {
+  if (!isMobile.value) return
+  drawerMode.value = null
+  mobileView.value = hasMobileTimelineHistoryState(event.state) && activeAgentId.value
+    ? 'timeline'
+    : 'sidebar'
 }
 
 function handleGlobalKeydown(event) {
@@ -365,6 +409,7 @@ function openGlobalEvents() {
     const { agent } = JSON.parse(event.data)
     upsertAgent(agent)
     clearViewedAgentAttention(agent)
+    reconcileTerminalAgentTurns(agent)
   })
 }
 
@@ -597,10 +642,14 @@ function handleMarkdownRendered() {
 
 function updateMobileState(event) {
   isMobile.value = event.matches
+  mobileView.value = event.matches
+    ? (hasMobileTimelineHistoryState(window.history.state) ? 'timeline' : 'sidebar')
+    : 'timeline'
 }
 
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('popstate', handleMobileHistoryPop)
   mobileMediaQuery = window.matchMedia('(max-width: 720px)')
   updateMobileState(mobileMediaQuery)
   mobileMediaQuery.addEventListener('change', updateMobileState)
@@ -609,6 +658,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('popstate', handleMobileHistoryPop)
   mobileMediaQuery?.removeEventListener('change', updateMobileState)
   closeEvents()
   closeGlobalEvents()

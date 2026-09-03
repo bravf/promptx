@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createTurnTimingMap, formatElapsedTime, getTurnActivityState, groupTimelineTurns, userMessageCopyText } from './timelinePresentation.js'
+import { createTurnTimingMap, formatElapsedTime, getTurnActivityState, groupTimelineTurns, isTimelineTurnRunning, userMessageCopyText } from './timelinePresentation.js'
 
 function entry(seq, turnId, type, item = {}) {
   return { seqStart: seq, seqEnd: seq, turnId, timestamp: `2026-01-01T00:00:0${seq}.000Z`, item: { type, ...item } }
@@ -94,6 +94,27 @@ test('Turn 精确时间优先，缺少元数据时回退 Timeline 时间', () =>
   assert.equal(result.get('turn-a').finishedAt - result.get('turn-a').startedAt, 8000)
   assert.equal(result.get('turn-b').startedAt, Date.parse('2026-01-01T00:01:00.000Z'))
   assert.equal(result.get('turn-b').finishedAt, Date.parse('2026-01-01T00:01:00.000Z'))
+})
+
+test('Agent 已结束时不让断线前遗留的 Turn 状态继续转圈', () => {
+  assert.equal(isTimelineTurnRunning({
+    agentRunning: false,
+    latestTurnId: 'turn-a',
+    turnId: 'turn-a',
+    turnStatus: 'running',
+  }), false)
+  assert.equal(isTimelineTurnRunning({
+    agentRunning: true,
+    latestTurnId: 'turn-b',
+    turnId: 'turn-a',
+    turnStatus: 'running',
+  }), false)
+  assert.equal(isTimelineTurnRunning({
+    agentRunning: true,
+    latestTurnId: 'turn-a',
+    turnId: 'turn-a',
+    turnStatus: 'running',
+  }), true)
 })
 
 test('耗时使用中文紧凑格式', () => {

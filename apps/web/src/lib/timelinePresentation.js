@@ -147,6 +147,16 @@ export function createTurnTimingMap(rows = [], turns = []) {
   return result
 }
 
+export function isTimelineTurnRunning({
+  agentRunning = false,
+  latestTurnId = '',
+  turnId = '',
+  turnStatus = 'unknown',
+} = {}) {
+  if (!agentRunning || !turnId || turnId !== latestTurnId) return false
+  return ['unknown', 'queued', 'running'].includes(turnStatus)
+}
+
 export function formatElapsedTime(milliseconds) {
   const totalSeconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000))
   const hours = Math.floor(totalSeconds / 3600)
