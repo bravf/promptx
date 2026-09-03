@@ -614,11 +614,7 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="flex min-h-0 min-w-0 flex-col">
-      <header class="flex h-14 shrink-0 items-center justify-between border-b px-4">
-        <div class="min-w-0 flex-1">
-          <div class="truncate text-sm font-semibold">{{ activeAgent?.title || activeWorkspace?.title || '选择一个工作区' }}</div>
-          <div v-if="activeWorkspace" class="theme-muted-text truncate text-[10px]"><span>{{ activeWorkspace.title }}</span><span class="mx-1">·</span><span class="font-mono">{{ activeWorkspace.cwd }}</span></div>
-        </div>
+      <header class="flex h-14 shrink-0 items-center justify-end border-b px-4">
         <div class="flex items-center gap-2">
           <div v-if="activeAgent" class="status-chip flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
         </div>
