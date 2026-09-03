@@ -1,17 +1,19 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, ArrowLeft, Bot, ChevronRight, FileDiff, Files, FolderOpen, LoaderCircle, Palette, Plus, Search, TerminalSquare, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, Bot, ChevronRight, FileDiff, Files, FolderOpen, LoaderCircle, Plus, Search, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
 import { v2Api, agentEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
+import { createEventSource } from '../lib/eventSource.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupTimelineTurns } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
 import AgentComposer from '../components/AgentComposer.vue'
 import SessionTitleMarquee from '../components/SessionTitleMarquee.vue'
 import TimelineTurn from '../components/TimelineTurn.vue'
+import V2SettingsDialog from '../components/V2SettingsDialog.vue'
 import WorkspaceInspector from '../components/WorkspaceInspector.vue'
 
-const { currentTheme, isDark, setTheme, themes } = useTheme()
+const { isDark } = useTheme()
 const workspaces = ref([])
 const providers = ref([])
 const agentsByWorkspace = ref({})
@@ -57,6 +59,10 @@ let markdownScrollFrame = null
 let inspectorRefreshTimer = null
 
 const activeWorkspace = computed(() => workspaces.value.find((item) => item.id === activeWorkspaceId.value))
+const activeWorkspaceDirectoryName = computed(() => {
+  const cwd = String(activeWorkspace.value?.cwd || '').replace(/[\\/]+$/, '')
+  return cwd.split(/[\\/]/).pop() || activeWorkspace.value?.title || ''
+})
 const agents = computed(() => agentsForWorkspace(activeWorkspaceId.value))
 const activeAgent = computed(() => agents.value.find((item) => item.id === activeAgentId.value))
 const isRunning = computed(() => activeAgent.value?.lifecycle === 'running')
@@ -289,7 +295,7 @@ function handleTimelineScroll(event) {
 }
 
 function openEvents(agentId, epoch, seq) {
-  eventSource = new EventSource(agentEventsUrl(agentId, seq ? `${epoch}:${seq}` : ''))
+  eventSource = createEventSource(agentEventsUrl(agentId, seq ? `${epoch}:${seq}` : ''))
   eventSource.addEventListener('timeline', (event) => {
     const { row } = JSON.parse(event.data)
     if (rows.value.some((item) => item.seq === row.seq)) return
@@ -354,7 +360,7 @@ function handleGlobalKeydown(event) {
 
 function openGlobalEvents() {
   globalEventSource?.close()
-  globalEventSource = new EventSource(globalEventsUrl())
+  globalEventSource = createEventSource(globalEventsUrl())
   globalEventSource.addEventListener('agent', (event) => {
     const { agent } = JSON.parse(event.data)
     upsertAgent(agent)
@@ -589,11 +595,6 @@ function handleMarkdownRendered() {
   })
 }
 
-function cycleTheme() {
-  const index = themes.value.findIndex((item) => item.id === currentTheme.value.id)
-  setTheme(themes.value[(index + 1) % themes.value.length].id)
-}
-
 function updateMobileState(event) {
   isMobile.value = event.matches
 }
@@ -665,7 +666,12 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="!workspaces.length && !loading" class="theme-muted-text px-3 py-8 text-center text-xs">还没有工作区</div>
       </div>
-      <footer class="flex items-center justify-between border-t p-2"><span class="theme-muted-text truncate px-1 text-[10px]">{{ currentTheme.shortName }}</span><button class="quiet-icon-button h-8 w-8" title="切换主题" @click="cycleTheme"><Palette class="h-4 w-4" /></button></footer>
+      <footer class="border-t p-2">
+        <button class="settings-entry flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs font-medium" @click="dialog = 'settings'">
+          <Settings class="h-4 w-4 shrink-0" />
+          <span>设置</span>
+        </button>
+      </footer>
     </aside>
 
     <main
@@ -674,11 +680,14 @@ onBeforeUnmount(() => {
       :inert="isMobile && mobileView !== 'timeline'"
       :aria-hidden="isMobile ? mobileView !== 'timeline' : undefined"
     >
-      <header class="timeline-header flex h-14 shrink-0 items-center justify-between border-b px-4">
+      <header class="timeline-header flex h-14 shrink-0 items-center gap-2 border-b px-4">
         <button class="mobile-back-button quiet-icon-button h-8 w-8" title="返回项目列表" aria-label="返回项目列表" @click="showMobileSidebar">
           <ArrowLeft class="h-4 w-4" />
         </button>
-        <div class="flex items-center gap-2">
+        <div v-if="activeWorkspace" class="mobile-workspace-path min-w-0 flex-1" :title="activeWorkspace.cwd">
+          <span class="block truncate text-sm font-medium">{{ activeWorkspaceDirectoryName }}</span>
+        </div>
+        <div class="ml-auto flex shrink-0 items-center gap-2">
           <div v-if="activeAgent" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
           <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :title="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></button>
           <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :title="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></button>
@@ -729,6 +738,8 @@ onBeforeUnmount(() => {
         @close="drawerMode = null"
       />
     </Transition>
+
+    <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" />
 
     <div v-if="dialog === 'conversation'" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4" @click.self="closeDialog">
       <form class="panel w-full max-w-md p-4" @submit.prevent="createConversation">
@@ -804,6 +815,8 @@ onBeforeUnmount(() => {
 .workspace-active { color: var(--theme-text); }
 .workspace-mark { background: var(--theme-appPanelInset); color: var(--theme-textMuted); }
 .workspace-toggle, .workspace-action, .agent-delete { color: var(--theme-textMuted); }
+.settings-entry { color: var(--theme-textMuted); }
+.settings-entry:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 .workspace-toggle:hover, .workspace-action:hover, .agent-delete:hover { color: var(--theme-text); }
 .workspace-delete:hover, .agent-delete:hover { color: var(--theme-dangerText); }
 .workspace-action, .agent-delete { opacity: 0; }
@@ -824,10 +837,11 @@ onBeforeUnmount(() => {
 .modal-backdrop { background: var(--theme-modalBackdrop); }
 .directory-suggestions { background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
 .directory-suggestion:hover { background: var(--theme-appPanelHover); }
-.sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion {
+.sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .settings-entry {
   transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease, transform 140ms ease;
 }
 .workspace-toggle:active, .workspace-action:active, .agent-delete:active { transform: scale(0.9); }
+.mobile-workspace-path { display: none; }
 .drawer-trigger.is-active { background: var(--theme-accentSoft); color: var(--theme-accentText); }
 .workspace-drawer-enter-active { transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease; }
 .workspace-drawer-leave-active { transition: transform 180ms ease-in, opacity 150ms ease; }
@@ -855,6 +869,7 @@ onBeforeUnmount(() => {
   .timeline-pane.mobile-panel-hidden { transform: translateX(100%); pointer-events: none; }
   .mobile-panel-active { transform: translateX(0); opacity: 1; pointer-events: auto; }
   .mobile-back-button { display: inline-flex; }
+  .mobile-workspace-path { display: block; }
   .v2-shell :deep(.workspace-inspector) { left: 0; }
   .workspace-action, .agent-delete { opacity: 1; }
   .workspace-delete { display: none; }

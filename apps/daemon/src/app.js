@@ -18,7 +18,7 @@ export async function createApp(options = {}) {
   const app = Fastify({ logger: options.logger ?? true })
   await app.register(cors, {
     origin: true,
-    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'],
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   })
   await app.register(multipart, {
     limits: {
@@ -40,9 +40,10 @@ export async function createApp(options = {}) {
   const relay = new RelayService({
     localBaseUrl: options.localBaseUrl || `http://127.0.0.1:${process.env.PORT || process.env.PROMPTX_DAEMON_PORT || 3001}`,
     logger: app.log,
+    ...(options.relayOptions || {}),
   })
   registerRelayRoutes(app, relay)
-  relay.start()
+  if (options.relay !== false) relay.start()
   const defaultWebRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist')
   const webRoot = options.webRoot === false ? '' : path.resolve(options.webRoot || defaultWebRoot)
   if (webRoot && fs.existsSync(path.join(webRoot, 'index.html'))) {

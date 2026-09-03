@@ -153,13 +153,7 @@ pnpm build
 
 - `docs/relay-quickstart.md`
 
-文档中包含：
-
-- 本地 PromptX 接入 Relay
-- 云端 Relay 启动与管理
-- 多租户子域名配置
-- `promptx relay tenant add/list/remove`
-- `promptx relay start/stop/restart/status`
+文档中包含公共 E2EE Relay 的本地配对、云端部署、Nginx 配置和运维命令。
 
 ## 禅道扩展
 

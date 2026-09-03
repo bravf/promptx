@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const runtimeDirs = [
+  path.join(rootDir, 'apps', 'daemon', 'src'),
   path.join(rootDir, 'apps', 'server', 'src'),
   path.join(rootDir, 'apps', 'runner', 'src'),
 ]

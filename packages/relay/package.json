@@ -1,0 +1,20 @@
+{
+  "name": "@promptx/relay",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./crypto": "./src/crypto.js",
+    "./offer": "./src/offer.js",
+    "./protocol": "./src/protocol.js"
+  },
+  "scripts": {
+    "build": "node --check src/index.js && node --check src/crypto.js && node --check src/offer.js && node --check src/protocol.js",
+    "lint": "node -e \"console.log('relay: nothing to lint')\"",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "tweetnacl": "^1.0.3"
+  }
+}

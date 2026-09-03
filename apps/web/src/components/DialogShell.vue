@@ -134,7 +134,7 @@ onBeforeUnmount(() => {
         <section class="panel dialog-shell-panel flex min-h-0 w-full flex-col overflow-hidden" :class="panelClass">
           <div
             v-if="$slots.title || $slots.header || $slots['header-actions'] || showClose"
-            class="theme-divider flex items-start justify-between gap-4 border-b"
+            class="theme-divider flex items-center justify-between gap-4 border-b"
             :class="headerClass"
           >
             <div class="min-w-0 flex-1">

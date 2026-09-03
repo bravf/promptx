@@ -73,7 +73,7 @@ function multipartFile(name, mimeType, content) {
 }
 
 test('CORS 预检允许 v2 的 PATCH 和 DELETE 请求', async () => {
-  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false })
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
 
   for (const method of ['PATCH', 'DELETE']) {
     const response = await app.inject({
@@ -93,7 +93,7 @@ test('CORS 预检允许 v2 的 PATCH 和 DELETE 请求', async () => {
 })
 
 test('Workspace、Agent 和 Timeline API 形成完整基础链路', async () => {
-  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false })
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
 
   const workspaceResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'claude' } })
   assert.equal(workspaceResponse.statusCode, 201)
@@ -140,7 +140,7 @@ test('Workspace inspection API 提供文件、Git 状态并拒绝路径逃逸', 
   }
   fs.writeFileSync(path.join(root, 'README.md'), '# After\n')
 
-  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false })
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
   try {
     const conversation = await app.inject({
       method: 'POST',
@@ -173,7 +173,7 @@ test('Workspace inspection API 提供文件、Git 状态并拒绝路径逃逸', 
 })
 
 test('同一路径的新对话复用 Workspace，并创建独立 Agent', async () => {
-  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false })
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
 
   const firstResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'codex' } })
   const secondResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'claude' } })
@@ -193,7 +193,7 @@ test('同一路径的新对话复用 Workspace，并创建独立 Agent', async (
 
 test('Agent 使用首条用户文本生成标题，后续消息不再覆盖', async () => {
   const { registry, runtimes } = createControlTestRegistry()
-  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, providerRegistry: registry })
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
   try {
     const conversationResponse = await app.inject({
       method: 'POST',
@@ -240,7 +240,7 @@ test('Agent 使用首条用户文本生成标题，后续消息不再覆盖', as
 
 test('首条纯附件消息不会让后续文本成为 Agent 标题', async () => {
   const { registry, runtimes } = createControlTestRegistry()
-  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, providerRegistry: registry })
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
   try {
     const conversationResponse = await app.inject({
       method: 'POST',
@@ -283,7 +283,7 @@ test('首条纯附件消息不会让后续文本成为 Agent 标题', async () =
 
 test('显式 Agent 标题不会被首条用户消息覆盖', async () => {
   const { registry } = createControlTestRegistry()
-  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, providerRegistry: registry })
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
   try {
     const conversationResponse = await app.inject({
       method: 'POST',
@@ -314,7 +314,7 @@ test('显式 Agent 标题不会被首条用户消息覆盖', async () => {
 
 test('v2 资产上传会持久化元数据并返回原始文件内容', async () => {
   const assetsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v2-assets-'))
-  const app = await createApp({ databasePath: ':memory:', assetsDir, logger: false, webRoot: false })
+  const app = await createApp({ databasePath: ':memory:', assetsDir, logger: false, webRoot: false, relay: false })
   try {
     const workspaceResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'codex' } })
     const { workspace } = workspaceResponse.json()
@@ -343,7 +343,7 @@ test('v2 资产上传会持久化元数据并返回原始文件内容', async ()
 
 test('Agent 控制接口持久化模型和思考强度，并在运行中拒绝切换', async () => {
   const { registry, runtimes } = createControlTestRegistry()
-  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, providerRegistry: registry })
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
   try {
     const workspaceResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'codex' } })
     const { agent } = workspaceResponse.json()

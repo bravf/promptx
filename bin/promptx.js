@@ -12,7 +12,6 @@ const serviceScriptPath = path.join(rootDir, 'scripts', 'service.mjs')
 const doctorScriptPath = path.join(rootDir, 'scripts', 'doctor.mjs')
 const relayScriptPath = path.join(rootDir, 'scripts', 'relay.mjs')
 const relayServiceScriptPath = path.join(rootDir, 'scripts', 'relay-service.mjs')
-const relayTenantScriptPath = path.join(rootDir, 'scripts', 'relay-tenant.mjs')
 
 function readCliVersion() {
   try {
@@ -46,10 +45,6 @@ PromptX CLI
   promptx relay stop
   promptx relay restart
   promptx relay status
-  promptx relay tenant add <key>
-  promptx relay tenant list
-  promptx relay tenant remove <key>
-  promptx relay tenant add <key> --domain promptx.mushayu.com
 
 说明：
   - start: 后台启动 PromptX V2，本机默认地址 http://127.0.0.1:3001
@@ -59,10 +54,7 @@ PromptX CLI
   - doctor: 检查 Node、Agent Provider、数据目录、端口和打包产物
   - version: 输出当前版本
   - relay start/stop/restart/status: 后台管理 PromptX Relay 中转服务
-  - relay tenant add: 追加一个 Relay 子域名租户并自动生成 host/token
-  - relay tenant list: 查看当前 Relay 租户列表
-  - relay tenant remove: 删除一个 Relay 租户
-    默认读取 PROMPTX_RELAY_BASE_DOMAIN / PROMPTX_RELAY_PUBLIC_URL / PROMPTX_RELAY_TENANTS_FILE
+    Relay 是无账号的 E2EE 密文转发服务，不需要配置租户或 Token
 `.trim())
 }
 
@@ -110,10 +102,8 @@ if (
   runNodeScript(relayServiceScriptPath, [subCommand])
 } else if (command === 'relay' && subCommand === 'run') {
   runNodeScript(relayScriptPath)
-} else if (command === 'relay' && subCommand === 'tenant') {
-  runNodeScript(relayTenantScriptPath, process.argv.slice(4))
 } else {
   console.error(`[promptx] 不支持的命令：${command}`)
-  console.error('[promptx] 可用命令：start / stop / restart / status / doctor / version / relay start / relay stop / relay restart / relay status / relay run / relay tenant add / relay tenant list / relay tenant remove')
+  console.error('[promptx] 可用命令：start / stop / restart / status / doctor / version / relay start / relay stop / relay restart / relay status / relay run')
   process.exitCode = 1
 }

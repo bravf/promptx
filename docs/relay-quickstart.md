@@ -1,272 +1,165 @@
-# PromptX Relay 使用说明
+# PromptX E2EE Relay 快速上手
 
-这份文档分两部分：
+Relay 让手机浏览器通过公网访问本机 PromptX。手机和 daemon 之间使用 Curve25519 + NaCl 端到端加密，公网 Relay 只转发 WebSocket 密文，不需要账号、租户、`accessToken` 或 `deviceToken`。
 
-- 给同事：本地 PromptX 如何接入 Relay
-- 给运维：云端 Relay 如何新增租户、启动和排查
+完整协议与信任边界见 [relay-e2ee-architecture.md](./relay-e2ee-architecture.md)。
 
-## 给同事
+## 本机使用
 
-### 1. 安装
+安装并启动 PromptX：
 
 ```bash
 npm install -g @muyichengshayu/promptx
-```
-
-### 2. 启动 PromptX
-
-```bash
 promptx start
 ```
 
-启动后本地访问：
+打开本机工作台：
 
 ```text
-http://127.0.0.1:3000
+http://127.0.0.1:3001
 ```
 
-### 3. 配置远程访问
-
-打开 PromptX 设置 -> 远程，填写管理员发给你的 3 项：
-
-- Relay 地址
-- 设备 ID
-- 设备 Token
-
-然后勾选“启用远程访问”。
-
-如果状态显示“已连接”，说明本机已经接入 Relay。
-
-### 4. 手机远程访问
-
-直接打开管理员发给你的子域名，例如：
+进入“设置 -> 远程访问”。PromptX 默认连接：
 
 ```text
-https://user1.promptx.mushayu.com
+wss://px.mushayu.com/relay/ws
 ```
 
-首次访问需要输入访问口令 `accessToken`。
+状态变为“已连接”后，可以：
 
-### 5. 排查
+- 用手机扫描二维码；
+- 或复制完整配对链接到手机打开。
 
-安装版默认检查命令：
+链接中的 `#offer=` 包含随机 `serverId` 和 daemon 公钥。URL Fragment 不会发送给普通 HTTP 服务，但完整链接仍等同远程访问凭证，不要公开分享。
+
+需要让旧链接失效时，点击“重置远程身份”。PromptX 会生成新的 `serverId` 和 Curve25519 密钥对。
+
+本机身份保存在：
+
+```text
+~/.promptx/data/relay-identity-v2.json
+```
+
+文件权限为 `0600`，不要复制或上传其中的私钥。
+
+## Relay 运维
+
+Relay 使用同一份 Vue 构建产物，并提供 `/relay/ws` WebSocket 盲转发端点。
+
+源码启动：
 
 ```bash
-curl http://127.0.0.1:3000/api/relay/status
+pnpm install
+pnpm build
+PROMPTX_RELAY_HOST=127.0.0.1 \
+PROMPTX_RELAY_PORT=3030 \
+node scripts/relay.mjs
 ```
 
-如果你本地跑的是开发环境 `pnpm dev`，改成：
-
-```bash
-curl http://127.0.0.1:3001/api/relay/status
-```
-
-重点看这些字段：
-
-- `connected`
-- `lastError`
-- `lastCloseReason`
-
-## 给运维
-
-### 1. 安装
-
-```bash
-npm install -g @muyichengshayu/promptx
-```
-
-### 2. 配环境变量
-
-建议在云端先设好：
-
-```bash
-export PROMPTX_RELAY_TENANTS_FILE=/etc/promptx-relay-tenants.json
-export PROMPTX_RELAY_BASE_DOMAIN=promptx.mushayu.com
-export PROMPTX_RELAY_HOST=0.0.0.0
-export PROMPTX_RELAY_PORT=3030
-```
-
-### 3. 新增一个租户
-
-```bash
-promptx relay tenant add user1
-```
-
-它会自动生成并写入：
-
-- `host`
-- `deviceId`
-- `deviceToken`
-- `accessToken`
-
-如果没有设 `PROMPTX_RELAY_BASE_DOMAIN`，也可以显式写：
-
-```bash
-promptx relay tenant add user1 --domain promptx.mushayu.com
-```
-
-### 4. 查看租户列表
-
-```bash
-promptx relay tenant list
-```
-
-### 5. 删除租户
-
-```bash
-promptx relay tenant remove user1
-```
-
-### 6. 启动 Relay
+后台管理：
 
 ```bash
 promptx relay start
-```
-
-查看状态：
-
-```bash
 promptx relay status
-```
-
-停止 Relay：
-
-```bash
+promptx relay restart
 promptx relay stop
 ```
 
-重启 Relay：
+健康检查：
 
 ```bash
-promptx relay restart
+curl http://127.0.0.1:3030/health
 ```
 
-如果只是升级 Relay 的租户统计能力，只需要在云端更新代码并重启 Relay，本地同事的 PromptX 不需要升级。
-
-### 7. 发给同事的信息
-
-新增好租户后，把这 4 项发给同事：
-
-- 子域名地址，例如 `https://user1.promptx.mushayu.com`
-- 设备 ID
-- 设备 Token
-- 访问口令 `accessToken`
-
-### 8. 健康检查
-
-检查某个租户是否在线：
-
-```bash
-curl -H 'Host: user1.promptx.mushayu.com' http://127.0.0.1:3030/health
-```
-
-正常会看到类似：
+返回示例：
 
 ```json
-{"ok":true,"tenant":"user1","host":"user1.promptx.mushayu.com","deviceOnline":true}
+{
+  "ok": true,
+  "protocolVersion": 2,
+  "connectedDaemons": 1,
+  "connectedClients": 1
+}
 ```
 
-### 9. 查看使用统计
+## px.mushayu.com Nginx 配置
 
-Relay 现在自带一个轻量统计页，用来看“今天有哪些租户实际使用了 Relay”。
-
-直接打开：
-
-```text
-https://你的域名/relay/admin/usage
-```
-
-如果你没有配置管理口令，这个页面可直接访问；如果后面想加保护，可以额外配置：
-
-```bash
-export PROMPTX_RELAY_ADMIN_TOKEN=你自己的管理口令
-```
-
-统计页会展示：
-
-- 今日活跃租户数
-- 今日设备连接次数
-- 今日转发请求数
-- 每个租户的最近活跃时间、最近设备、API 请求数、上传请求数
-
-统计文件默认保存在：
-
-```text
-~/.promptx/data/relay-usage.json
-```
-
-### 10. Nginx 配置
-
-建议让 Nginx 负责 HTTPS，并把请求转发到本机 `3030`：
+Relay 应只监听服务器 loopback，由 Nginx 终止 TLS：
 
 ```nginx
 server {
   listen 80;
-  server_name *.promptx.mushayu.com;
+  server_name px.mushayu.com;
   return 301 https://$host$request_uri;
 }
 
 server {
   listen 443 ssl http2;
-  server_name *.promptx.mushayu.com;
+  server_name px.mushayu.com;
 
-  ssl_certificate /etc/letsencrypt/live/promptx.mushayu.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/promptx.mushayu.com/privkey.pem;
+  ssl_certificate /etc/letsencrypt/live/px.mushayu.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/px.mushayu.com/privkey.pem;
+
+  location /relay/ws {
+    proxy_pass http://127.0.0.1:3030;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+  }
 
   location / {
     proxy_pass http://127.0.0.1:3030;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
   }
 }
 ```
 
-### 11. DNS 配置
-
-最省事的是泛解析：
-
-```text
-*.promptx.mushayu.com -> 云服务器公网 IP
-```
-
-### 12. 常见问题
-
-- `设备令牌不匹配`
-  - 同事本地填写的 `deviceToken` 不对
-- `设备 ID 不匹配`
-  - 同事本地填写的 `deviceId` 不对
-- `当前 Relay 域名未匹配到租户`
-  - 子域名没加到租户配置里，或者 DNS/Nginx 没配好
-- `503 PromptX 本地设备暂未连接到 relay`
-  - 云端 Relay 正常，但对应同事的本机 PromptX 没连上
-
-### 13. 开发环境源码启动
-
-如果不是 npm 安装版，而是源码测试：
-
-云端：
+然后检查并重载：
 
 ```bash
-pnpm install
-pnpm build
-PROMPTX_RELAY_TENANTS_FILE=/etc/promptx-relay-tenants.json \
-PROMPTX_RELAY_HOST=0.0.0.0 \
-PROMPTX_RELAY_PORT=3030 \
-node scripts/relay.mjs
+nginx -t
+systemctl reload nginx
+curl https://px.mushayu.com/health
 ```
 
-本地开发机：
+## 可调限制
 
-```bash
-pnpm dev
-```
-
-本地开发前端地址：
+公网服务可以通过环境变量设置资源上限：
 
 ```text
-http://127.0.0.1:5174
+PROMPTX_RELAY_MAX_FRAME_BYTES=524288
+PROMPTX_RELAY_MAX_CLIENTS_PER_SERVER=16
+PROMPTX_RELAY_MAX_TOTAL_CLIENTS=5000
+PROMPTX_RELAY_MAX_PENDING_BYTES=1048576
+PROMPTX_RELAY_HEARTBEAT_INTERVAL_MS=25000
+PROMPTX_RELAY_IDLE_TIMEOUT_MS=600000
+PROMPTX_RELAY_PENDING_TIMEOUT_MS=30000
+PROMPTX_RELAY_CONNECTIONS_PER_MINUTE=120
 ```
+
+这些限制只用于保护 Relay 资源，不会让 Relay 获得解密业务内容的能力。
+
+## 常见问题
+
+### 一直显示“连接中”
+
+依次检查：
+
+```bash
+curl http://127.0.0.1:3001/api/v2/relay/status
+curl https://px.mushayu.com/health
+```
+
+确认 Nginx 已转发 WebSocket Upgrade，并确认本机可以访问 `wss://px.mushayu.com/relay/ws`。
+
+### 手机打开后无法完成 E2EE 握手
+
+通常是配对链接被截断、旧链接已被重置，或代理没有原样转发二进制 WebSocket 帧。重新从设置复制完整链接，避免聊天软件删掉 `#offer=` Fragment。
+
+### Relay 能看到什么
+
+Relay 可以看到连接时间、IP、`serverId`、连接数量和密文大小。它不能读取 Prompt、回复、Timeline、文件名、文件内容、Diff、图片或附件。服务器日志不应记录 WebSocket 帧内容。

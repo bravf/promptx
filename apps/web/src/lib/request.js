@@ -1,4 +1,5 @@
 import { translate } from '../composables/useI18n.js'
+import { transportFetch } from './transport.js'
 
 const importMetaEnv = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
 
@@ -42,7 +43,7 @@ export function resolveRequestErrorMessage(payload = {}, fallbackKey = 'errors.r
 
 export async function request(path, options = {}) {
   const hasJsonBody = typeof options.body !== 'undefined' && !(options.body instanceof FormData)
-  const response = await fetch(`${getApiBaseInternal()}${path}`, {
+  const response = await transportFetch(`${getApiBaseInternal()}${path}`, {
     headers: {
       ...(hasJsonBody ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {}),

@@ -33,6 +33,7 @@ const directoryLoading = ref(new Set())
 const selectedPath = ref('')
 const filePreview = ref(null)
 const filePreviewHtml = ref('')
+const filePreviewObjectUrl = ref('')
 const fileLoading = ref(false)
 const requestedLine = ref(null)
 const gitStatus = ref(null)
@@ -43,6 +44,11 @@ const diffLoading = ref(false)
 const error = ref('')
 const showHiddenFiles = ref(false)
 let workspaceVersion = 0
+
+function clearFilePreviewObjectUrl() {
+  if (filePreviewObjectUrl.value) URL.revokeObjectURL(filePreviewObjectUrl.value)
+  filePreviewObjectUrl.value = ''
+}
 
 const visibleFiles = computed(() => {
   const result = []
@@ -137,6 +143,7 @@ async function selectFile(filePath, line = null) {
   requestedLine.value = line
   filePreview.value = null
   filePreviewHtml.value = ''
+  clearFilePreviewObjectUrl()
   fileLoading.value = true
   error.value = ''
   const version = workspaceVersion
@@ -144,6 +151,11 @@ async function selectFile(filePath, line = null) {
     const result = await v2Api.readWorkspaceFile(props.workspaceId, filePath)
     if (version !== workspaceVersion || selectedPath.value !== filePath) return
     filePreview.value = result.file
+    if (result.file.kind === 'image') {
+      const objectUrl = await v2Api.workspaceFileObjectUrl(props.workspaceId, result.file.path)
+      if (version !== workspaceVersion || selectedPath.value !== filePath) URL.revokeObjectURL(objectUrl)
+      else filePreviewObjectUrl.value = objectUrl
+    }
     await renderFilePreview()
   } catch (cause) {
     if (version === workspaceVersion) error.value = cause.message
@@ -222,6 +234,7 @@ async function refreshGit(options = {}) {
 
 watch(() => props.workspaceId, async () => {
   workspaceVersion += 1
+  clearFilePreviewObjectUrl()
   directoryCache.value = {}
   expandedPaths.value = new Set()
   selectedPath.value = ''
@@ -239,7 +252,10 @@ watch(() => props.mode, (mode) => {
   if (mode === 'files') loadDirectory('')
   else loadGitStatus({ quiet: true })
 })
-onBeforeUnmount(() => { workspaceVersion += 1 })
+onBeforeUnmount(() => {
+  workspaceVersion += 1
+  clearFilePreviewObjectUrl()
+})
 defineExpose({ openPath, refreshGit })
 </script>
 
@@ -297,7 +313,7 @@ defineExpose({ openPath, refreshGit })
           <div v-if="filePreview.kind === 'text'" class="source-code-view" :style="{ '--source-code-gutter-width': '3.2rem' }">
             <table class="source-code-view__table"><tbody v-html="filePreviewHtml.replaceAll('data-line=', 'data-preview-line=')" /></table>
           </div>
-          <div v-else-if="filePreview.kind === 'image'" class="flex min-h-full items-center justify-center p-4"><img class="max-h-full max-w-full object-contain" :src="v2Api.workspaceFileContentUrl(workspaceId, filePreview.path)" :alt="filePreview.name" /></div>
+          <div v-else-if="filePreview.kind === 'image'" class="flex min-h-full items-center justify-center p-4"><img v-if="filePreviewObjectUrl" class="max-h-full max-w-full object-contain" :src="filePreviewObjectUrl" :alt="filePreview.name" /></div>
           <div v-else class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><component :is="filePreview.kind === 'too_large' ? FileWarning : ImageIcon" class="mb-2 h-6 w-6" />{{ filePreview.kind === 'too_large' ? '文件过大，暂不支持预览' : '二进制文件暂不支持预览' }}</div>
         </template>
       </div>
