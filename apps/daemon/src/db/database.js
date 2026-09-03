@@ -3,6 +3,13 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 
+function ensureColumn(db, table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all()
+  if (!columns.some((item) => item.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+  }
+}
+
 export function resolveDaemonPaths() {
   const homeDir = path.resolve(process.env.PROMPTX_HOME || path.join(os.homedir(), '.promptx'))
   const dataDir = path.resolve(process.env.PROMPTX_DATA_DIR || path.join(homeDir, 'data'))
@@ -119,5 +126,9 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
     CREATE INDEX IF NOT EXISTS idx_agent_timeline_session_seq
       ON agent_timeline_rows(agent_session_id, seq);
   `)
+  // Keep the v2 database usable after adding attention state to existing local data.
+  ensureColumn(db, 'agent_sessions', 'requires_attention', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'agent_sessions', 'attention_reason', 'TEXT')
+  ensureColumn(db, 'agent_sessions', 'attention_at', 'TEXT')
   return db
 }

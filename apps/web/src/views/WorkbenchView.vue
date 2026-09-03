@@ -1,18 +1,20 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, Bot, FolderOpen, LoaderCircle, Palette, Plus, Search, TerminalSquare, Trash2, X } from 'lucide-vue-next'
-import { v2Api, agentEventsUrl } from '../lib/v2Api.js'
+import { ArrowDown, Bot, ChevronRight, FolderOpen, LoaderCircle, Palette, Plus, Search, TerminalSquare, Trash2, X } from 'lucide-vue-next'
+import { v2Api, agentEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupTimelineTurns } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
 import AgentComposer from '../components/AgentComposer.vue'
+import SessionTitleMarquee from '../components/SessionTitleMarquee.vue'
 import TimelineTurn from '../components/TimelineTurn.vue'
 
 const { currentTheme, isDark, setTheme, themes } = useTheme()
 const workspaces = ref([])
 const providers = ref([])
-const agents = ref([])
+const agentsByWorkspace = ref({})
+const expandedWorkspaceIds = ref(new Set())
 const rows = ref([])
 const turns = ref([])
 const activeWorkspaceId = ref('')
@@ -36,8 +38,11 @@ const directorySearchError = ref('')
 const directorySuggestionsOpen = ref(false)
 const selectedDirectoryIndex = ref(-1)
 const agentProvider = ref('codex')
+const creating = ref(false)
 const timelineElement = ref(null)
 let eventSource = null
+let globalEventSource = null
+const attentionClearPending = new Set()
 let timelineRequestVersion = 0
 let positioningTimeline = false
 let directorySearchTimer = null
@@ -45,11 +50,82 @@ let directorySearchController = null
 let markdownScrollFrame = null
 
 const activeWorkspace = computed(() => workspaces.value.find((item) => item.id === activeWorkspaceId.value))
+const agents = computed(() => agentsForWorkspace(activeWorkspaceId.value))
 const activeAgent = computed(() => agents.value.find((item) => item.id === activeAgentId.value))
 const isRunning = computed(() => activeAgent.value?.lifecycle === 'running')
 const entries = computed(() => groupTimelineTurns(projectTimelineRows(rows.value)))
 const turnTimings = computed(() => createTurnTimingMap(rows.value, turns.value))
 const latestTurnId = computed(() => rows.value.findLast((row) => row.turnId)?.turnId || '')
+
+function agentsForWorkspace(workspaceId) {
+  return agentsByWorkspace.value[workspaceId] || []
+}
+
+function setWorkspaceAgents(workspaceId, nextAgents) {
+  agentsByWorkspace.value = { ...agentsByWorkspace.value, [workspaceId]: nextAgents }
+}
+
+function upsertAgent(agent) {
+  if (!agent?.workspaceId) return
+  const workspaceAgents = agentsForWorkspace(agent.workspaceId)
+  const index = workspaceAgents.findIndex((item) => item.id === agent.id)
+  const nextAgents = [...workspaceAgents]
+  if (index >= 0) nextAgents[index] = agent
+  else nextAgents.unshift(agent)
+  setWorkspaceAgents(agent.workspaceId, nextAgents)
+}
+
+function setWorkspaceExpanded(workspaceId, expanded = true) {
+  const next = new Set(expandedWorkspaceIds.value)
+  if (expanded) next.add(workspaceId)
+  else next.delete(workspaceId)
+  expandedWorkspaceIds.value = next
+}
+
+function toggleWorkspace(workspaceId) {
+  setWorkspaceExpanded(workspaceId, !expandedWorkspaceIds.value.has(workspaceId))
+}
+
+function providerLabel(providerId) {
+  return providers.value.find((provider) => provider.id === providerId)?.label || providerId
+}
+
+function workspaceInitial(workspace) {
+  return String(workspace.title || workspace.cwd || 'W').trim().charAt(0).toUpperCase()
+}
+
+function agentStatusClass(agent) {
+  if (agent.id === activeAgentId.value || !agent.requiresAttention) return ''
+  if (agent.attentionReason === 'error') return 'agent-dot-failed'
+  if (agent.attentionReason === 'finished') return 'agent-dot-finished'
+  return ''
+}
+
+function clearViewedAgentAttention(agent) {
+  if (!agent || agent.id !== activeAgentId.value || !agent.requiresAttention || attentionClearPending.has(agent.id)) return
+  attentionClearPending.add(agent.id)
+  v2Api.clearAgentAttention(agent.id)
+    .then(({ agent: updated }) => upsertAgent(updated))
+    .catch((cause) => { error.value = cause.message })
+    .finally(() => attentionClearPending.delete(agent.id))
+}
+
+function resetTimelineSelection() {
+  timelineRequestVersion += 1
+  positioningTimeline = true
+  activeAgentId.value = ''
+  agentControl.value = null
+  settingsLoading.value = false
+  rows.value = []
+  turns.value = []
+  timelineEpoch.value = ''
+  hasOlderHistory.value = false
+  loadingOlderHistory.value = false
+  followingTimeline.value = true
+  hasNewTimelineItems.value = false
+  sending.value = false
+  closeEvents()
+}
 
 function upsertTurn(turn) {
   if (!turn?.id) return
@@ -70,6 +146,12 @@ async function loadInitial() {
     const [workspaceResult, providerResult] = await Promise.all([v2Api.listWorkspaces(), v2Api.listProviders()])
     workspaces.value = workspaceResult.workspaces
     providers.value = providerResult.providers
+    const agentResults = await Promise.all(workspaces.value.map(async (workspace) => [
+      workspace.id,
+      (await v2Api.listAgents(workspace.id)).agents,
+    ]))
+    agentsByWorkspace.value = Object.fromEntries(agentResults)
+    expandedWorkspaceIds.value = new Set(workspaces.value.map((workspace) => workspace.id))
     if (workspaces.value.length) await selectWorkspace(workspaces.value[0].id)
   } catch (cause) {
     error.value = cause.message
@@ -79,26 +161,25 @@ async function loadInitial() {
 }
 
 async function selectWorkspace(id) {
-  timelineRequestVersion += 1
-  positioningTimeline = true
   activeWorkspaceId.value = id
-  activeAgentId.value = ''
-  agentControl.value = null
-  rows.value = []
-  turns.value = []
-  timelineEpoch.value = ''
-  hasOlderHistory.value = false
-  loadingOlderHistory.value = false
-  followingTimeline.value = true
-  hasNewTimelineItems.value = false
-  closeEvents()
-  const result = await v2Api.listAgents(id)
-  agents.value = result.agents
-  if (agents.value.length) await selectAgent(agents.value[0].id)
-  else positioningTimeline = false
+  setWorkspaceExpanded(id)
+  if (!(id in agentsByWorkspace.value)) {
+    const result = await v2Api.listAgents(id)
+    setWorkspaceAgents(id, result.agents)
+  }
+  const workspaceAgents = agentsForWorkspace(id)
+  if (workspaceAgents.length) await selectAgent(workspaceAgents[0].id)
+  else {
+    resetTimelineSelection()
+    positioningTimeline = false
+  }
 }
 
 async function selectAgent(id) {
+  const agent = Object.values(agentsByWorkspace.value).flat().find((item) => item.id === id)
+  if (!agent) return
+  activeWorkspaceId.value = agent.workspaceId
+  setWorkspaceExpanded(agent.workspaceId)
   const requestVersion = ++timelineRequestVersion
   positioningTimeline = true
   activeAgentId.value = id
@@ -212,8 +293,8 @@ function openEvents(agentId, epoch, seq) {
   })
   eventSource.addEventListener('agent', (event) => {
     const { agent } = JSON.parse(event.data)
-    const index = agents.value.findIndex((item) => item.id === agent.id)
-    if (index >= 0) agents.value[index] = agent
+    upsertAgent(agent)
+    clearViewedAgentAttention(agent)
     sending.value = agent.lifecycle === 'running'
   })
   eventSource.addEventListener('turn', (event) => {
@@ -230,6 +311,21 @@ function openEvents(agentId, epoch, seq) {
     if (followingTimeline.value) scrollToBottom()
     else hasNewTimelineItems.value = true
   })
+}
+
+function openGlobalEvents() {
+  globalEventSource?.close()
+  globalEventSource = new EventSource(globalEventsUrl())
+  globalEventSource.addEventListener('agent', (event) => {
+    const { agent } = JSON.parse(event.data)
+    upsertAgent(agent)
+    clearViewedAgentAttention(agent)
+  })
+}
+
+function closeGlobalEvents() {
+  globalEventSource?.close()
+  globalEventSource = null
 }
 
 function closeEvents() {
@@ -270,8 +366,14 @@ async function searchDirectorySuggestions(query = workspacePath.value) {
 }
 
 function scheduleDirectorySearch() {
-  if (directorySearchTimer) clearTimeout(directorySearchTimer)
-  directorySearchController?.abort()
+  cancelDirectorySearch()
+  if (!workspacePath.value.trim()) {
+    directorySuggestions.value = []
+    directorySearchError.value = ''
+    directorySuggestionsOpen.value = false
+    selectedDirectoryIndex.value = -1
+    return
+  }
   directorySuggestionsOpen.value = true
   selectedDirectoryIndex.value = -1
   directorySearchTimer = setTimeout(() => {
@@ -280,19 +382,21 @@ function scheduleDirectorySearch() {
   }, 250)
 }
 
-async function openWorkspaceDialog() {
-  workspacePath.value = ''
+async function openConversationDialog(workspace = null) {
+  workspacePath.value = workspace?.cwd || ''
+  agentProvider.value = providers.value.some((provider) => provider.id === 'codex')
+    ? 'codex'
+    : providers.value[0]?.id || ''
   directorySuggestions.value = []
   directorySearchError.value = ''
-  directorySuggestionsOpen.value = true
+  directorySuggestionsOpen.value = false
   selectedDirectoryIndex.value = -1
-  dialog.value = 'workspace'
+  dialog.value = 'conversation'
   await nextTick()
   workspacePathInput.value?.focus()
-  searchDirectorySuggestions('')
 }
 
-function closeWorkspaceDialog() {
+function closeDialog() {
   cancelDirectorySearch()
   directorySuggestionsOpen.value = false
   dialog.value = ''
@@ -342,50 +446,38 @@ function handleDirectoryKeydown(event) {
   }
 }
 
-async function createWorkspace() {
+async function createConversation() {
+  if (creating.value) return
+  creating.value = true
+  error.value = ''
   try {
-    const { workspace } = await v2Api.createWorkspace({ cwd: workspacePath.value })
+    const { workspace, agent } = await v2Api.createConversation({ cwd: workspacePath.value, providerId: agentProvider.value })
     if (!workspaces.value.some((item) => item.id === workspace.id)) workspaces.value.push(workspace)
+    upsertAgent(agent)
     workspacePath.value = ''
-    closeWorkspaceDialog()
-    await selectWorkspace(workspace.id)
+    closeDialog()
+    setWorkspaceExpanded(workspace.id)
+    await selectAgent(agent.id)
   } catch (cause) {
     error.value = cause.message
+  } finally {
+    creating.value = false
   }
 }
 
 async function removeAgent(agent) {
   if (!window.confirm(`确定删除 Agent“${agent.title}”？它的 Timeline 数据也会一并删除。`)) return
-  const removedIndex = agents.value.findIndex((item) => item.id === agent.id)
+  const workspaceAgents = agentsForWorkspace(agent.workspaceId)
+  const removedIndex = workspaceAgents.findIndex((item) => item.id === agent.id)
   try {
     await v2Api.deleteAgent(agent.id)
-    agents.value = agents.value.filter((item) => item.id !== agent.id)
+    const remainingAgents = workspaceAgents.filter((item) => item.id !== agent.id)
+    setWorkspaceAgents(agent.workspaceId, remainingAgents)
     if (activeAgentId.value !== agent.id) return
-    closeEvents()
-    timelineRequestVersion += 1
-    activeAgentId.value = ''
-    agentControl.value = null
-    rows.value = []
-    turns.value = []
-    timelineEpoch.value = ''
-    hasOlderHistory.value = false
-    followingTimeline.value = true
-    hasNewTimelineItems.value = false
-    sending.value = false
-    const fallback = agents.value[Math.min(removedIndex, agents.value.length - 1)]
+    resetTimelineSelection()
+    const fallback = remainingAgents[Math.min(removedIndex, remainingAgents.length - 1)]
     if (fallback) await selectAgent(fallback.id)
-  } catch (cause) {
-    error.value = cause.message
-  }
-}
-
-async function createAgent() {
-  try {
-    const provider = providers.value.find((item) => item.id === agentProvider.value)
-    const { agent } = await v2Api.createAgent(activeWorkspaceId.value, { providerId: agentProvider.value, title: `${provider?.label || agentProvider.value} Agent` })
-    agents.value.unshift(agent)
-    dialog.value = ''
-    await selectAgent(agent.id)
+    else positioningTimeline = false
   } catch (cause) {
     error.value = cause.message
   }
@@ -395,21 +487,15 @@ async function removeWorkspace(workspace) {
   if (!window.confirm(`确定移除工作区“${workspace.title}”？Agent 和 Timeline 数据会一并删除。`)) return
   await v2Api.deleteWorkspace(workspace.id)
   workspaces.value = workspaces.value.filter((item) => item.id !== workspace.id)
+  const nextAgentsByWorkspace = { ...agentsByWorkspace.value }
+  delete nextAgentsByWorkspace[workspace.id]
+  agentsByWorkspace.value = nextAgentsByWorkspace
+  setWorkspaceExpanded(workspace.id, false)
   if (activeWorkspaceId.value !== workspace.id) return
-  closeEvents()
-  timelineRequestVersion += 1
-  agents.value = []
-  rows.value = []
-  turns.value = []
-  timelineEpoch.value = ''
-  hasOlderHistory.value = false
-  loadingOlderHistory.value = false
-  followingTimeline.value = true
-  hasNewTimelineItems.value = false
+  resetTimelineSelection()
   activeWorkspaceId.value = ''
-  activeAgentId.value = ''
-  agentControl.value = null
   if (workspaces.value.length) await selectWorkspace(workspaces.value[0].id)
+  else positioningTimeline = false
 }
 
 async function submitPrompt(content) {
@@ -433,8 +519,7 @@ async function updateAgentSettings(input) {
   error.value = ''
   try {
     const result = await v2Api.updateAgentSettings(activeAgentId.value, input)
-    const index = agents.value.findIndex((agent) => agent.id === result.agent.id)
-    if (index >= 0) agents.value[index] = result.agent
+    upsertAgent(result.agent)
     agentControl.value = result.control
   } catch (cause) {
     error.value = cause.message
@@ -470,9 +555,13 @@ function cycleTheme() {
   setTheme(themes.value[(index + 1) % themes.value.length].id)
 }
 
-onMounted(loadInitial)
+onMounted(async () => {
+  await loadInitial()
+  openGlobalEvents()
+})
 onBeforeUnmount(() => {
   closeEvents()
+  closeGlobalEvents()
   cancelDirectorySearch()
   if (markdownScrollFrame) cancelAnimationFrame(markdownScrollFrame)
 })
@@ -481,19 +570,44 @@ onBeforeUnmount(() => {
 <template>
   <div class="v2-shell panel grid h-full min-h-0 overflow-hidden">
     <aside class="workspace-sidebar flex min-h-0 flex-col border-r">
-      <header class="flex h-14 shrink-0 items-center justify-between border-b px-3">
+      <header class="flex h-14 shrink-0 items-center border-b px-3">
         <div class="flex min-w-0 items-center gap-2">
           <div class="brand-mark flex h-7 w-7 items-center justify-center rounded-sm"><TerminalSquare class="h-4 w-4" /></div>
           <span class="text-sm font-semibold">PromptX</span><span class="theme-muted-text text-[10px]">V2</span>
         </div>
-        <button class="tool-button h-8 w-8" title="新增工作区" @click="openWorkspaceDialog"><Plus class="h-4 w-4" /></button>
       </header>
-      <div class="min-h-0 flex-1 overflow-y-auto p-2">
-        <button v-for="workspace in workspaces" :key="workspace.id" class="workspace-row group mb-1 flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left" :class="workspace.id === activeWorkspaceId ? 'row-active' : ''" @click="selectWorkspace(workspace.id)">
-          <FolderOpen class="h-4 w-4 shrink-0" />
-          <span class="row-copy min-w-0 flex-1"><span class="block truncate text-xs font-medium">{{ workspace.title }}</span><span class="theme-muted-text block truncate font-mono text-[10px]">{{ workspace.cwd }}</span></span>
-          <span class="row-action h-6 w-6 items-center justify-center" title="移除工作区" @click.stop="removeWorkspace(workspace)"><Trash2 class="h-3.5 w-3.5" /></span>
+      <div class="shrink-0 px-2 pb-2 pt-2">
+        <button class="sidebar-primary-action flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs font-medium" @click="openConversationDialog()">
+          <Plus class="h-4 w-4 shrink-0" />
+          <span>新对话</span>
         </button>
+      </div>
+      <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        <div class="theme-muted-text flex h-8 items-center px-2 text-[10px] font-medium uppercase tracking-wide">工作区</div>
+        <div v-for="workspace in workspaces" :key="workspace.id" class="workspace-group mb-2">
+          <div class="workspace-heading group flex h-9 min-w-0 items-center rounded-sm" :class="workspace.id === activeWorkspaceId ? 'workspace-active' : ''">
+            <button class="workspace-toggle flex h-7 w-6 shrink-0 items-center justify-center" :title="expandedWorkspaceIds.has(workspace.id) ? '收起工作区' : '展开工作区'" @click="toggleWorkspace(workspace.id)">
+              <ChevronRight class="h-3.5 w-3.5 transition-transform" :class="expandedWorkspaceIds.has(workspace.id) ? 'rotate-90' : ''" />
+            </button>
+            <button class="flex min-w-0 flex-1 items-center gap-2 py-1 text-left" :title="workspace.cwd" @click="selectWorkspace(workspace.id)">
+              <span class="workspace-mark flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-[10px] font-semibold">{{ workspaceInitial(workspace) }}</span>
+              <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ workspace.title }}</span>
+            </button>
+            <button class="workspace-action flex h-7 w-7 shrink-0 items-center justify-center" :title="`在 ${workspace.title} 中新建对话`" @click="openConversationDialog(workspace)"><Plus class="h-3.5 w-3.5" /></button>
+            <button class="workspace-action workspace-delete flex h-7 w-7 shrink-0 items-center justify-center" :title="`移除 ${workspace.title}`" @click="removeWorkspace(workspace)"><Trash2 class="h-3.5 w-3.5" /></button>
+          </div>
+          <div v-if="expandedWorkspaceIds.has(workspace.id)" class="agent-list ml-6 mt-0.5">
+            <div v-for="agent in agentsForWorkspace(workspace.id)" :key="agent.id" class="agent-row group flex min-w-0 items-center rounded-sm" :class="agent.id === activeAgentId ? 'row-active' : ''">
+              <button class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${agent.title} · ${providerLabel(agent.providerId)}`" @click="selectAgent(agent.id)">
+                <span v-if="agentStatusClass(agent)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(agent)" />
+                <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="agent.title" />
+                <LoaderCircle v-if="agent.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
+              </button>
+              <button class="agent-delete flex h-7 w-7 shrink-0 items-center justify-center" :title="`删除 ${agent.title}`" @click="removeAgent(agent)"><X class="h-3 w-3" /></button>
+            </div>
+            <button v-if="!agentsForWorkspace(workspace.id).length" class="theme-muted-text flex h-8 w-full items-center gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(workspace)"><Plus class="h-3 w-3" />新对话</button>
+          </div>
+        </div>
         <div v-if="!workspaces.length && !loading" class="theme-muted-text px-3 py-8 text-center text-xs">还没有工作区</div>
       </div>
       <footer class="flex items-center justify-between border-t p-2"><span class="theme-muted-text truncate px-1 text-[10px]">{{ currentTheme.shortName }}</span><button class="tool-button h-8 w-8" title="切换主题" @click="cycleTheme"><Palette class="h-4 w-4" /></button></footer>
@@ -502,33 +616,17 @@ onBeforeUnmount(() => {
     <main class="flex min-h-0 min-w-0 flex-col">
       <header class="flex h-14 shrink-0 items-center justify-between border-b px-4">
         <div class="min-w-0 flex-1">
-          <div class="truncate text-sm font-semibold">{{ activeWorkspace?.title || '选择一个工作区' }}</div>
-          <div v-if="activeWorkspace" class="theme-muted-text truncate font-mono text-[10px]">{{ activeWorkspace.cwd }}</div>
+          <div class="truncate text-sm font-semibold">{{ activeAgent?.title || activeWorkspace?.title || '选择一个工作区' }}</div>
+          <div v-if="activeWorkspace" class="theme-muted-text truncate text-[10px]"><span>{{ activeWorkspace.title }}</span><span class="mx-1">·</span><span class="font-mono">{{ activeWorkspace.cwd }}</span></div>
         </div>
         <div class="flex items-center gap-2">
           <div v-if="activeAgent" class="status-chip flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
         </div>
       </header>
 
-      <div v-if="activeWorkspace" class="agent-tabs flex h-10 shrink-0 items-center border-b px-1">
-        <div class="min-w-0 flex-1 overflow-x-auto">
-          <div class="flex min-w-max items-center gap-1 px-1">
-            <div v-for="agent in agents" :key="agent.id" class="agent-tab group flex h-8 max-w-44 items-center rounded-sm" :class="agent.id === activeAgentId ? 'row-active' : ''">
-              <button class="flex min-w-0 flex-1 items-center gap-1.5 py-1 pl-2 text-left" :title="agent.title" @click="selectAgent(agent.id)">
-                <span class="provider-mark flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-[8px] font-semibold">{{ agent.providerId.slice(0, 2).toUpperCase() }}</span>
-                <span class="truncate text-xs font-medium">{{ agent.title }}</span>
-                <LoaderCircle v-if="agent.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
-              </button>
-              <button class="agent-close flex h-7 w-7 shrink-0 items-center justify-center" :title="`删除 ${agent.title}`" @click="removeAgent(agent)"><X class="h-3 w-3" /></button>
-            </div>
-            <button class="tool-button h-8 w-8 shrink-0" title="新建 Agent" @click="dialog = 'agent'"><Plus class="h-4 w-4" /></button>
-          </div>
-        </div>
-      </div>
-
       <div class="relative min-h-0 flex-1">
         <div ref="timelineElement" class="timeline h-full overflow-y-auto" @scroll.passive="handleTimelineScroll">
-          <div v-if="!activeAgent || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeAgent ? '开始一段新的协作' : (activeWorkspace ? '创建第一个 Agent' : '添加一个工作区') }}</p><p v-if="activeAgent" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
+          <div v-if="!activeAgent || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeAgent ? '开始一段新的协作' : '新建一条对话' }}</p><p v-if="activeAgent" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
               <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" @rendered="handleMarkdownRendered" />
@@ -558,13 +656,13 @@ onBeforeUnmount(() => {
       </footer>
     </main>
 
-    <div v-if="dialog" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4" @click.self="dialog === 'workspace' ? closeWorkspaceDialog() : (dialog = '')">
-      <form v-if="dialog === 'workspace'" class="panel w-full max-w-md p-4" @submit.prevent="createWorkspace">
+    <div v-if="dialog === 'conversation'" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4" @click.self="closeDialog">
+      <form class="panel w-full max-w-md p-4" @submit.prevent="createConversation">
         <div class="flex items-center justify-between">
-          <h2 class="text-sm font-semibold">添加工作区</h2>
-          <button type="button" class="tool-button h-8 w-8" title="关闭" @click="closeWorkspaceDialog"><X class="h-4 w-4" /></button>
+          <h2 class="text-sm font-semibold">新对话</h2>
+          <button type="button" class="tool-button h-8 w-8" title="关闭" @click="closeDialog"><X class="h-4 w-4" /></button>
         </div>
-        <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">本机目录</label>
+        <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
         <div class="relative mt-1">
           <Search class="theme-muted-text pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2" />
           <input
@@ -579,8 +677,6 @@ onBeforeUnmount(() => {
             :aria-expanded="directorySuggestionsOpen"
             :aria-activedescendant="selectedDirectoryIndex >= 0 ? `directory-suggestion-${selectedDirectoryIndex}` : undefined"
             @input="scheduleDirectorySearch"
-            @focus="directorySuggestionsOpen = true"
-            @click="directorySuggestionsOpen = true"
             @keydown="handleDirectoryKeydown"
           />
           <LoaderCircle v-if="directorySearchLoading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" />
@@ -613,25 +709,36 @@ onBeforeUnmount(() => {
             <div v-else-if="!directorySearchLoading && !directorySuggestions.length" class="theme-muted-text px-3 py-5 text-center text-xs">没有找到匹配目录</div>
           </div>
         </div>
-        <div class="mt-4 flex justify-end"><button class="tool-button tool-button-primary h-9 px-4 text-xs" :disabled="!workspacePath.trim()">添加</button></div>
+        <label class="theme-muted-text mt-4 block text-xs" for="conversation-provider">Provider</label>
+        <select id="conversation-provider" v-model="agentProvider" class="tool-input mt-1" :disabled="creating">
+          <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+        </select>
+        <div class="mt-4 flex justify-end"><button class="tool-button tool-button-primary h-9 gap-2 px-4 text-xs" :disabled="!workspacePath.trim() || !agentProvider || creating"><LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />创建对话</button></div>
       </form>
-      <form v-else class="panel w-full max-w-md p-4" @submit.prevent="createAgent"><div class="flex items-center justify-between"><h2 class="text-sm font-semibold">新建 Agent</h2><button type="button" class="tool-button h-8 w-8" @click="dialog = ''"><X class="h-4 w-4" /></button></div><label class="theme-muted-text mt-4 block text-xs">Provider</label><select v-model="agentProvider" class="tool-input mt-1"><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option></select><div class="mt-4 flex justify-end"><button class="tool-button tool-button-primary h-9 px-4 text-xs">创建</button></div></form>
     </div>
   </div>
 </template>
 
 <style scoped>
-.v2-shell { grid-template-columns: 220px minmax(0, 1fr); }
-.workspace-sidebar, .agent-tabs, header, footer, .composer-wrap { border-color: var(--theme-borderDefault); }
-.brand-mark, .provider-mark { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
-.workspace-row:hover, .agent-tab:hover { background: var(--theme-appPanelHover); }
+.v2-shell { grid-template-columns: 240px minmax(0, 1fr); }
+.workspace-sidebar, header, footer, .composer-wrap { border-color: var(--theme-borderDefault); }
+.brand-mark { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
+.sidebar-primary-action { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
+.sidebar-primary-action:hover { filter: brightness(0.96); }
+.workspace-heading:hover, .agent-row:hover { background: var(--theme-appPanelHover); }
+.workspace-active { color: var(--theme-text); }
+.workspace-mark { background: var(--theme-appPanelInset); color: var(--theme-textMuted); }
+.workspace-toggle, .workspace-action, .agent-delete { color: var(--theme-textMuted); }
+.workspace-toggle:hover, .workspace-action:hover, .agent-delete:hover { color: var(--theme-text); }
+.workspace-delete:hover, .agent-delete:hover { color: var(--theme-dangerText); }
+.workspace-action, .agent-delete { opacity: 0; }
+.workspace-heading:hover .workspace-action,
+.workspace-heading:focus-within .workspace-action,
+.agent-row:hover .agent-delete,
+.agent-row:focus-within .agent-delete { opacity: 1; }
+.agent-dot-finished { background: var(--theme-success); }
+.agent-dot-failed { background: var(--theme-danger); }
 .row-active { background: var(--theme-appPanelInset); }
-.row-action { display: none; color: var(--theme-textMuted); }
-.group:hover .row-action { display: flex; }
-.agent-tabs { background: var(--theme-appPanelMuted); }
-.agent-close { color: var(--theme-textMuted); opacity: 0; }
-.agent-tab:hover .agent-close, .agent-tab.row-active .agent-close { opacity: 1; }
-.agent-close:hover { color: var(--theme-dangerText); }
 .status-chip { border-color: var(--theme-borderDefault); background: var(--theme-appPanelStrong); }
 .status-dot { background: var(--theme-success); }
 .status-dot-running { background: var(--theme-warning); }
@@ -642,6 +749,15 @@ onBeforeUnmount(() => {
 .modal-backdrop { background: var(--theme-modalBackdrop); }
 .directory-suggestions { background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
 .directory-suggestion:hover { background: var(--theme-appPanelHover); }
-@media (max-width: 900px) { .v2-shell { grid-template-columns: 64px minmax(0, 1fr); } .workspace-sidebar header span, .workspace-sidebar footer span, .workspace-sidebar .row-copy { display: none; } .workspace-sidebar header, .workspace-sidebar footer, .workspace-row { justify-content: center; } }
-@media (max-width: 640px) { .status-text { display: none; } .agent-tab { max-width: 136px; } }
+@media (max-width: 900px) { .v2-shell { grid-template-columns: 200px minmax(0, 1fr); } }
+@media (max-width: 640px) {
+  .v2-shell { grid-template-columns: minmax(136px, 38vw) minmax(0, 1fr); }
+  .workspace-sidebar header { padding-inline: 0.5rem; }
+  .workspace-sidebar header .theme-muted-text, .workspace-sidebar footer span { display: none; }
+  .workspace-sidebar footer { justify-content: flex-end; }
+  .workspace-action, .agent-delete { opacity: 1; }
+  .workspace-delete { display: none; }
+  .agent-list { margin-left: 0.75rem; }
+  .status-text { display: none; }
+}
 </style>

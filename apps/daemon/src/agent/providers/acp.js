@@ -91,6 +91,10 @@ export class AcpRuntime extends EventEmitter {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     })
+    const childReady = new Promise((resolve, reject) => {
+      child.once('spawn', resolve)
+      child.once('error', reject)
+    })
     this.child = child
     child.stderr.on('data', (chunk) => this.emit('stderr', chunk.toString()))
     child.on('exit', () => {
@@ -100,16 +104,18 @@ export class AcpRuntime extends EventEmitter {
       this.connected = false
       this.emit('runtimeExit')
     })
-    const stream = ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout))
-    const connection = new ClientSideConnection(() => ({
-      requestPermission: async (params) => selectPermission(params.options),
-      sessionUpdate: async (params) => {
-        if (this.connection === connection && this.acceptUpdates) this.onSessionUpdate(params.update)
-      },
-    }), stream)
-    this.connection = connection
+    let connection = null
     this.acceptUpdates = false
     try {
+      await childReady
+      const stream = ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout))
+      connection = new ClientSideConnection(() => ({
+        requestPermission: async (params) => selectPermission(params.options),
+        sessionUpdate: async (params) => {
+          if (this.connection === connection && this.acceptUpdates) this.onSessionUpdate(params.update)
+        },
+      }), stream)
+      this.connection = connection
       await connection.initialize({
         protocolVersion: PROTOCOL_VERSION,
         clientInfo: { name: 'promptx', title: 'PromptX', version: '2.0.0' },

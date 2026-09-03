@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { DEFAULT_AGENT_TITLE } from '../agent/sessionTitle.js'
 
 function parseJson(value, fallback = {}) {
   try {
@@ -43,6 +44,9 @@ function mapAgent(row) {
     timelineEpoch: row.timeline_epoch,
     timelineNextSeq: row.timeline_next_seq,
     lastError: row.last_error,
+    requiresAttention: Boolean(row.requires_attention),
+    attentionReason: row.attention_reason,
+    attentionAt: row.attention_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastActiveAt: row.last_active_at,
@@ -156,6 +160,12 @@ export function createRepository(db) {
         : 'SELECT * FROM agent_sessions WHERE workspace_id = ? AND archived_at IS NULL ORDER BY last_active_at DESC'
       return db.prepare(sql).all(workspaceId).map(mapAgent)
     },
+    listAllAgents(includeArchived = false) {
+      const sql = includeArchived
+        ? 'SELECT * FROM agent_sessions ORDER BY last_active_at DESC'
+        : 'SELECT * FROM agent_sessions WHERE archived_at IS NULL ORDER BY last_active_at DESC'
+      return db.prepare(sql).all().map(mapAgent)
+    },
     getAgent(id) {
       return mapAgent(db.prepare('SELECT * FROM agent_sessions WHERE id = ?').get(id))
     },
@@ -165,9 +175,9 @@ export function createRepository(db) {
       db.prepare(`INSERT INTO agent_sessions
         (id, workspace_id, provider_id, title, lifecycle, model_id, mode_id, config_json,
          capabilities_json, native_handle_json, timeline_epoch, timeline_next_seq, last_error,
-         created_at, updated_at, last_active_at)
-        VALUES (?, ?, ?, ?, 'initializing', ?, ?, ?, ?, '{}', ?, 1, '', ?, ?, ?)`)
-        .run(id, workspaceId, input.providerId, input.title || '新 Agent', input.modelId || '', input.modeId || '',
+         requires_attention, attention_reason, attention_at, created_at, updated_at, last_active_at)
+        VALUES (?, ?, ?, ?, 'initializing', ?, ?, ?, ?, '{}', ?, 1, '', 0, NULL, NULL, ?, ?, ?)`)
+        .run(id, workspaceId, input.providerId, input.title || DEFAULT_AGENT_TITLE, input.modelId || '', input.modeId || '',
           JSON.stringify(input.providerConfig || {}), JSON.stringify(capabilities), randomUUID(), now, now, now)
       return this.getAgent(id)
     },
@@ -177,11 +187,22 @@ export function createRepository(db) {
       const next = { ...current, ...patch, updatedAt: nowIso() }
       db.prepare(`UPDATE agent_sessions SET title = ?, lifecycle = ?, model_id = ?, mode_id = ?,
         config_json = ?, capabilities_json = ?, native_handle_json = ?, last_error = ?, updated_at = ?,
-        last_active_at = ?, archived_at = ? WHERE id = ?`)
+        last_active_at = ?, archived_at = ?, requires_attention = ?, attention_reason = ?, attention_at = ? WHERE id = ?`)
         .run(next.title, next.lifecycle, next.modelId, next.modeId, JSON.stringify(next.config || {}),
           JSON.stringify(next.capabilities || {}), JSON.stringify(next.nativeHandle || {}), next.lastError || '',
-          next.updatedAt, next.lastActiveAt || next.updatedAt, next.archivedAt || null, id)
+          next.updatedAt, next.lastActiveAt || next.updatedAt, next.archivedAt || null,
+          next.requiresAttention ? 1 : 0, next.attentionReason || null, next.attentionAt || null, id)
       return this.getAgent(id)
+    },
+    clearAgentAttention(id) {
+      const current = this.getAgent(id)
+      if (!current) return null
+      if (!current.requiresAttention && !current.attentionReason && !current.attentionAt) return current
+      return this.updateAgent(id, {
+        requiresAttention: false,
+        attentionReason: null,
+        attentionAt: null,
+      })
     },
     deleteAgent(id) {
       return db.prepare('DELETE FROM agent_sessions WHERE id = ?').run(id).changes > 0
@@ -191,6 +212,9 @@ export function createRepository(db) {
     },
     getTurnByClientMessage(agentId, clientMessageId) {
       return mapTurn(db.prepare('SELECT * FROM agent_turns WHERE agent_session_id = ? AND client_message_id = ?').get(agentId, clientMessageId))
+    },
+    hasTurns(agentId) {
+      return Boolean(db.prepare('SELECT 1 FROM agent_turns WHERE agent_session_id = ? LIMIT 1').get(agentId))
     },
     listTurns(agentId, limit = 100) {
       return db.prepare('SELECT * FROM agent_turns WHERE agent_session_id = ? ORDER BY created_at DESC LIMIT ?').all(agentId, limit).map(mapTurn)
@@ -220,7 +244,8 @@ export function createRepository(db) {
       const now = nowIso()
       db.prepare(`UPDATE agent_turns SET status = 'failed', error_message = 'daemon_restarted', finished_at = ?
         WHERE status IN ('queued', 'running')`).run(now)
-      db.prepare(`UPDATE agent_sessions SET lifecycle = 'ready', updated_at = ? WHERE lifecycle = 'running'`).run(now)
+      db.prepare(`UPDATE agent_sessions SET lifecycle = 'ready', updated_at = ?, requires_attention = 1,
+        attention_reason = 'error', attention_at = ? WHERE lifecycle = 'running'`).run(now, now)
     },
     appendTimeline(agentId, turnId, item, options) {
       return insertTimeline(agentId, turnId, item, options)

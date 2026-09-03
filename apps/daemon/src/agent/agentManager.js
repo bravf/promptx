@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { TimelineCoalescer } from '../timeline/timelineCoalescer.js'
+import { DEFAULT_AGENT_TITLE, deriveAgentTitle } from './sessionTitle.js'
 
 function nowIso() {
   return new Date().toISOString()
@@ -57,7 +58,7 @@ export class AgentManager {
   }
 
   async startTurn(agentId, input) {
-    const agent = this.repository.getAgent(agentId)
+    let agent = this.repository.getAgent(agentId)
     if (!agent) throw new Error('Agent 不存在。')
     if (agent.archivedAt) throw new Error('已归档的 Agent 不能发送消息。')
     const existing = this.repository.getTurnByClientMessage(agentId, input.clientMessageId)
@@ -76,6 +77,21 @@ export class AgentManager {
       }
     })
     const timelineContent = providerContent.map(({ absolutePath, ...block }) => block)
+    const isFirstTurn = !this.repository.hasTurns(agentId)
+    const patch = {}
+    if (isFirstTurn && agent.title === DEFAULT_AGENT_TITLE) {
+      const title = deriveAgentTitle(input.input.content)
+      if (title) patch.title = title
+    }
+    if (agent.requiresAttention) {
+      patch.requiresAttention = false
+      patch.attentionReason = null
+      patch.attentionAt = null
+    }
+    if (Object.keys(patch).length) {
+      agent = this.repository.updateAgent(agent.id, patch)
+      this.eventHub.publish(agent.id, { type: 'agent', agent })
+    }
     const turn = this.repository.createTurn(agentId, input.clientMessageId)
     this.activeTurns.set(agentId, turn)
     this.commitTimeline({
@@ -183,7 +199,17 @@ export class AgentManager {
       this.commitTimeline({ agentId, turnId: turn.id, item: { type: 'error', code: 'provider_error', message } })
     }
     this.activeTurns.delete(agentId)
-    const agent = this.repository.updateAgent(agentId, { lifecycle: 'ready', lastError: message, lastActiveAt: nowIso() })
+    const attention = status === 'completed'
+      ? { requiresAttention: true, attentionReason: 'finished', attentionAt: nowIso() }
+      : status === 'failed'
+        ? { requiresAttention: true, attentionReason: 'error', attentionAt: nowIso() }
+        : {}
+    const agent = this.repository.updateAgent(agentId, {
+      lifecycle: 'ready',
+      lastError: message,
+      lastActiveAt: nowIso(),
+      ...attention,
+    })
     this.eventHub.publish(agentId, { type: 'turn', turn: updated })
     this.eventHub.publish(agentId, { type: 'agent', agent })
   }

@@ -11,6 +11,37 @@ function isProcessEntry(entry) {
     || isProviderRetryEntry(entry)
 }
 
+function mergeAssistantOutputEntries(entries = []) {
+  const result = []
+  for (const entry of entries) {
+    const previous = result.at(-1)
+    if (entry.item?.type !== 'assistant_message' || previous?.item?.type !== 'assistant_message') {
+      result.push({
+        ...entry,
+        item: { ...entry.item },
+        ...(entry.sourceSeqRanges ? { sourceSeqRanges: [...entry.sourceSeqRanges] } : {}),
+        ...(entry.collapsed ? { collapsed: [...entry.collapsed] } : {}),
+      })
+      continue
+    }
+
+    const previousText = String(previous.item.text || '').trimEnd()
+    const nextText = String(entry.item.text || '').trimStart()
+    previous.item = {
+      ...previous.item,
+      text: previousText && nextText ? `${previousText}\n\n${nextText}` : previousText || nextText,
+    }
+    previous.timestamp = entry.timestamp
+    previous.seqEnd = Math.max(previous.seqEnd, entry.seqEnd)
+    previous.sourceSeqRanges = [
+      ...(previous.sourceSeqRanges || []),
+      ...(entry.sourceSeqRanges || []),
+    ]
+    previous.collapsed = [...new Set([...(previous.collapsed || []), ...(entry.collapsed || []), 'turn_assistant_merge'])]
+  }
+  return result
+}
+
 function validTime(value) {
   const time = Date.parse(value || '')
   return Number.isFinite(time) ? time : null
@@ -59,6 +90,7 @@ export function groupTimelineTurns(entries = []) {
     turn.processEntries = turn.processEntries.filter((entry) => (
       !isProviderRetryEntry(entry) || entry === latestEntry
     ))
+    turn.outputEntries = mergeAssistantOutputEntries(turn.outputEntries)
   }
 
   return result

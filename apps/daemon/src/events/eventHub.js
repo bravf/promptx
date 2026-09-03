@@ -1,6 +1,7 @@
 export class EventHub {
   constructor() {
     this.listeners = new Map()
+    this.globalListeners = new Set()
   }
 
   subscribe(agentId, listener) {
@@ -13,7 +14,13 @@ export class EventHub {
     }
   }
 
+  subscribeAll(listener) {
+    this.globalListeners.add(listener)
+    return () => this.globalListeners.delete(listener)
+  }
+
   publish(agentId, event) {
     for (const listener of this.listeners.get(agentId) || []) listener(event)
+    for (const listener of this.globalListeners) listener(event)
   }
 }

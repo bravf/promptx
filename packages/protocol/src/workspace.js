@@ -10,9 +10,10 @@ export const WorkspaceSchema = z.object({
   lastOpenedAt: z.string(),
 })
 
-export const CreateWorkspaceInputSchema = z.object({
+export const CreateConversationInputSchema = z.object({
   cwd: z.string().trim().min(1),
   title: z.string().trim().max(120).optional(),
+  providerId: z.string().trim().min(1),
 })
 
 export const UpdateWorkspaceInputSchema = z.object({

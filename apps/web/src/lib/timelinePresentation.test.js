@@ -30,6 +30,21 @@ test('Assistant commentary 进入过程区，只有 final answer 进入输出区
   assert.deepEqual(result[0].outputEntries.map((item) => item.item.text), ['当前项目是 Vue 应用'])
 })
 
+test('同一 Turn 中被过程事件隔开的最终回复合并为一个展示条目', () => {
+  const result = groupTimelineTurns([
+    entry(1, 'turn-a', 'assistant_message', { phase: 'final_answer', text: '我先读取项目。' }),
+    entry(2, 'turn-a', 'tool_call', { callId: 'tool-1' }),
+    entry(3, 'turn-a', 'reasoning', { text: '继续分析' }),
+    entry(4, 'turn-a', 'assistant_message', { phase: 'final_answer', text: '项目分析完成。' }),
+  ])
+
+  assert.equal(result[0].outputEntries.length, 1)
+  assert.equal(result[0].outputEntries[0].item.text, '我先读取项目。\n\n项目分析完成。')
+  assert.equal(result[0].outputEntries[0].seqStart, 1)
+  assert.equal(result[0].outputEntries[0].seqEnd, 4)
+  assert.deepEqual(result[0].outputEntries[0].collapsed, ['turn_assistant_merge'])
+})
+
 test('Provider 重试提示进入过程区，仅在它是最新事件时显示', () => {
   const retry = { code: 'provider_retrying', text: '正在重试' }
   const active = groupTimelineTurns([

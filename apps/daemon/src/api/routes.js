@@ -1,8 +1,7 @@
 import {
   CreateAgentInputSchema,
+  CreateConversationInputSchema,
   CreateTurnInputSchema,
-  CreateWorkspaceInputSchema,
-  ProviderIds,
   UpdateAgentSettingsInputSchema,
   UpdateWorkspaceInputSchema,
 } from '../../../../packages/protocol/src/index.js'
@@ -10,6 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { searchDirectories } from '../workspaces/directorySearch.js'
 import { publicAsset, removeStoredAssets, storeAsset } from '../assets/assetStorage.js'
+import { DEFAULT_AGENT_TITLE } from '../agent/sessionTitle.js'
 
 function parseCursor(value) {
   if (!value) return null
@@ -45,18 +45,31 @@ export function registerRoutes(app, context) {
   }))
 
   app.get('/api/v2/workspaces', async () => ({ workspaces: repository.listWorkspaces() }))
-  app.post('/api/v2/workspaces', async (request, reply) => {
-    const input = CreateWorkspaceInputSchema.parse(request.body)
+  app.get('/api/v2/events', (request, reply) => {
+    reply.hijack()
+    const raw = reply.raw
+    raw.writeHead(200, createSseHeaders(request.headers.origin))
+    const writeAgent = (agent) => sseWrite(raw, { type: 'agent', agent })
+    const unsubscribe = eventHub.subscribeAll((event) => {
+      if (event.type === 'agent') writeAgent(event.agent)
+    })
+    repository.listAllAgents().forEach(writeAgent)
+    const heartbeat = setInterval(() => raw.write(': heartbeat\n\n'), 15000)
+    heartbeat.unref?.()
+    raw.on('close', () => {
+      clearInterval(heartbeat)
+      unsubscribe()
+    })
+  })
+  app.post('/api/v2/conversations', async (request, reply) => {
+    const input = CreateConversationInputSchema.parse(request.body)
+    const provider = providerRegistry.get(input.providerId)
     const workspace = repository.createWorkspace(input)
-    let [agent] = repository.listAgents(workspace.id)
-    if (!agent) {
-      const provider = providerRegistry.get(ProviderIds.CODEX)
-      agent = repository.createAgent(workspace.id, {
-        providerId: provider.id,
-        title: `${provider.label} Agent`,
-      }, provider.capabilities)
-      agent = repository.updateAgent(agent.id, { lifecycle: 'ready' })
-    }
+    let agent = repository.createAgent(workspace.id, {
+      providerId: provider.id,
+      title: DEFAULT_AGENT_TITLE,
+    }, provider.capabilities)
+    agent = repository.updateAgent(agent.id, { lifecycle: 'ready' })
     reply.code(201)
     return { workspace, agent }
   })
@@ -150,6 +163,13 @@ export function registerRoutes(app, context) {
     agentManager.close(request.params.agentId)
     if (!repository.deleteAgent(request.params.agentId)) return reply.code(404).send({ error: 'agent_not_found' })
     return reply.code(204).send()
+  })
+  app.post('/api/v2/agents/:agentId/attention/clear', async (request, reply) => {
+    const agent = repository.getAgent(request.params.agentId)
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    const updated = repository.clearAgentAttention(agent.id)
+    eventHub.publish(agent.id, { type: 'agent', agent: updated })
+    return { agent: updated }
   })
 
   app.get('/api/v2/agents/:agentId/timeline', async (request) => ({

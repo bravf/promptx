@@ -94,10 +94,10 @@ test('CORS 预检允许 v2 的 PATCH 和 DELETE 请求', async () => {
 test('Workspace、Agent 和 Timeline API 形成完整基础链路', async () => {
   const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false })
 
-  const workspaceResponse = await app.inject({ method: 'POST', url: '/api/v2/workspaces', payload: { cwd: process.cwd() } })
+  const workspaceResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'claude' } })
   assert.equal(workspaceResponse.statusCode, 201)
   const { workspace, agent } = workspaceResponse.json()
-  assert.equal(agent.providerId, 'codex')
+  assert.equal(agent.providerId, 'claude')
   assert.equal(agent.lifecycle, 'ready')
 
   const agentsResponse = await app.inject({ method: 'GET', url: `/api/v2/workspaces/${workspace.id}/agents` })
@@ -123,29 +123,151 @@ test('Workspace、Agent 和 Timeline API 形成完整基础链路', async () => 
   await app.close()
 })
 
-test('重复添加工作区不会重复创建默认 Agent，且 Agent 可以删除', async () => {
+test('同一路径的新对话复用 Workspace，并创建独立 Agent', async () => {
   const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false })
 
-  const firstResponse = await app.inject({ method: 'POST', url: '/api/v2/workspaces', payload: { cwd: process.cwd() } })
-  const secondResponse = await app.inject({ method: 'POST', url: '/api/v2/workspaces', payload: { cwd: process.cwd() } })
+  const firstResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'codex' } })
+  const secondResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'claude' } })
   const first = firstResponse.json()
   const second = secondResponse.json()
   assert.equal(second.workspace.id, first.workspace.id)
-  assert.equal(second.agent.id, first.agent.id)
+  assert.notEqual(second.agent.id, first.agent.id)
+  assert.equal(second.agent.providerId, 'claude')
 
   const deleteResponse = await app.inject({ method: 'DELETE', url: `/api/v2/agents/${first.agent.id}` })
   assert.equal(deleteResponse.statusCode, 204)
   const agentsResponse = await app.inject({ method: 'GET', url: `/api/v2/workspaces/${first.workspace.id}/agents` })
-  assert.deepEqual(agentsResponse.json().agents, [])
+  assert.deepEqual(agentsResponse.json().agents.map((agent) => agent.id), [second.agent.id])
 
   await app.close()
+})
+
+test('Agent 使用首条用户文本生成标题，后续消息不再覆盖', async () => {
+  const { registry, runtimes } = createControlTestRegistry()
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, providerRegistry: registry })
+  try {
+    const conversationResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v2/conversations',
+      payload: { cwd: process.cwd(), providerId: 'codex' },
+    })
+    const { agent } = conversationResponse.json()
+    assert.equal(agent.title, '新对话')
+
+    const firstResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v2/agents/${agent.id}/turns`,
+      payload: {
+        clientMessageId: 'title-first-turn',
+        input: { content: [{ type: 'text', text: '  \n  分析   PromptX\t标题流程  \n这行不应该出现' }] },
+      },
+    })
+    assert.equal(firstResponse.statusCode, 202)
+    assert.equal(app.sqliteRepository.getAgent(agent.id).title, '分析 PromptX 标题流程')
+
+    runtimes[0].emit('turnCompleted')
+    assert.equal(app.sqliteRepository.getAgent(agent.id).requiresAttention, true)
+    assert.equal(app.sqliteRepository.getAgent(agent.id).attentionReason, 'finished')
+    const clearAttentionResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v2/agents/${agent.id}/attention/clear`,
+    })
+    assert.equal(clearAttentionResponse.statusCode, 200)
+    assert.equal(clearAttentionResponse.json().agent.requiresAttention, false)
+    const secondResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v2/agents/${agent.id}/turns`,
+      payload: {
+        clientMessageId: 'title-second-turn',
+        input: { content: [{ type: 'text', text: '这是第二条消息' }] },
+      },
+    })
+    assert.equal(secondResponse.statusCode, 202)
+    assert.equal(app.sqliteRepository.getAgent(agent.id).title, '分析 PromptX 标题流程')
+  } finally {
+    await app.close()
+  }
+})
+
+test('首条纯附件消息不会让后续文本成为 Agent 标题', async () => {
+  const { registry, runtimes } = createControlTestRegistry()
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, providerRegistry: registry })
+  try {
+    const conversationResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v2/conversations',
+      payload: { cwd: process.cwd(), providerId: 'codex' },
+    })
+    const { workspace, agent } = conversationResponse.json()
+    const asset = app.sqliteRepository.createAsset(workspace.id, {
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      size: 5,
+      sha256: 'test-sha',
+      storagePath: path.join(os.tmpdir(), `${agent.id}-notes.txt`),
+    })
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/v2/agents/${agent.id}/turns`,
+      payload: {
+        clientMessageId: 'attachment-first-turn',
+        input: { content: [{ type: 'file', assetId: asset.id, name: asset.name, mimeType: asset.mimeType, size: asset.size }] },
+      },
+    })
+    assert.equal(app.sqliteRepository.getAgent(agent.id).title, '新对话')
+
+    runtimes[0].emit('turnCompleted')
+    await app.inject({
+      method: 'POST',
+      url: `/api/v2/agents/${agent.id}/turns`,
+      payload: {
+        clientMessageId: 'text-second-turn',
+        input: { content: [{ type: 'text', text: '第二条文本' }] },
+      },
+    })
+    assert.equal(app.sqliteRepository.getAgent(agent.id).title, '新对话')
+  } finally {
+    await app.close()
+  }
+})
+
+test('显式 Agent 标题不会被首条用户消息覆盖', async () => {
+  const { registry } = createControlTestRegistry()
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, providerRegistry: registry })
+  try {
+    const conversationResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v2/conversations',
+      payload: { cwd: process.cwd(), providerId: 'codex' },
+    })
+    const { workspace } = conversationResponse.json()
+    const agentResponse = await app.inject({
+      method: 'POST',
+      url: `/api/v2/workspaces/${workspace.id}/agents`,
+      payload: { providerId: 'codex', title: '固定标题' },
+    })
+    const { agent } = agentResponse.json()
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/v2/agents/${agent.id}/turns`,
+      payload: {
+        clientMessageId: 'explicit-title-turn',
+        input: { content: [{ type: 'text', text: '不应替换标题' }] },
+      },
+    })
+    assert.equal(app.sqliteRepository.getAgent(agent.id).title, '固定标题')
+  } finally {
+    await app.close()
+  }
 })
 
 test('v2 资产上传会持久化元数据并返回原始文件内容', async () => {
   const assetsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v2-assets-'))
   const app = await createApp({ databasePath: ':memory:', assetsDir, logger: false, webRoot: false })
   try {
-    const workspaceResponse = await app.inject({ method: 'POST', url: '/api/v2/workspaces', payload: { cwd: process.cwd() } })
+    const workspaceResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'codex' } })
     const { workspace } = workspaceResponse.json()
     const upload = multipartFile('notes.txt', 'text/plain', 'asset-content')
     const uploadResponse = await app.inject({
@@ -174,7 +296,7 @@ test('Agent 控制接口持久化模型和思考强度，并在运行中拒绝�
   const { registry, runtimes } = createControlTestRegistry()
   const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, providerRegistry: registry })
   try {
-    const workspaceResponse = await app.inject({ method: 'POST', url: '/api/v2/workspaces', payload: { cwd: process.cwd() } })
+    const workspaceResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'codex' } })
     const { agent } = workspaceResponse.json()
 
     const controlResponse = await app.inject({ method: 'GET', url: `/api/v2/agents/${agent.id}/control` })

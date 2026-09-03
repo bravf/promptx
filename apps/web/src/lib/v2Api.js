@@ -13,7 +13,7 @@ export const v2Api = {
     })
   },
   listWorkspaces: () => request('/api/v2/workspaces'),
-  createWorkspace: (input) => request('/api/v2/workspaces', { method: 'POST', body: JSON.stringify(input) }),
+  createConversation: (input) => request('/api/v2/conversations', { method: 'POST', body: JSON.stringify(input) }),
   deleteWorkspace: (id) => request(`/api/v2/workspaces/${id}`, { method: 'DELETE' }),
   uploadAsset: (workspaceId, file, options = {}) => {
     const body = new FormData()
@@ -47,9 +47,14 @@ export const v2Api = {
     body: JSON.stringify({ clientMessageId, input: { content } }),
   }),
   cancel: (agentId) => request(`/api/v2/agents/${agentId}/cancel`, { method: 'POST' }),
+  clearAgentAttention: (agentId) => request(`/api/v2/agents/${agentId}/attention/clear`, { method: 'POST' }),
 }
 
 export function agentEventsUrl(agentId, cursor = '') {
   const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
   return `${getApiBase()}/api/v2/agents/${agentId}/events${query}`
+}
+
+export function globalEventsUrl() {
+  return `${getApiBase()}/api/v2/events`
 }
