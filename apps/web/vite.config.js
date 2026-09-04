@@ -23,11 +23,7 @@ export default defineConfig({
             return undefined
           }
 
-          if (id.includes('/@tiptap/') || id.includes('/prosemirror/')) {
-            return 'vendor-tiptap'
-          }
-
-          if (id.includes('/lucide-vue-next/') || id.includes('/vue-draggable-plus/')) {
+          if (id.includes('/lucide-vue-next/')) {
             return 'vendor-ui'
           }
 

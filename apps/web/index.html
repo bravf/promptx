@@ -5,9 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PromptX</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      (() => {
+        try {
+          const themeId = localStorage.getItem('promptx:theme-id') || 'promptx-stone-light'
+          document.documentElement.dataset.theme = themeId
+          if (themeId === 'promptx-stone-dark' || (!localStorage.getItem('promptx:theme-id') && matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark')
+            document.documentElement.style.colorScheme = 'dark'
+          }
+        } catch {}
+      })()
+    </script>
+    <style>
+      #app-loading-skeleton { min-height: 100dvh; padding: 12px; background: var(--theme-appBg, #f1eee8); }
+      #app-loading-skeleton::before { content: ''; display: block; height: 100%; min-height: calc(100dvh - 24px); border: 1px solid var(--theme-borderDefault, #d1c7ba); border-radius: 3px; background: var(--theme-appPanel, #fbfaf8); }
+      .dark #app-loading-skeleton { background: #1e1e1c; }
+      @media (max-width: 720px) { #app-loading-skeleton { padding: 0; } #app-loading-skeleton::before { border: 0; border-radius: 0; min-height: 100dvh; } }
+    </style>
   </head>
   <body class="h-full">
-    <div id="app" class="h-full"></div>
+    <div id="app" class="h-full"><div id="app-loading-skeleton" aria-label="正在加载" role="status"></div></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

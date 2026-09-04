@@ -39,6 +39,7 @@ const requestedLine = ref(null)
 const gitStatus = ref(null)
 const gitLoading = ref(false)
 const selectedDiffPath = ref('')
+const displayedDiffPath = ref('')
 const diff = ref(null)
 const diffLoading = ref(false)
 const error = ref('')
@@ -141,21 +142,24 @@ async function renderFilePreview() {
 async function selectFile(filePath, line = null) {
   selectedPath.value = filePath
   requestedLine.value = line
-  filePreview.value = null
-  filePreviewHtml.value = ''
-  clearFilePreviewObjectUrl()
   fileLoading.value = true
   error.value = ''
   const version = workspaceVersion
   try {
     const result = await v2Api.readWorkspaceFile(props.workspaceId, filePath)
     if (version !== workspaceVersion || selectedPath.value !== filePath) return
-    filePreview.value = result.file
-    if (result.file.kind === 'image') {
-      const objectUrl = await v2Api.workspaceFileObjectUrl(props.workspaceId, result.file.path)
+    const nextFile = result.file
+    let nextObjectUrl = ''
+    if (nextFile.kind === 'image') {
+      const objectUrl = await v2Api.workspaceFileObjectUrl(props.workspaceId, nextFile.path)
       if (version !== workspaceVersion || selectedPath.value !== filePath) URL.revokeObjectURL(objectUrl)
-      else filePreviewObjectUrl.value = objectUrl
+      else nextObjectUrl = objectUrl
     }
+    if (version !== workspaceVersion || selectedPath.value !== filePath) return
+    const previousObjectUrl = filePreviewObjectUrl.value
+    filePreview.value = nextFile
+    if (previousObjectUrl) URL.revokeObjectURL(previousObjectUrl)
+    filePreviewObjectUrl.value = nextObjectUrl
     await renderFilePreview()
   } catch (cause) {
     if (version === workspaceVersion) error.value = cause.message
@@ -180,6 +184,7 @@ async function loadGitStatus(options = {}) {
     gitStatus.value = result.git
     if (selectedDiffPath.value && !result.git.files.some((file) => file.path === selectedDiffPath.value)) {
       selectedDiffPath.value = ''
+      displayedDiffPath.value = ''
       diff.value = null
     }
   } catch (cause) {
@@ -191,13 +196,15 @@ async function loadGitStatus(options = {}) {
 
 async function selectDiff(filePath) {
   selectedDiffPath.value = filePath
-  diff.value = null
   diffLoading.value = true
   error.value = ''
   const version = workspaceVersion
   try {
     const result = await v2Api.getWorkspaceGitDiff(props.workspaceId, filePath)
-    if (version === workspaceVersion && selectedDiffPath.value === filePath) diff.value = result.diff
+    if (version === workspaceVersion && selectedDiffPath.value === filePath) {
+      diff.value = result.diff
+      displayedDiffPath.value = filePath
+    }
   } catch (cause) {
     if (version === workspaceVersion) error.value = cause.message
   } finally {
@@ -241,6 +248,7 @@ watch(() => props.workspaceId, async () => {
   filePreview.value = null
   gitStatus.value = null
   selectedDiffPath.value = ''
+  displayedDiffPath.value = ''
   diff.value = null
   error.value = ''
   await Promise.all([loadDirectory(''), loadGitStatus({ quiet: true })])
@@ -279,31 +287,34 @@ defineExpose({ openPath, refreshGit })
 
     <div v-if="mode === 'files'" class="drawer-body grid min-h-0 flex-1">
       <div class="file-tree min-h-0 overflow-auto border-r py-1">
-        <div v-if="directoryLoading.has('') && !directoryCache['']" class="theme-muted-text flex h-20 items-center justify-center"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
-        <button
-          v-for="entry in visibleFiles"
-          v-else
-          :key="entry.path"
-          class="tree-row flex h-7 w-full min-w-0 items-center gap-1.5 pr-2 text-left text-xs"
-          :class="selectedPath === entry.path ? 'is-selected' : ''"
-          :style="{ paddingLeft: `${8 + entry.depth * 14}px` }"
-          :title="entry.path"
-          @click="selectTreeEntry(entry)"
-        >
-          <ChevronRight v-if="entry.type === 'directory'" class="h-3 w-3 shrink-0 transition-transform" :class="expandedPaths.has(entry.path) ? 'rotate-90' : ''" />
-          <span v-else class="w-3 shrink-0" />
-          <FolderOpen v-if="entry.type === 'directory' && expandedPaths.has(entry.path)" class="folder-icon h-3.5 w-3.5 shrink-0" />
-          <Folder v-else-if="entry.type === 'directory'" class="folder-icon h-3.5 w-3.5 shrink-0" />
-          <Link2 v-else-if="entry.type === 'symlink'" class="theme-muted-text h-3.5 w-3.5 shrink-0" />
-          <File v-else class="theme-muted-text h-3.5 w-3.5 shrink-0" />
-          <span class="truncate">{{ entry.name }}</span>
-          <LoaderCircle v-if="directoryLoading.has(entry.path)" class="theme-muted-text ml-auto h-3 w-3 shrink-0 animate-spin" />
-        </button>
+        <div v-if="directoryLoading.has('') && !directoryCache['']" class="inspector-skeleton p-2" role="status" aria-label="正在加载文件树">
+          <div v-for="index in 8" :key="index" class="inspector-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
+        </div>
+        <template v-else>
+          <button
+            v-for="entry in visibleFiles"
+            :key="entry.path"
+            class="tree-row flex h-7 w-full min-w-0 items-center gap-1.5 pr-2 text-left text-xs"
+            :class="selectedPath === entry.path ? 'is-selected' : ''"
+            :style="{ paddingLeft: `${8 + entry.depth * 14}px` }"
+            :title="entry.path"
+            @click="selectTreeEntry(entry)"
+          >
+            <ChevronRight v-if="entry.type === 'directory'" class="h-3 w-3 shrink-0 transition-transform" :class="expandedPaths.has(entry.path) ? 'rotate-90' : ''" />
+            <span v-else class="w-3 shrink-0" />
+            <FolderOpen v-if="entry.type === 'directory' && expandedPaths.has(entry.path)" class="folder-icon h-3.5 w-3.5 shrink-0" />
+            <Folder v-else-if="entry.type === 'directory'" class="folder-icon h-3.5 w-3.5 shrink-0" />
+            <Link2 v-else-if="entry.type === 'symlink'" class="theme-muted-text h-3.5 w-3.5 shrink-0" />
+            <File v-else class="theme-muted-text h-3.5 w-3.5 shrink-0" />
+            <span class="truncate">{{ entry.name }}</span>
+            <LoaderCircle v-if="directoryLoading.has(entry.path)" class="theme-muted-text ml-auto h-3 w-3 shrink-0 animate-spin" />
+          </button>
+        </template>
         <div v-if="directoryCache[''] && !visibleFiles.length" class="theme-muted-text px-3 py-8 text-center text-xs">工作区为空</div>
       </div>
 
-      <div class="preview-pane min-h-0 flex-1 overflow-auto">
-        <div v-if="fileLoading" class="theme-muted-text flex h-full items-center justify-center"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
+      <div class="preview-pane relative min-h-0 flex-1 overflow-auto">
+        <div v-if="fileLoading && !filePreview" class="theme-muted-text flex h-full items-center justify-center"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
         <div v-else-if="!filePreview" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><Files class="mb-2 h-6 w-6" />选择文件进行预览</div>
         <template v-else>
           <div class="preview-heading sticky top-0 z-[1] flex min-w-0 items-center justify-between gap-2 border-b px-3 py-2">
@@ -316,12 +327,15 @@ defineExpose({ openPath, refreshGit })
           <div v-else-if="filePreview.kind === 'image'" class="flex min-h-full items-center justify-center p-4"><img v-if="filePreviewObjectUrl" class="max-h-full max-w-full object-contain" :src="filePreviewObjectUrl" :alt="filePreview.name" /></div>
           <div v-else class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><component :is="filePreview.kind === 'too_large' ? FileWarning : ImageIcon" class="mb-2 h-6 w-6" />{{ filePreview.kind === 'too_large' ? '文件过大，暂不支持预览' : '二进制文件暂不支持预览' }}</div>
         </template>
+        <div v-if="fileLoading && filePreview" class="inspector-loading-overlay" role="status" aria-label="正在加载文件预览"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
       </div>
     </div>
 
     <div v-else class="drawer-body grid min-h-0 flex-1">
       <div class="changes-list min-h-0 overflow-auto border-r py-1">
-        <div v-if="gitLoading && !gitStatus" class="theme-muted-text flex h-20 items-center justify-center"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
+        <div v-if="gitLoading && !gitStatus" class="inspector-skeleton p-2" role="status" aria-label="正在加载 Git 变更">
+          <div v-for="index in 8" :key="index" class="inspector-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
+        </div>
         <div v-else-if="gitStatus && !gitStatus.available" class="theme-muted-text px-4 py-8 text-center text-xs">当前工作区不在 Git 仓库中</div>
         <div v-else-if="gitStatus && !gitStatus.files.length" class="theme-muted-text px-4 py-8 text-center text-xs">没有未提交的变更</div>
         <template v-else>
@@ -334,11 +348,10 @@ defineExpose({ openPath, refreshGit })
         </template>
       </div>
 
-      <div class="diff-pane min-h-0 flex-1 overflow-auto">
-        <div v-if="diffLoading" class="theme-muted-text flex h-full items-center justify-center"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
-        <div v-else-if="!selectedDiffPath" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><GitBranch class="mb-2 h-6 w-6" />选择文件查看 Diff</div>
+      <div class="diff-pane relative min-h-0 flex-1 overflow-auto">
+        <div v-if="!selectedDiffPath" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><GitBranch class="mb-2 h-6 w-6" />选择文件查看 Diff</div>
         <template v-else>
-          <div class="preview-heading sticky top-0 z-[1] border-b px-3 py-2 font-mono text-[11px]">{{ selectedDiffPath }}</div>
+          <div class="preview-heading sticky top-0 z-[1] border-b px-3 py-2 font-mono text-[11px]">{{ displayedDiffPath || selectedDiffPath }}</div>
           <div v-if="diff?.truncated" class="inspector-warning border-b px-3 py-2 text-[10px]">Diff 过大，仅显示前 2 MB</div>
           <div v-if="diff && !diffSections.length" class="theme-muted-text px-4 py-8 text-center text-xs">没有可显示的文本 Diff</div>
           <section v-for="section in diffSections" :key="section.key">
@@ -346,6 +359,7 @@ defineExpose({ openPath, refreshGit })
             <pre class="diff-code m-0 min-w-max"><code><span v-for="(line, index) in section.content.split('\n')" :key="index" class="diff-line block px-3" :class="diffLineClass(line)">{{ line || ' ' }}</span></code></pre>
           </section>
         </template>
+        <div v-if="diffLoading" class="inspector-loading-overlay" role="status" aria-label="正在加载 Diff"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
       </div>
     </div>
   </aside>
@@ -354,6 +368,11 @@ defineExpose({ openPath, refreshGit })
 <style scoped>
 .workspace-inspector { background: var(--theme-appPanel); border-color: var(--theme-borderDefault); box-shadow: var(--theme-shadowPanel); }
 .workspace-inspector header, .file-tree, .changes-list, .preview-heading, .diff-section-title { border-color: var(--theme-borderDefault); }
+.inspector-skeleton { display: grid; gap: 0.5rem; }
+.inspector-skeleton-line { height: 1.75rem; border-radius: 2px; background: var(--theme-appPanelInset); opacity: 0.7; animation: inspector-skeleton-pulse 1.2s ease-in-out infinite; }
+.inspector-skeleton-line.is-short { width: 68%; }
+.inspector-loading-overlay { position: absolute; inset: 0; z-index: 5; display: flex; align-items: flex-start; justify-content: center; padding-top: 4rem; background: color-mix(in srgb, var(--theme-appPanel) 82%, transparent); color: var(--theme-textMuted); }
+@keyframes inspector-skeleton-pulse { 0%, 100% { opacity: 0.42; } 50% { opacity: 0.82; } }
 .drawer-action.is-active { background: var(--theme-accentSoft); color: var(--theme-accentText); }
 .drawer-body { grid-template-columns: minmax(240px, 30%) minmax(0, 1fr); }
 .tab-count { min-width: 1rem; border-radius: 999px; background: var(--theme-appPanelStrong); padding: 0 0.3rem; text-align: center; font-size: 9px; }
@@ -384,6 +403,7 @@ defineExpose({ openPath, refreshGit })
 .change-status[data-status='modified'] { color: var(--theme-warningText); }
 @media (prefers-reduced-motion: reduce) {
   .drawer-action, .tree-row, .change-row { transition: none; }
+  .inspector-skeleton-line { animation: none; opacity: 0.62; }
 }
 @media (max-width: 720px) {
   .drawer-body { grid-template-columns: minmax(180px, 38%) minmax(0, 1fr); }

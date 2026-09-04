@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -50,6 +50,17 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close'])
+const panelRef = ref(null)
+let previouslyFocusedElement = null
+
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'textarea:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
 
 const resolvedBackdropClass = computed(() => {
   if (props.backdropClass) {
@@ -87,12 +98,35 @@ function handleBackdropClick() {
 }
 
 function handleKeydown(event) {
-  if (!props.open || !props.closeOnEscape || props.closeDisabled) {
+  if (!props.open) {
+    return
+  }
+
+  if (event.target && !panelRef.value?.contains(event.target)) {
     return
   }
 
   if (event.key === 'Escape') {
+    if (!props.closeOnEscape || props.closeDisabled) return
     emit('close')
+    return
+  }
+
+  if (event.key !== 'Tab') return
+  const focusable = [...(panelRef.value?.querySelectorAll(FOCUSABLE_SELECTOR) || [])]
+  if (!focusable.length) {
+    event.preventDefault()
+    panelRef.value?.focus()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
   }
 }
 
@@ -103,12 +137,19 @@ watch(
       document.body.classList.toggle('overflow-hidden', open)
     }
 
-    if (open && props.closeOnEscape) {
+    if (open) {
+      previouslyFocusedElement = document.activeElement
       window.addEventListener('keydown', handleKeydown)
+      nextTick(() => {
+        const target = panelRef.value?.querySelector(FOCUSABLE_SELECTOR) || panelRef.value
+        target?.focus?.()
+      })
       return
     }
 
     window.removeEventListener('keydown', handleKeydown)
+    if (previouslyFocusedElement?.isConnected) previouslyFocusedElement.focus()
+    previouslyFocusedElement = null
   },
   { immediate: true }
 )
@@ -131,7 +172,7 @@ onBeforeUnmount(() => {
         :class="resolvedBackdropClass"
         @click.self="handleBackdropClick"
       >
-        <section class="panel dialog-shell-panel flex min-h-0 w-full flex-col overflow-hidden" :class="panelClass">
+        <section ref="panelRef" class="panel dialog-shell-panel flex min-h-0 w-full flex-col overflow-hidden" :class="panelClass" role="dialog" aria-modal="true" tabindex="-1">
           <div
             v-if="$slots.title || $slots.header || $slots['header-actions'] || showClose"
             class="theme-divider flex items-center justify-between gap-4 border-b"
@@ -149,6 +190,8 @@ onBeforeUnmount(() => {
                 v-if="showClose"
                 type="button"
                 class="theme-icon-button h-8 w-8 shrink-0"
+                title="关闭"
+                aria-label="关闭"
                 :disabled="closeDisabled"
                 @click="requestClose"
               >

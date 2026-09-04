@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Check, Copy, Info, LoaderCircle, Palette, RadioTower, RefreshCw, RotateCcw, Settings2, X } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import DialogShell from './DialogShell.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import { v2Api } from '../lib/v2Api.js'
 
@@ -22,6 +23,7 @@ const relayData = ref(null)
 const relayForm = ref({ enabled: true, relayUrl: '', appUrl: '' })
 const pairingQr = ref('')
 const copied = ref(false)
+const confirmReset = ref(false)
 
 const sections = [
   { id: 'appearance', label: '外观', icon: Palette },
@@ -89,7 +91,7 @@ async function reconnectRelay() {
 }
 
 async function resetIdentity() {
-  if (!window.confirm('重置后，旧的远程访问链接会立即失效。确定继续？')) return
+  confirmReset.value = false
   relayLoading.value = true
   relayError.value = ''
   try {
@@ -204,7 +206,7 @@ watch(
               </div>
               <div class="mt-4 flex flex-wrap gap-2">
                 <button type="button" class="tool-button h-8 gap-1.5 px-3 text-xs" :disabled="relayLoading" @click="reconnectRelay"><RefreshCw class="h-3.5 w-3.5" :class="relayLoading ? 'animate-spin' : ''" />重新连接</button>
-                <button type="button" class="tool-button h-8 gap-1.5 px-3 text-xs" :disabled="relayLoading" @click="resetIdentity"><RotateCcw class="h-3.5 w-3.5" />重置远程身份</button>
+                <button type="button" class="tool-button h-8 gap-1.5 px-3 text-xs" :disabled="relayLoading" @click="confirmReset = true"><RotateCcw class="h-3.5 w-3.5" />重置远程身份</button>
               </div>
             </div>
             <img v-if="pairingQr" :src="pairingQr" alt="PromptX 远程访问二维码" class="relay-qr h-40 w-40 rounded-sm p-2" />
@@ -226,6 +228,16 @@ watch(
       </section>
     </div>
   </DialogShell>
+
+  <ConfirmDialog
+    :open="confirmReset"
+    title="重置远程访问身份？"
+    description="重置后，旧的远程访问链接会立即失效。"
+    confirm-text="重置"
+    :danger="true"
+    @cancel="confirmReset = false"
+    @confirm="resetIdentity"
+  />
 </template>
 
 <style scoped>

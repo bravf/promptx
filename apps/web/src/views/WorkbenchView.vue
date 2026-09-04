@@ -9,6 +9,8 @@ import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupTimelineTurns, isTimelineTurnRunning } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
 import AgentComposer from '../components/AgentComposer.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import DialogShell from '../components/DialogShell.vue'
 import SessionTitleMarquee from '../components/SessionTitleMarquee.vue'
 import TimelineTurn from '../components/TimelineTurn.vue'
 import V2SettingsDialog from '../components/V2SettingsDialog.vue'
@@ -23,7 +25,11 @@ const rows = ref([])
 const turns = ref([])
 const activeWorkspaceId = ref('')
 const activeAgentId = ref('')
+const displayedAgentId = ref('')
 const loading = ref(true)
+const timelineLoading = ref(false)
+const timelineSyncing = ref(false)
+const timelineSyncError = ref('')
 const sending = ref(false)
 const agentControl = ref(null)
 const settingsLoading = ref(false)
@@ -43,6 +49,7 @@ const directorySuggestionsOpen = ref(false)
 const selectedDirectoryIndex = ref(-1)
 const agentProvider = ref('codex')
 const creating = ref(false)
+const confirmation = ref({ open: false, title: '', description: '', confirmText: '', danger: false, resolve: null })
 const timelineElement = ref(null)
 const workspaceInspector = ref(null)
 const drawerMode = ref(null)
@@ -55,6 +62,8 @@ const attentionClearPending = new Set()
 const turnReconcilePending = new Set()
 let timelineRequestVersion = 0
 let positioningTimeline = false
+const timelineCache = new Map()
+const MAX_TIMELINE_CACHE_SIZE = 10
 let directorySearchTimer = null
 let directorySearchController = null
 let markdownScrollFrame = null
@@ -71,6 +80,7 @@ const isRunning = computed(() => activeAgent.value?.lifecycle === 'running')
 const entries = computed(() => groupTimelineTurns(projectTimelineRows(rows.value)))
 const turnTimings = computed(() => createTurnTimingMap(rows.value, turns.value))
 const latestTurnId = computed(() => rows.value.findLast((row) => row.turnId)?.turnId || '')
+const timelineHasContent = computed(() => displayedAgentId.value === activeAgentId.value && Boolean(timelineEpoch.value || rows.value.length || turns.value.length))
 
 function agentsForWorkspace(workspaceId) {
   return agentsByWorkspace.value[workspaceId] || []
@@ -125,10 +135,45 @@ function clearViewedAgentAttention(agent) {
     .finally(() => attentionClearPending.delete(agent.id))
 }
 
+function cacheTimeline(agentId = displayedAgentId.value || activeAgentId.value) {
+  if (!agentId || displayedAgentId.value !== agentId || !timelineEpoch.value) return
+  const snapshot = {
+    agentId,
+    rows: [...rows.value],
+    turns: [...turns.value],
+    epoch: timelineEpoch.value,
+    maxSeq: rows.value.at(-1)?.seq || 0,
+    hasOlderHistory: hasOlderHistory.value,
+    cachedAt: Date.now(),
+  }
+  timelineCache.delete(agentId)
+  timelineCache.set(agentId, snapshot)
+  while (timelineCache.size > MAX_TIMELINE_CACHE_SIZE) timelineCache.delete(timelineCache.keys().next().value)
+}
+
+function restoreTimelineCache(agentId) {
+  const snapshot = timelineCache.get(agentId)
+  if (!snapshot) return false
+  timelineCache.delete(agentId)
+  timelineCache.set(agentId, snapshot)
+  rows.value = [...snapshot.rows]
+  turns.value = [...snapshot.turns]
+  timelineEpoch.value = snapshot.epoch
+  hasOlderHistory.value = snapshot.hasOlderHistory
+  displayedAgentId.value = agentId
+  return true
+}
+
+function clearTimelineCache(agentId) {
+  if (agentId) timelineCache.delete(agentId)
+  else timelineCache.clear()
+}
+
 function resetTimelineSelection() {
   timelineRequestVersion += 1
   positioningTimeline = true
   activeAgentId.value = ''
+  displayedAgentId.value = ''
   agentControl.value = null
   settingsLoading.value = false
   rows.value = []
@@ -136,8 +181,11 @@ function resetTimelineSelection() {
   timelineEpoch.value = ''
   hasOlderHistory.value = false
   loadingOlderHistory.value = false
+  timelineLoading.value = false
   followingTimeline.value = true
   hasNewTimelineItems.value = false
+  timelineSyncing.value = false
+  timelineSyncError.value = ''
   sending.value = false
   closeEvents()
 }
@@ -147,6 +195,7 @@ function upsertTurn(turn) {
   const index = turns.value.findIndex((item) => item.id === turn.id)
   if (index >= 0) turns.value[index] = turn
   else turns.value.unshift(turn)
+  cacheTimeline()
 }
 
 function processIsRunning(entry) {
@@ -170,6 +219,7 @@ async function reconcileTerminalAgentTurns(agent) {
     const result = await v2Api.listTurns(agent.id, 1000)
     if (requestVersion === timelineRequestVersion && activeAgentId.value === agent.id) {
       turns.value = result.turns
+      cacheTimeline(agent.id)
     }
   } catch (cause) {
     if (requestVersion === timelineRequestVersion && activeAgentId.value === agent.id) error.value = cause.message
@@ -222,16 +272,26 @@ async function selectAgent(id, { navigate = false } = {}) {
   const requestVersion = ++timelineRequestVersion
   positioningTimeline = true
   activeAgentId.value = id
+  const hasCachedTimeline = restoreTimelineCache(id)
+  const cachedTimeline = timelineCache.get(id)
+  if (!hasCachedTimeline) {
+    displayedAgentId.value = ''
+    rows.value = []
+    turns.value = []
+    timelineEpoch.value = ''
+    hasOlderHistory.value = false
+  }
+  timelineLoading.value = !hasCachedTimeline
+  timelineSyncing.value = true
+  timelineSyncError.value = ''
+  error.value = ''
   agentControl.value = null
   settingsLoading.value = false
-  closeEvents()
-  rows.value = []
-  turns.value = []
-  timelineEpoch.value = ''
-  hasOlderHistory.value = false
   loadingOlderHistory.value = false
   followingTimeline.value = true
   hasNewTimelineItems.value = false
+  closeEvents()
+  if (cachedTimeline) openEvents(id, cachedTimeline.epoch, cachedTimeline.maxSeq)
   try {
     const [result, turnResult] = await Promise.all([v2Api.getTimeline(id), v2Api.listTurns(id, 1000)])
     if (requestVersion !== timelineRequestVersion || activeAgentId.value !== id) return
@@ -239,16 +299,32 @@ async function selectAgent(id, { navigate = false } = {}) {
     turns.value = turnResult.turns
     timelineEpoch.value = result.timeline.epoch
     hasOlderHistory.value = result.timeline.hasOlder
+    displayedAgentId.value = id
+    cacheTimeline(id)
     await scrollToBottom({ force: true })
     if (requestVersion !== timelineRequestVersion || activeAgentId.value !== id) return
     positioningTimeline = false
+    closeEvents()
     openEvents(id, result.timeline.epoch, result.timeline.window.maxSeq)
     loadAgentControl(id, requestVersion)
     fillTimelineViewport()
   } catch (cause) {
-    if (requestVersion === timelineRequestVersion) error.value = cause.message
+    if (requestVersion === timelineRequestVersion) {
+      timelineSyncError.value = cause.message
+      if (!hasCachedTimeline) {
+        displayedAgentId.value = ''
+        rows.value = []
+        turns.value = []
+        timelineEpoch.value = ''
+        hasOlderHistory.value = false
+      }
+    }
   } finally {
-    if (requestVersion === timelineRequestVersion) positioningTimeline = false
+    if (requestVersion === timelineRequestVersion) {
+      positioningTimeline = false
+      timelineLoading.value = false
+      timelineSyncing.value = false
+    }
   }
 }
 
@@ -289,6 +365,7 @@ async function loadOlderHistory() {
     positioningTimeline = true
     rows.value = [...olderRows, ...rows.value]
     hasOlderHistory.value = result.timeline.hasOlder
+    cacheTimeline(agentId)
     await nextTick()
     if (element) {
       element.scrollTop = previousTop + element.scrollHeight - previousHeight
@@ -326,6 +403,7 @@ function openEvents(agentId, epoch, seq) {
     if (rows.value.some((item) => item.seq === row.seq)) return
     const shouldFollow = isTimelineAtBottom(timelineElement.value)
     rows.value.push(row)
+    cacheTimeline(agentId)
     if (row.item?.type === 'tool_call' && ['completed', 'failed', 'canceled'].includes(row.item.status)) scheduleInspectorRefresh()
     followingTimeline.value = shouldFollow
     if (shouldFollow) scrollToBottom()
@@ -351,6 +429,8 @@ function openEvents(agentId, epoch, seq) {
     rows.value = timeline.rows
     timelineEpoch.value = timeline.epoch
     hasOlderHistory.value = timeline.hasOlder
+    displayedAgentId.value = agentId
+    cacheTimeline(agentId)
     if (followingTimeline.value) scrollToBottom()
     else hasNewTimelineItems.value = true
   })
@@ -555,12 +635,36 @@ async function createConversation() {
   }
 }
 
+function requestConfirmation(options = {}) {
+  return new Promise((resolve) => {
+    confirmation.value = { open: true, resolve, ...options }
+  })
+}
+
+function cancelConfirmation() {
+  const resolve = confirmation.value.resolve
+  confirmation.value = { open: false, title: '', description: '', confirmText: '', danger: false, resolve: null }
+  resolve?.(false)
+}
+
+function acceptConfirmation() {
+  const resolve = confirmation.value.resolve
+  confirmation.value = { open: false, title: '', description: '', confirmText: '', danger: false, resolve: null }
+  resolve?.(true)
+}
+
 async function removeAgent(agent) {
-  if (!window.confirm(`确定删除 Agent“${agent.title}”？它的 Timeline 数据也会一并删除。`)) return
+  if (!await requestConfirmation({
+    title: `删除 Agent“${agent.title}”？`,
+    description: '它的 Timeline 数据也会一并删除。',
+    confirmText: '删除',
+    danger: true,
+  })) return
   const workspaceAgents = agentsForWorkspace(agent.workspaceId)
   const removedIndex = workspaceAgents.findIndex((item) => item.id === agent.id)
   try {
     await v2Api.deleteAgent(agent.id)
+    clearTimelineCache(agent.id)
     const remainingAgents = workspaceAgents.filter((item) => item.id !== agent.id)
     setWorkspaceAgents(agent.workspaceId, remainingAgents)
     if (activeAgentId.value !== agent.id) return
@@ -574,8 +678,14 @@ async function removeAgent(agent) {
 }
 
 async function removeWorkspace(workspace) {
-  if (!window.confirm(`确定移除工作区“${workspace.title}”？Agent 和 Timeline 数据会一并删除。`)) return
+  if (!await requestConfirmation({
+    title: `移除工作区“${workspace.title}”？`,
+    description: 'Agent 和 Timeline 数据会一并删除。',
+    confirmText: '移除',
+    danger: true,
+  })) return
   await v2Api.deleteWorkspace(workspace.id)
+  agentsForWorkspace(workspace.id).forEach((agent) => clearTimelineCache(agent.id))
   workspaces.value = workspaces.value.filter((item) => item.id !== workspace.id)
   const nextAgentsByWorkspace = { ...agentsByWorkspace.value }
   delete nextAgentsByWorkspace[workspace.id]
@@ -670,6 +780,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="v2-shell panel relative grid h-full min-h-0 overflow-hidden">
+    <div v-if="loading" class="v2-loading-skeleton absolute inset-0 z-30 grid grid-cols-[240px_minmax(0,1fr)]" role="status" aria-label="正在加载工作区">
+      <div class="border-r p-3"><div class="skeleton-line h-7 w-24" /><div class="skeleton-line mt-5 h-9 w-full" /><div class="skeleton-line mt-3 h-8 w-4/5" /><div class="skeleton-line mt-2 h-8 w-3/5" /></div>
+      <div class="p-4"><div class="skeleton-line h-8 w-40" /><div class="mx-auto mt-16 max-w-3xl space-y-3"><div class="skeleton-line h-12 w-3/4" /><div class="skeleton-line h-20 w-5/6" /><div class="skeleton-line h-12 w-2/3" /></div></div>
+    </div>
     <aside
       class="workspace-sidebar flex min-h-0 flex-col border-r"
       :class="mobileView === 'sidebar' ? 'mobile-panel-active' : 'mobile-panel-hidden'"
@@ -738,6 +852,7 @@ onBeforeUnmount(() => {
           <span class="block truncate text-sm font-medium">{{ activeWorkspaceDirectoryName }}</span>
         </div>
         <div class="ml-auto flex shrink-0 items-center gap-2">
+          <div v-if="timelineSyncing" class="timeline-sync-status theme-muted-text flex h-8 w-8 items-center justify-center" title="正在同步 Timeline" aria-label="正在同步 Timeline"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
           <div v-if="activeAgent" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
           <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :title="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></button>
           <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :title="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></button>
@@ -746,13 +861,21 @@ onBeforeUnmount(() => {
 
       <div class="relative min-h-0 flex-1">
         <div ref="timelineElement" class="timeline h-full overflow-y-auto" @scroll.passive="handleTimelineScroll">
-          <div v-if="!activeAgent || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeAgent ? '开始一段新的协作' : '新建一条对话' }}</p><p v-if="activeAgent" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
+          <div v-if="timelineSyncError && !timelineHasContent" class="flex h-full items-center justify-center p-8 text-center"><div class="max-w-sm"><p class="error-row rounded-sm border px-3 py-2 text-left text-xs">Timeline 同步失败：{{ timelineSyncError }}</p><button class="tool-button mt-3 h-8 px-3 text-xs" @click="selectAgent(activeAgentId)">重试</button></div></div>
+          <div v-else-if="!activeAgent || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeAgent ? '开始一段新的协作' : '新建一条对话' }}</p><p v-if="activeAgent" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
               <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" :workspace-cwd="activeWorkspace?.cwd" @rendered="handleMarkdownRendered" @open-workspace-path="openWorkspacePath" />
               <article v-else-if="entry.item?.type === 'error'" class="error-row mb-5 ml-7 rounded-sm border px-3 py-2 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.message }}</article>
               <article v-else-if="entry.item?.type === 'system_notice'" class="theme-muted-text mb-5 ml-7 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.text }}</article>
             </template>
+          </div>
+          <div v-if="timelineSyncError && timelineHasContent" class="timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sm border px-3 py-2 text-xs shadow-sm"><span class="theme-muted-text">同步失败</span><button class="font-medium" @click="selectAgent(activeAgentId)">重试</button></div>
+        </div>
+        <div v-if="timelineLoading && !loading" class="timeline-loading-overlay absolute inset-0 z-10 flex items-start justify-center pt-16" role="status" aria-label="正在加载 Timeline">
+          <div class="timeline-loading-indicator panel flex items-center gap-2 rounded-sm border px-3 py-2 text-xs shadow-sm">
+            <LoaderCircle class="theme-muted-text h-3.5 w-3.5 animate-spin" />
+            <span class="theme-muted-text">正在加载 Timeline</span>
           </div>
         </div>
         <div v-if="loadingOlderHistory" class="panel pointer-events-none absolute left-1/2 top-3 z-10 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-sm border shadow-sm" role="status" aria-label="正在加载更早记录">
@@ -764,6 +887,7 @@ onBeforeUnmount(() => {
       <footer v-if="activeAgent" class="composer-wrap shrink-0 border-t p-3 sm:p-4">
         <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
         <AgentComposer
+          :key="activeAgentId"
           :workspace-id="activeWorkspaceId"
           :running="isRunning"
           :sending="sending"
@@ -791,12 +915,15 @@ onBeforeUnmount(() => {
 
     <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" />
 
-    <div v-if="dialog === 'conversation'" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4" @click.self="closeDialog">
-      <form class="panel w-full max-w-md p-4" @submit.prevent="createConversation">
-        <div class="flex items-center justify-between">
-          <h2 class="text-sm font-semibold">新对话</h2>
-          <button type="button" class="quiet-icon-button h-8 w-8" title="关闭" @click="closeDialog"><X class="h-4 w-4" /></button>
-        </div>
+    <DialogShell
+      :open="dialog === 'conversation'"
+      panel-class="max-w-md"
+      header-class="px-4 py-3"
+      body-class="flex flex-col"
+      @close="closeDialog"
+    >
+      <template #title><h2 class="text-sm font-semibold">新对话</h2></template>
+      <form class="px-4 pb-4" @submit.prevent="createConversation">
         <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
         <div class="relative mt-1">
           <Search class="theme-muted-text pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2" />
@@ -850,12 +977,27 @@ onBeforeUnmount(() => {
         </select>
         <div class="mt-4 flex justify-end"><button class="tool-button tool-button-primary h-9 gap-2 px-4 text-xs" :disabled="!workspacePath.trim() || !agentProvider || creating"><LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />创建对话</button></div>
       </form>
-    </div>
+    </DialogShell>
+
+    <ConfirmDialog
+      :open="confirmation.open"
+      :title="confirmation.title"
+      :description="confirmation.description"
+      :confirm-text="confirmation.confirmText"
+      :danger="confirmation.danger"
+      @cancel="cancelConfirmation"
+      @confirm="acceptConfirmation"
+    />
   </div>
 </template>
 
 <style scoped>
 .v2-shell { grid-template-columns: 240px minmax(0, 1fr); }
+.v2-loading-skeleton { background: var(--theme-appPanel); color: var(--theme-textMuted); }
+.v2-loading-skeleton > div { border-color: var(--theme-borderDefault); }
+.skeleton-line { border-radius: 2px; background: var(--theme-appPanelInset); opacity: 0.72; animation: skeleton-pulse 1.2s ease-in-out infinite; }
+@keyframes skeleton-pulse { 0%, 100% { opacity: 0.48; } 50% { opacity: 0.88; } }
+.timeline-loading-overlay { background: color-mix(in srgb, var(--theme-appPanel) 84%, transparent); }
 .v2-shell :deep(.workspace-inspector) { bottom: 0; left: 240px; position: absolute; right: 0; top: 3.5rem; z-index: 20; }
 .workspace-sidebar, header, footer, .composer-wrap { border-color: var(--theme-borderDefault); }
 .brand-mark { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
@@ -881,10 +1023,8 @@ onBeforeUnmount(() => {
 .status-dot { background: var(--theme-success); }
 .status-dot-running { background: var(--theme-warning); }
 .timeline { background: var(--theme-appPanel); }
-.process-row { border-color: var(--theme-processBorder); background: var(--theme-processBg); color: var(--theme-processText); }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .composer-wrap { background: var(--theme-appPanelMuted); }
-.modal-backdrop { background: var(--theme-modalBackdrop); }
 .directory-suggestions { background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
 .directory-suggestion:hover { background: var(--theme-appPanelHover); }
 .sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .settings-entry {
@@ -905,6 +1045,9 @@ onBeforeUnmount(() => {
   .v2-shell :deep(.workspace-inspector) { left: 200px; }
 }
 @media (max-width: 720px) {
+  .v2-loading-skeleton { display: block; }
+  .v2-loading-skeleton > div:first-child { display: none; }
+  .v2-loading-skeleton > div:last-child { height: 100%; }
   .v2-shell { display: block; border: 0; border-radius: 0; }
   .workspace-sidebar, .timeline-pane {
     position: absolute;

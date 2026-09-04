@@ -11,10 +11,19 @@ import router from './router.js'
 import './styles.css'
 import { initializeI18n } from './composables/useI18n.js'
 import { initializeTheme } from './composables/useTheme.js'
-import { initializeWorkbenchPreferences } from './lib/workbenchPreferences.js'
+
+function reportGlobalError(error) {
+  const message = String(error?.message || error || '页面发生未知错误。').trim()
+  window.__PROMPTX_GLOBAL_ERROR__ = message
+  window.dispatchEvent(new CustomEvent('promptx:global-error', { detail: { message } }))
+}
+
+window.addEventListener('error', (event) => reportGlobalError(event.error || event.message))
+window.addEventListener('unhandledrejection', (event) => reportGlobalError(event.reason))
 
 initializeTheme()
 initializeI18n()
-initializeWorkbenchPreferences()
 
-createApp(App).use(router).mount('#app')
+const app = createApp(App)
+app.config.errorHandler = (error) => reportGlobalError(error)
+app.use(router).mount('#app')

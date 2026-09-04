@@ -11,6 +11,10 @@ function isProcessEntry(entry) {
     || isProviderRetryEntry(entry)
 }
 
+function hasRenderableAssistantText(entry) {
+  return entry.item?.type !== 'assistant_message' || String(entry.item.text || '').trim().length > 0
+}
+
 function mergeAssistantOutputEntries(entries = []) {
   const result = []
   for (const entry of entries) {
@@ -87,10 +91,10 @@ export function groupTimelineTurns(entries = []) {
     const latestEntry = allEntries.reduce((latest, entry) => (
       !latest || entry.seqEnd > latest.seqEnd ? entry : latest
     ), null)
-    turn.processEntries = turn.processEntries.filter((entry) => (
-      !isProviderRetryEntry(entry) || entry === latestEntry
-    ))
-    turn.outputEntries = mergeAssistantOutputEntries(turn.outputEntries)
+    turn.processEntries = turn.processEntries
+      .filter(hasRenderableAssistantText)
+      .filter((entry) => !isProviderRetryEntry(entry) || entry === latestEntry)
+    turn.outputEntries = mergeAssistantOutputEntries(turn.outputEntries.filter(hasRenderableAssistantText))
   }
 
   return result

@@ -75,7 +75,6 @@ onBeforeUnmount(() => clearInterval(clockTimer))
       <button type="button" class="theme-muted-text flex w-full items-center gap-1.5 py-1 text-left text-xs disabled:cursor-default" :disabled="!hasProcessEntries" :aria-expanded="hasProcessEntries ? expanded : undefined" @click="expanded = !expanded">
         <span>{{ heading }}</span>
         <ChevronRight v-if="hasProcessEntries" class="h-3.5 w-3.5 shrink-0 transition-transform" :class="expanded ? 'rotate-90' : ''" />
-        <LoaderCircle v-if="running" class="h-3 w-3 animate-spin" />
       </button>
       <div v-if="expanded && hasProcessEntries" class="process-content pb-1 pl-5 pt-1">
         <div v-for="entry in visibleProcessEntries" :key="`${entry.seqStart}-${entry.item.callId || entry.item.type}`" class="process-entry py-1.5 text-xs">
@@ -123,6 +122,12 @@ onBeforeUnmount(() => clearInterval(clockTimer))
       <div v-else-if="entry.item.type === 'error'" class="error-row ml-7 rounded-sm border px-3 py-2 text-xs">{{ entry.item.message }}</div>
       <div v-else-if="entry.item.type === 'system_notice'" class="theme-muted-text ml-7 text-xs">{{ entry.item.text }}</div>
     </article>
+
+    <div v-if="running" class="timeline-generating-indicator mb-5 ml-7 flex items-center gap-1" role="status" aria-label="正在生成">
+      <span class="timeline-generating-dot" aria-hidden="true">.</span>
+      <span class="timeline-generating-dot" aria-hidden="true">.</span>
+      <span class="timeline-generating-dot" aria-hidden="true">.</span>
+    </div>
   </section>
 </template>
 
@@ -130,4 +135,12 @@ onBeforeUnmount(() => clearInterval(clockTimer))
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .workspace-path-link { color: var(--theme-accentText); }
 .workspace-path-link:hover { text-decoration: underline; }
+.timeline-generating-indicator { color: var(--theme-textMuted); font-size: 1.25rem; font-weight: 600; line-height: 0.75rem; }
+.timeline-generating-dot { animation: timeline-generating-pulse 1.15s ease-in-out infinite; opacity: 0.28; }
+.timeline-generating-dot:nth-child(2) { animation-delay: 160ms; }
+.timeline-generating-dot:nth-child(3) { animation-delay: 320ms; }
+@keyframes timeline-generating-pulse { 0%, 55%, 100% { opacity: 0.28; } 25% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .timeline-generating-dot { animation: none; opacity: 0.72; }
+}
 </style>

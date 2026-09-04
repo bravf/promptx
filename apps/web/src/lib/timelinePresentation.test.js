@@ -30,6 +30,16 @@ test('Assistant commentary 进入过程区，只有 final answer 进入输出区
   assert.deepEqual(result[0].outputEntries.map((item) => item.item.text), ['当前项目是 Vue 应用'])
 })
 
+test('空白 Assistant 消息不渲染为空的过程或输出条目', () => {
+  const result = groupTimelineTurns([
+    entry(1, 'turn-a', 'assistant_message', { phase: 'commentary', text: '   ' }),
+    entry(2, 'turn-a', 'reasoning', { text: '分析中' }),
+    entry(3, 'turn-a', 'assistant_message', { phase: 'final_answer', text: '' }),
+  ])
+  assert.deepEqual(result[0].processEntries.map((item) => item.item.type), ['reasoning'])
+  assert.deepEqual(result[0].outputEntries, [])
+})
+
 test('同一 Turn 中被过程事件隔开的最终回复合并为一个展示条目', () => {
   const result = groupTimelineTurns([
     entry(1, 'turn-a', 'assistant_message', { phase: 'final_answer', text: '我先读取项目。' }),

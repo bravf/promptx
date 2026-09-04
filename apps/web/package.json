@@ -19,18 +19,11 @@
     "@promptx/protocol": "workspace:*",
     "@promptx/relay": "workspace:*",
     "@promptx/shared": "workspace:*",
-    "@tiptap/core": "^3.22.0",
-    "@tiptap/extension-paragraph": "^3.22.0",
-    "@tiptap/pm": "^3.22.0",
-    "@tiptap/starter-kit": "^3.22.0",
-    "@tiptap/vue-3": "^3.22.0",
-    "html-to-image": "1.11.13",
     "lucide-vue-next": "^0.577.0",
     "markdown-it": "^14.1.1",
     "qrcode": "^1.5.4",
     "shiki": "^4.0.2",
     "vue": "^3.5.22",
-    "vue-draggable-plus": "^0.6.1",
     "vue-router": "^4.5.1"
   },
   "devDependencies": {
