@@ -49,12 +49,14 @@ test('目录按文件夹优先和自然名称排序，并隐藏 .git', (t) => {
 test('文件预览区分文本、图片、二进制和超大文件', (t) => {
   const root = fixture(t)
   fs.writeFileSync(path.join(root, 'hello.js'), 'const answer = 42\n')
+  fs.writeFileSync(path.join(root, 'utf8-boundary.md'), `${'a'.repeat(8191)}中文`)
   fs.writeFileSync(path.join(root, 'image.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
   fs.writeFileSync(path.join(root, 'binary.bin'), Buffer.from([0x00, 0x01, 0x02]))
   fs.writeFileSync(path.join(root, 'large.txt'), Buffer.alloc(2 * 1024 * 1024 + 1, 0x61))
 
   assert.equal(readWorkspaceFile(root, 'hello.js').kind, 'text')
   assert.equal(readWorkspaceFile(root, 'hello.js').content, 'const answer = 42\n')
+  assert.equal(readWorkspaceFile(root, 'utf8-boundary.md').kind, 'text')
   assert.equal(readWorkspaceFile(root, 'image.png').kind, 'image')
   assert.equal(readWorkspaceFile(root, 'binary.bin').kind, 'binary')
   assert.equal(readWorkspaceFile(root, 'large.txt').kind, 'too_large')

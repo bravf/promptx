@@ -142,7 +142,7 @@ function looksBinary(buffer) {
   const sample = buffer.subarray(0, Math.min(buffer.length, 8192))
   if (sample.includes(0)) return true
   try {
-    new TextDecoder('utf-8', { fatal: true }).decode(sample)
+    new TextDecoder('utf-8', { fatal: true }).decode(sample, { stream: sample.length < buffer.length })
     return false
   } catch {
     return true

@@ -413,7 +413,6 @@
 - 新增 `promptx relay tenant add/list/remove` 与 `promptx relay start/stop/restart/status`，补齐 Relay 的租户管理和后台运维命令。
 - 完善 Relay 转发稳定性与诊断信息，修复远程请求体转发问题，并增加更清晰的 host、tenant 与拒绝原因日志。
 - README 精简为入口说明，详细 Relay 部署与使用流程迁移到 `docs/relay-quickstart.md`。
-- 修复 Windows 开发环境下 `pnpm dev` / `pnpm dev:tailscale` 可能报 `spawn EINVAL` 的问题。
 
 ## 0.1.5
 

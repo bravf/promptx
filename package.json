@@ -38,8 +38,6 @@
   "packageManager": "pnpm@10.15.1",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:tailscale": "node scripts/dev-tailscale.mjs",
-    "dev:tailscale:auto": "node scripts/dev-tailscale.mjs --auto",
     "build": "pnpm -r build",
     "test": "pnpm --filter @promptx/shared test && pnpm --filter @promptx/relay test && pnpm --filter @promptx/protocol test && pnpm --filter @promptx/daemon test && pnpm --filter @promptx/web test",
     "start": "pnpm build && node scripts/service.mjs start",
