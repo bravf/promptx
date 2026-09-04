@@ -1172,16 +1172,16 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-          <div v-if="timelineSyncError && timelineHasContent" class="timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-2 text-xs shadow-sm" role="alert"><CircleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>同步失败</span><button class="font-medium" @click="selectAgent(activeAgentId)">重试</button></div>
+          <div v-if="timelineSyncError && timelineHasContent" class="status-float status-float-pill status-float-error timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 gap-2" role="alert"><CircleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>同步失败</span><button class="font-medium" @click="selectAgent(activeAgentId)">重试</button></div>
         </div>
         <div v-if="timelineLoading && !loading" class="timeline-loading-overlay absolute inset-0 z-10 flex items-start justify-center pt-16" role="status" aria-label="加载中">
-          <div class="timeline-loading-indicator panel flex items-center gap-2 rounded-sm border px-3 py-2 text-xs shadow-sm">
-            <LoaderCircle class="theme-muted-text h-3.5 w-3.5 animate-spin" />
-            <span class="theme-muted-text">加载中</span>
+          <div class="status-float status-float-pill timeline-loading-indicator gap-2">
+            <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
+            <span>加载中</span>
           </div>
         </div>
-        <div v-if="loadingOlderHistory" class="panel pointer-events-none absolute left-1/2 top-3 z-10 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-sm border shadow-sm" role="status" aria-label="正在加载更早记录">
-          <LoaderCircle class="theme-muted-text h-3.5 w-3.5 animate-spin" />
+        <div v-if="loadingOlderHistory" class="status-float status-float-icon pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2" role="status" aria-label="正在加载更早记录">
+          <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
         </div>
         <button
           v-if="!followingTimeline && timelineHasContent"

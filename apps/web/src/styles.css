@@ -123,6 +123,32 @@ body {
     box-shadow: var(--theme-shadowPanel);
   }
 
+  .status-float {
+    @apply inline-flex items-center border text-xs;
+    border-color: var(--theme-borderDefault);
+    background: var(--theme-appPanelStrong);
+    color: var(--theme-textMuted);
+    box-shadow: var(--theme-shadowPopover);
+  }
+
+  .status-float-pill {
+    @apply rounded-full px-3 py-2;
+  }
+
+  .status-float-icon {
+    @apply h-7 w-7 justify-center rounded-full;
+  }
+
+  .status-float-panel {
+    @apply rounded-lg px-3 py-2.5;
+  }
+
+  .status-float-error {
+    border-color: var(--theme-danger);
+    background: var(--theme-dangerSoft);
+    color: var(--theme-dangerText);
+  }
+
   .tool-button {
     @apply inline-flex items-center justify-center rounded-sm border font-medium transition focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-60;
     border-color: var(--theme-buttonBorder);
