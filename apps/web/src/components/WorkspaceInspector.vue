@@ -34,6 +34,7 @@ const selectedPath = ref('')
 const filePreview = ref(null)
 const filePreviewHtml = ref('')
 const filePreviewObjectUrl = ref('')
+const previewPane = ref(null)
 const fileLoading = ref(false)
 const requestedLine = ref(null)
 const gitStatus = ref(null)
@@ -131,11 +132,17 @@ async function renderFilePreview() {
   filePreviewHtml.value = rendered.html
   await nextTick()
   if (requestedLine.value) {
-    const inspector = document.querySelector('.workspace-inspector')
-    inspector?.querySelectorAll('.is-target-line').forEach((element) => element.classList.remove('is-target-line'))
-    const line = inspector?.querySelector(`tr[data-preview-line="${requestedLine.value}"]`)
+    const pane = previewPane.value
+    pane?.querySelectorAll('.is-target-line').forEach((element) => element.classList.remove('is-target-line'))
+    const line = pane?.querySelector(`tr[data-preview-line="${requestedLine.value}"]`)
     line?.classList.add('is-target-line')
-    line?.scrollIntoView({ block: 'center' })
+    if (pane && line) {
+      const paneRect = pane.getBoundingClientRect()
+      const lineRect = line.getBoundingClientRect()
+      const headingHeight = pane.querySelector('.preview-heading')?.getBoundingClientRect().height || 0
+      const visibleHeight = Math.max(0, pane.clientHeight - headingHeight)
+      pane.scrollTop = Math.max(0, pane.scrollTop + lineRect.top - paneRect.top - headingHeight - (visibleHeight - lineRect.height) / 2)
+    }
   }
 }
 
@@ -313,7 +320,7 @@ defineExpose({ openPath, refreshGit })
         <div v-if="directoryCache[''] && !visibleFiles.length" class="theme-muted-text px-3 py-8 text-center text-xs">工作区为空</div>
       </div>
 
-      <div class="preview-pane relative min-h-0 flex-1 overflow-auto">
+      <div ref="previewPane" class="preview-pane relative min-h-0 flex-1 overflow-auto">
         <div v-if="fileLoading && !filePreview" class="theme-muted-text flex h-full items-center justify-center"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
         <div v-else-if="!filePreview" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><Files class="mb-2 h-6 w-6" />选择文件进行预览</div>
         <template v-else>

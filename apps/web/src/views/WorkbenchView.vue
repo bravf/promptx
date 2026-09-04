@@ -77,6 +77,9 @@ const MAX_TIMELINE_CACHE_SIZE = 10
 let directorySearchTimer = null
 let directorySearchController = null
 let markdownScrollFrame = null
+let timelineBottomPinTimer = null
+let timelineBottomPinVersion = 0
+let lastTimelineScrollTop = 0
 let inspectorRefreshTimer = null
 let timelineWakeSyncAt = 0
 let importSearchTimer = null
@@ -193,6 +196,7 @@ function clearTimelineCache(agentId) {
 
 function resetTimelineSelection() {
   timelineRequestVersion += 1
+  releaseTimelineBottomPin()
   positioningTimeline = true
   activeAgentId.value = ''
   displayedAgentId.value = ''
@@ -301,6 +305,7 @@ async function selectAgent(id, { navigate = false } = {}) {
   activeWorkspaceId.value = agent.workspaceId
   setWorkspaceExpanded(agent.workspaceId)
   const requestVersion = ++timelineRequestVersion
+  releaseTimelineBottomPin()
   positioningTimeline = true
   activeAgentId.value = id
   draftContent.value = draftsByAgent.get(id)?.map((item) => ({ ...item })) || []
@@ -334,6 +339,7 @@ async function selectAgent(id, { navigate = false } = {}) {
     hasOlderHistory.value = result.timeline.hasOlder
     displayedAgentId.value = id
     cacheTimeline(id)
+    pinTimelineToBottom(requestVersion)
     await scrollToBottom({ force: true })
     if (requestVersion !== timelineRequestVersion || activeAgentId.value !== id) return
     positioningTimeline = false
@@ -420,9 +426,33 @@ function fillTimelineViewport() {
   if (element && element.scrollHeight <= element.clientHeight) loadOlderHistory()
 }
 
+function timelineIsPinnedToBottom() {
+  return timelineBottomPinVersion > 0 && timelineBottomPinVersion === timelineRequestVersion
+}
+
+function releaseTimelineBottomPin() {
+  if (timelineBottomPinTimer) clearTimeout(timelineBottomPinTimer)
+  timelineBottomPinTimer = null
+  timelineBottomPinVersion = 0
+}
+
+function pinTimelineToBottom(requestVersion = timelineRequestVersion) {
+  releaseTimelineBottomPin()
+  timelineBottomPinVersion = requestVersion
+  timelineBottomPinTimer = setTimeout(() => {
+    if (timelineBottomPinVersion === requestVersion) releaseTimelineBottomPin()
+  }, 3000)
+}
+
 function handleTimelineScroll(event) {
-  if (positioningTimeline) return
   const element = event.currentTarget
+  const previousScrollTop = lastTimelineScrollTop
+  lastTimelineScrollTop = element.scrollTop
+  if (positioningTimeline) return
+  if (timelineIsPinnedToBottom()) {
+    if (element.scrollTop + 1 >= previousScrollTop) return
+    releaseTimelineBottomPin()
+  }
   const atBottom = isTimelineAtBottom(element)
   followingTimeline.value = atBottom
   if (atBottom) hasNewTimelineItems.value = false
@@ -942,6 +972,7 @@ async function scrollToBottom({ force = false, behavior = 'auto' } = {}) {
   if (!force && !followingTimeline.value) return
   const element = timelineElement.value
   element?.scrollTo({ top: element.scrollHeight, behavior })
+  if (element) lastTimelineScrollTop = element.scrollTop
   followingTimeline.value = true
   hasNewTimelineItems.value = false
 }
@@ -952,10 +983,11 @@ function jumpToLatest() {
 }
 
 function handleMarkdownRendered() {
-  if (!followingTimeline.value || markdownScrollFrame) return
+  if ((!followingTimeline.value && !timelineIsPinnedToBottom()) || markdownScrollFrame) return
   markdownScrollFrame = requestAnimationFrame(() => {
     markdownScrollFrame = null
-    scrollToBottom()
+    const force = timelineIsPinnedToBottom()
+    if (followingTimeline.value || force) scrollToBottom({ force })
   })
 }
 
@@ -991,6 +1023,7 @@ onBeforeUnmount(() => {
   cancelDirectorySearch()
   cancelImportSearch()
   if (markdownScrollFrame) cancelAnimationFrame(markdownScrollFrame)
+  releaseTimelineBottomPin()
   if (inspectorRefreshTimer) clearTimeout(inspectorRefreshTimer)
 })
 </script>
