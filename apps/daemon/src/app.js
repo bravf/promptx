@@ -14,11 +14,19 @@ import { AgentManager } from './agent/agentManager.js'
 import { registerRoutes } from './api/routes.js'
 import { registerRelayRoutes, RelayService } from './relay/relayService.js'
 import { SessionImportService } from './agent/sessionImport.js'
+import { createCorsPolicy } from './security/corsPolicy.js'
 
 export async function createApp(options = {}) {
   const app = Fastify({ logger: options.logger ?? true })
+  const corsPolicy = createCorsPolicy(options.allowedOrigins)
+  app.addHook('onRequest', async (request, reply) => {
+    const origin = request.headers.origin
+    if (request.url.startsWith('/api/') && origin && !corsPolicy.allows(origin)) {
+      return reply.code(403).send({ error: 'origin_not_allowed', message: '该网页来源不能访问 PromptX Daemon。' })
+    }
+  })
   await app.register(cors, {
-    origin: true,
+    origin: (origin, callback) => callback(null, corsPolicy.allows(origin)),
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   })
   await app.register(multipart, {
@@ -38,7 +46,7 @@ export async function createApp(options = {}) {
   const sessionImport = new SessionImportService({ repository, providerRegistry, agentManager })
   app.decorate('sqliteRepository', repository)
   repository.failActiveTurnsOnStartup()
-  registerRoutes(app, { repository, timelineStore, eventHub, providerRegistry, agentManager, sessionImport, assetsDir })
+  registerRoutes(app, { repository, timelineStore, eventHub, providerRegistry, agentManager, sessionImport, assetsDir, corsPolicy })
   const relay = new RelayService({
     localBaseUrl: options.localBaseUrl || `http://127.0.0.1:${process.env.PORT || process.env.PROMPTX_DAEMON_PORT || 3001}`,
     logger: app.log,

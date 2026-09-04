@@ -9,7 +9,6 @@ import App from './App.vue'
 import './lib/relayOffer.js'
 import router from './router.js'
 import './styles.css'
-import { initializeI18n } from './composables/useI18n.js'
 import { initializeTheme } from './composables/useTheme.js'
 
 function reportGlobalError(error) {
@@ -22,7 +21,6 @@ window.addEventListener('error', (event) => reportGlobalError(event.error || eve
 window.addEventListener('unhandledrejection', (event) => reportGlobalError(event.reason))
 
 initializeTheme()
-initializeI18n()
 
 const app = createApp(App)
 app.config.errorHandler = (error) => reportGlobalError(error)

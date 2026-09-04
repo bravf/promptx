@@ -8,17 +8,13 @@
     "build": "vite build",
     "lint": "node -e \"console.log('web: nothing to lint')\"",
     "test": "node --test src/**/*.test.js",
-    "test:e2e": "node --test --test-concurrency=1 e2e/*.e2e.js",
-    "test:e2e:real-runner": "node e2e/real-runner-concurrency.mjs",
-    "test:e2e:real-runner-stop": "node e2e/real-runner-stop.mjs",
-    "test:e2e:real-runner-ui-hot-update": "node e2e/real-runner-ui-hot-update.mjs"
+    "test:e2e": "node --test --test-concurrency=1 e2e/v2-*.e2e.js"
   },
   "dependencies": {
     "@fontsource/geist-mono": "^5.2.7",
     "@fontsource/geist-sans": "^5.2.5",
     "@promptx/protocol": "workspace:*",
     "@promptx/relay": "workspace:*",
-    "@promptx/shared": "workspace:*",
     "lucide-vue-next": "^0.577.0",
     "markdown-it": "^14.1.1",
     "qrcode": "^1.5.4",

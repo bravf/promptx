@@ -8,9 +8,18 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 import WebSocket from 'ws'
 
-import { startRelayServer } from '../../../server/src/relayServer.js'
+import { startRelayServer } from '../../../../packages/relay/src/server.js'
 import { EncryptedRelayConnection } from '../../../web/src/lib/relayConnection.js'
-import { RelayService } from './relayService.js'
+import { cleanHeaders, RelayService } from './relayService.js'
+
+test('Relay 内部转发剥离浏览器 Origin 和凭证头', () => {
+  assert.deepEqual(cleanHeaders({
+    origin: 'https://px.mushayu.com',
+    authorization: 'Bearer secret',
+    cookie: 'session=secret',
+    'content-type': 'application/json',
+  }), { 'content-type': 'application/json' })
+})
 
 async function waitFor(check, timeoutMs = 3_000) {
   const startedAt = Date.now()

@@ -1,6 +1,6 @@
 import process from 'node:process'
 
-import { startRelayServer } from '../apps/server/src/relayServer.js'
+import { startRelayServer } from '../packages/relay/src/server.js'
 import { createFastifyLoggerOptions } from '../packages/shared/src/dailyLogStream.js'
 
 async function main() {

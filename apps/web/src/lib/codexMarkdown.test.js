@@ -21,9 +21,7 @@ test('renderCodexMarkdown renders fenced code blocks and lists', async () => {
   assert.match(html, /class="codex-code-block__copy" data-copy-code="1"/)
   assert.match(html, /<pre><code class="language-js">/)
   assert.match(html, /style="color:[^"]+"/)
-  assert.match(html, />console\.</)
-  assert.match(html, />log</)
-  assert.match(html, />1</)
+  assert.match(html.replace(/<[^>]+>/g, ''), /console\.log\(1\)/)
 })
 
 test('renderCodexMarkdown renders react language badge', async () => {

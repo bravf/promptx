@@ -119,3 +119,18 @@ test('Git 状态和 Diff 仅返回工作区子目录的变更', async (t) => {
   const untrackedDiff = await getWorkspaceGitDiff(workspace, 'untracked.txt')
   assert.match(untrackedDiff.unstaged, /\+untracked/)
 })
+
+test('超大 Diff 在子进程输出阶段截断并返回可展示内容', async (t) => {
+  const root = fixture(t)
+  git(root, 'init', '-q')
+  fs.writeFileSync(path.join(root, 'large.txt'), 'before\n')
+  git(root, 'add', 'large.txt')
+  git(root, 'commit', '-qm', 'initial')
+  fs.writeFileSync(path.join(root, 'large.txt'), `${'after\n'.repeat(400_000)}`)
+
+  const result = await getWorkspaceGitDiff(root, 'large.txt')
+  assert.equal(result.truncated, true)
+  assert.ok(Buffer.byteLength(result.unstaged) <= 2 * 1024 * 1024)
+  assert.ok(result.unstaged.split('\n').length <= 8001)
+  assert.match(result.unstaged, /diff --git/)
+})

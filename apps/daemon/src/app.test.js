@@ -92,6 +92,47 @@ test('CORS 预检允许 v2 的 PATCH 和 DELETE 请求', async () => {
   await app.close()
 })
 
+test('Daemon 拒绝未授权网页来源访问 API', async () => {
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
+  try {
+    const preflight = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/v2/workspaces',
+      headers: {
+        origin: 'https://evil.example',
+        'access-control-request-method': 'DELETE',
+      },
+    })
+    assert.equal(preflight.statusCode, 403)
+    assert.equal(preflight.headers['access-control-allow-origin'], undefined)
+
+    const request = await app.inject({
+      method: 'GET',
+      url: '/api/v2/workspaces',
+      headers: { origin: 'https://evil.example' },
+    })
+    assert.equal(request.statusCode, 403)
+    assert.equal(request.json().error, 'origin_not_allowed')
+  } finally {
+    await app.close()
+  }
+})
+
+test('Daemon 允许正式版同源网页访问 API', async () => {
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
+  try {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v2/providers',
+      headers: { origin: 'http://127.0.0.1:3001' },
+    })
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.headers['access-control-allow-origin'], 'http://127.0.0.1:3001')
+  } finally {
+    await app.close()
+  }
+})
+
 test('Workspace、Agent 和 Timeline API 形成完整基础链路', async () => {
   const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
 
@@ -392,6 +433,61 @@ test('Agent 控制接口持久化模型和思考强度，并在运行中拒绝�
   }
 })
 
+test('Agent 发送预检期间拒绝并发切换模型', async () => {
+  let markPrepareStarted
+  let releasePrepare
+  const prepareStarted = new Promise((resolve) => { markPrepareStarted = resolve })
+  const prepareGate = new Promise((resolve) => { releasePrepare = resolve })
+  const runtime = new EventEmitter()
+  runtime.prepareTurn = async () => {
+    markPrepareStarted()
+    await prepareGate
+  }
+  runtime.startTurn = async () => ({})
+  runtime.close = () => {}
+  const provider = {
+    id: 'codex',
+    label: 'Codex Test',
+    capabilities: { models: true },
+    createRuntime: () => runtime,
+  }
+  const registry = {
+    list: () => [{ id: provider.id, label: provider.label, capabilities: provider.capabilities }],
+    get: () => provider,
+  }
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
+  try {
+    const conversation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/conversations',
+      payload: { cwd: process.cwd(), providerId: 'codex' },
+    })
+    const { agent } = conversation.json()
+    const turnRequest = app.inject({
+      method: 'POST',
+      url: `/api/v2/agents/${agent.id}/turns`,
+      payload: {
+        clientMessageId: 'preparing-turn',
+        input: { content: [{ type: 'text', text: '正在预检' }] },
+      },
+    })
+    await prepareStarted
+
+    const updateResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/v2/agents/${agent.id}/settings`,
+      payload: { modelId: 'model-b' },
+    })
+    assert.equal(updateResponse.statusCode, 409)
+
+    releasePrepare()
+    assert.equal((await turnRequest).statusCode, 202)
+  } finally {
+    releasePrepare?.()
+    await app.close()
+  }
+})
+
 test('运行中的 Agent 拒绝新的 Turn，重复请求保持幂等', async () => {
   const { registry } = createControlTestRegistry()
   const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
@@ -417,6 +513,56 @@ test('运行中的 Agent 拒绝新的 Turn，重复请求保持幂等', async ()
       payload: { clientMessageId: 'running-second', input: { content: [{ type: 'text', text: '不应发送' }] } },
     })
     assert.equal(rejected.statusCode, 409)
+  } finally {
+    await app.close()
+  }
+})
+
+test('Runtime 发送前预检失败时不创建 Turn 或用户 Timeline', async () => {
+  const runtime = new EventEmitter()
+  runtime.prepareTurn = async () => {
+    const error = new Error('当前 Codex CLI 无法续跑该会话。')
+    error.code = 'codex_paginated_resume_unsupported'
+    error.statusCode = 409
+    throw error
+  }
+  runtime.startTurn = async () => {
+    assert.fail('预检失败后不应调用 startTurn')
+  }
+  runtime.close = () => {}
+  const provider = {
+    id: 'codex',
+    label: 'Codex Test',
+    capabilities: {},
+    createRuntime: () => runtime,
+  }
+  const registry = {
+    list: () => [{ id: provider.id, label: provider.label, capabilities: provider.capabilities }],
+    get: () => provider,
+  }
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
+  try {
+    const conversation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/conversations',
+      payload: { cwd: process.cwd(), providerId: 'codex' },
+    })
+    const { agent } = conversation.json()
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v2/agents/${agent.id}/turns`,
+      payload: {
+        clientMessageId: 'blocked-before-write',
+        input: { content: [{ type: 'text', text: '不应写入 Timeline' }] },
+      },
+    })
+
+    assert.equal(response.statusCode, 409)
+    assert.equal(response.json().error, 'codex_paginated_resume_unsupported')
+    assert.equal(app.sqliteRepository.listTurns(agent.id).length, 0)
+    assert.equal(app.sqliteRepository.listTimelineRows(agent.id).length, 0)
+    assert.equal(app.sqliteRepository.getAgent(agent.id).title, '新对话')
+    assert.equal(app.sqliteRepository.getAgent(agent.id).lifecycle, 'ready')
   } finally {
     await app.close()
   }

@@ -1,11 +1,10 @@
-import { translate } from '../composables/useI18n.js'
 import { transportFetch } from './transport.js'
 
 const importMetaEnv = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
 
 function resolveDefaultApiBase() {
   if (typeof window === 'undefined') {
-    return 'http://localhost:3000'
+    return 'http://localhost:3001'
   }
 
   const url = new URL(window.location.origin)
@@ -18,7 +17,7 @@ function resolveDefaultApiBase() {
   const currentPort = String(url.port || '')
   const viteDevPorts = new Set(['4173', '5173', '5174'])
   if (viteDevPorts.has(currentPort)) {
-    url.port = '3000'
+    url.port = '3001'
     return url.toString().replace(/\/$/, '')
   }
 
@@ -30,15 +29,7 @@ function getApiBaseInternal() {
 }
 
 export function resolveRequestErrorMessage(payload = {}, fallbackKey = 'errors.requestFailed') {
-  const messageKey = String(payload?.messageKey || '').trim()
-  if (messageKey) {
-    const translated = translate(messageKey)
-    if (translated && translated !== messageKey) {
-      return translated
-    }
-  }
-
-  return payload?.message || translate(fallbackKey)
+  return payload?.message || (fallbackKey === 'errors.requestFailed' ? '请求失败，请稍后重试。' : fallbackKey)
 }
 
 export async function request(path, options = {}) {
@@ -53,7 +44,10 @@ export async function request(path, options = {}) {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}))
-    throw new Error(resolveRequestErrorMessage(payload))
+    const error = new Error(resolveRequestErrorMessage(payload))
+    error.code = payload?.error || ''
+    error.statusCode = response.status
+    throw error
   }
 
   if (response.status === 204) {

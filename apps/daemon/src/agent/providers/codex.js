@@ -3,6 +3,7 @@ import { JsonRpcProcess } from '../jsonRpcProcess.js'
 import { filePromptText } from '../promptAttachments.js'
 import { createControlState, effortLabel, normalizeContextUsage } from '../controlState.js'
 import { readCodexHistorySnapshot } from '../history/providers/codexHistory.js'
+import { CODEX_BIN, createPaginatedResumeError } from './codexCli.js'
 
 export function buildCodexInput(content) {
   return content.map((block) => {
@@ -66,17 +67,48 @@ function isPaginatedThreadsError(error) {
   return /paginated_threads/i.test(error?.message || '')
 }
 
+function isActiveWriterError(error) {
+  return /already has an active writer/i.test(error?.message || '')
+}
+
+function isArchivedThreadError(error, threadId) {
+  const message = error?.message || ''
+  return message.includes(`session ${threadId} is archived`)
+}
+
+function isAlreadyUnarchivedError(error, threadId) {
+  return (error?.message || '').includes(`no archived rollout found for thread id ${threadId}`)
+}
+
+function createActiveWriterError() {
+  const error = new Error('该 Codex 会话正在 Codex App 或另一个客户端中打开，暂时不能从 PromptX 发送。请先关闭另一端的这个会话，再重新尝试。')
+  error.code = 'codex_thread_active_writer'
+  error.statusCode = 409
+  return error
+}
+
+function createUnarchiveError(error) {
+  const detail = error?.message ? `：${error.message}` : ''
+  const wrapped = new Error(`该 Codex 会话已归档，PromptX 无法自动恢复${detail}`)
+  wrapped.code = 'codex_thread_unarchive_failed'
+  wrapped.statusCode = 409
+  wrapped.cause = error
+  return wrapped
+}
+
 export class CodexRuntime extends EventEmitter {
-  constructor({ cwd, nativeHandle = {}, modelId = '', config = {} }) {
+  constructor({ cwd, nativeHandle = {}, modelId = '', config = {}, rpcFactory = null }) {
     super()
     this.cwd = cwd
     this.nativeHandle = nativeHandle
     this.modelId = modelId
     this.reasoningEffort = config.reasoningEffort || ''
     this.rpc = null
+    this.rpcFactory = rpcFactory || ((command, args, options) => new JsonRpcProcess(command, args, options))
     this.connected = false
     this.connectPromise = null
     this.threadId = nativeHandle.threadId || ''
+    this.threadLoaded = false
     this.turnId = ''
     this.historyOnly = false
     this.messagePhases = new Map()
@@ -96,7 +128,7 @@ export class CodexRuntime extends EventEmitter {
   }
 
   async connectInternal() {
-    const rpc = new JsonRpcProcess('codex', ['app-server', '--stdio'], { cwd: this.cwd })
+    const rpc = this.rpcFactory(CODEX_BIN, ['app-server', '--stdio'], { cwd: this.cwd })
     this.rpc = rpc
     rpc.on('notification', (message) => {
       if (this.rpc === rpc) this.onNotification(message)
@@ -134,36 +166,8 @@ export class CodexRuntime extends EventEmitter {
       })
       this.modelId = this.controlState.currentModelId
       this.reasoningEffort = this.controlState.currentReasoningEffort
-      const params = {
-        cwd: this.cwd,
-        approvalPolicy: 'never',
-        sandbox: 'danger-full-access',
-        ...(this.modelId ? { model: this.modelId } : {}),
-      }
-      let result
-      this.historyOnly = false
-      if (this.threadId) {
-        try {
-          result = await rpc.request('thread/resume', { threadId: this.threadId, ...params })
-        } catch (error) {
-          if (isMissingThreadError(error)) {
-            result = await rpc.request('thread/start', params)
-          } else if (isPaginatedThreadsError(error)) {
-            // Codex 0.152 can expose paginated Desktop threads but cannot
-            // resume them through app-server yet. Keep the connection alive
-            // so the history provider can read the rollout JSONL.
-            this.historyOnly = true
-            result = { thread: { id: this.threadId } }
-          } else {
-            throw error
-          }
-        }
-      } else {
-        result = await rpc.request('thread/start', params)
-      }
-      this.threadId = result.thread?.id || result.threadId || this.threadId
       this.connected = true
-      this.emit('handle', { threadId: this.threadId })
+      if (this.threadId) this.emit('handle', { threadId: this.threadId })
       this.emit('controlState', this.controlState)
     } catch (error) {
       if (this.rpc === rpc) this.rpc = null
@@ -179,14 +183,69 @@ export class CodexRuntime extends EventEmitter {
   }
 
   async readHistorySnapshot(options) {
+    if (!this.threadId) return { status: 'unsupported' }
     return readCodexHistorySnapshot(this, options)
   }
 
-  async startTurn(content, clientMessageId) {
+  async ensureThreadLoaded() {
     await this.connect()
-    if (this.historyOnly) {
-      throw new Error('该 Codex 会话使用 paginated 历史，当前 Codex 版本暂不支持继续运行，请升级 Codex。')
+    if (this.threadLoaded) return
+    const params = {
+      cwd: this.cwd,
+      approvalPolicy: 'never',
+      sandbox: 'danger-full-access',
+      ...(this.modelId ? { model: this.modelId } : {}),
     }
+    let result
+    this.historyOnly = false
+    if (this.threadId) {
+      try {
+        result = await this.rpc.request('thread/resume', { threadId: this.threadId, ...params })
+      } catch (error) {
+        if (isMissingThreadError(error)) {
+          result = await this.rpc.request('thread/start', params)
+        } else if (isPaginatedThreadsError(error)) {
+          this.historyOnly = true
+          throw await createPaginatedResumeError()
+        } else if (isActiveWriterError(error)) {
+          throw createActiveWriterError()
+        } else if (isArchivedThreadError(error, this.threadId)) {
+          result = await this.unarchiveAndResumeThread(params)
+        } else {
+          throw error
+        }
+      }
+    } else {
+      result = await this.rpc.request('thread/start', params)
+    }
+    this.threadId = result.thread?.id || result.threadId || this.threadId
+    this.threadLoaded = true
+    this.emit('handle', { threadId: this.threadId })
+  }
+
+  async unarchiveAndResumeThread(params) {
+    try {
+      await this.rpc.request('thread/unarchive', { threadId: this.threadId })
+    } catch (error) {
+      // Another Codex client may have restored it between resume and unarchive.
+      if (!isAlreadyUnarchivedError(error, this.threadId)) throw createUnarchiveError(error)
+    }
+
+    try {
+      return await this.rpc.request('thread/resume', { threadId: this.threadId, ...params })
+    } catch (error) {
+      if (isActiveWriterError(error)) throw createActiveWriterError()
+      if (isArchivedThreadError(error, this.threadId)) throw createUnarchiveError(error)
+      throw error
+    }
+  }
+
+  async prepareTurn() {
+    await this.ensureThreadLoaded()
+  }
+
+  async startTurn(content, clientMessageId) {
+    await this.prepareTurn()
     this.messagePhases.clear()
     this.messageTextSeen.clear()
     const input = buildCodexInput(content)
@@ -293,7 +352,13 @@ export class CodexRuntime extends EventEmitter {
     const rpc = this.rpc
     this.rpc = null
     this.connected = false
+    this.threadLoaded = false
+    this.turnId = ''
     rpc?.close()
+  }
+
+  releaseThreadWriter() {
+    this.close()
   }
 }
 

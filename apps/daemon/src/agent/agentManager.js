@@ -15,6 +15,7 @@ export class AgentManager {
     this.eventHub = eventHub
     this.runtimes = new Map()
     this.activeTurns = new Map()
+    this.preparingTurns = new Set()
     this.controlStates = new Map()
     this.coalescer = new TimelineCoalescer((payload) => this.commitTimeline(payload))
     this.timelineSync = new TimelineSyncCoordinator({
@@ -71,7 +72,7 @@ export class AgentManager {
     if (agent.archivedAt) throw new Error('已归档的 Agent 不能发送消息。')
     const existing = this.repository.getTurnByClientMessage(agentId, input.clientMessageId)
     if (existing) return existing
-    if (this.activeTurns.has(agentId)) {
+    if (this.activeTurns.has(agentId) || this.preparingTurns.has(agentId)) {
       const error = new Error('Agent 正在运行，请等待当前任务完成后再发送。')
       error.statusCode = 409
       throw error
@@ -89,37 +90,68 @@ export class AgentManager {
         absolutePath: asset.storagePath,
       }
     })
-    const timelineContent = providerContent.map(({ absolutePath, ...block }) => block)
-    const isFirstTurn = !this.repository.hasTurns(agentId)
-    const patch = {}
-    if (isFirstTurn && agent.title === DEFAULT_AGENT_TITLE) {
-      const title = deriveAgentTitle(input.input.content)
-      if (title) patch.title = title
-    }
-    if (agent.requiresAttention) {
-      patch.requiresAttention = false
-      patch.attentionReason = null
-      patch.attentionAt = null
-    }
-    if (Object.keys(patch).length) {
-      agent = this.repository.updateAgent(agent.id, patch)
-      this.eventHub.publish(agent.id, { type: 'agent', agent })
-    }
-    const turn = this.repository.createTurn(agentId, input.clientMessageId)
-    this.activeTurns.set(agentId, turn)
-    this.commitTimeline({
-      agentId,
-      turnId: turn.id,
-      item: { type: 'user_message', clientMessageId: input.clientMessageId, content: timelineContent },
-    })
-    this.markStarted(agentId)
+    let runtime = null
+    this.preparingTurns.add(agentId)
     try {
-      const result = await this.getRuntime(agent).startTurn(providerContent, input.clientMessageId)
-      if (result?.nativeTurnId) this.markStarted(agentId, result.nativeTurnId)
-      return this.repository.getTurn(turn.id)
-    } catch (error) {
-      this.finish(agentId, 'failed', { error })
-      throw error
+      runtime = this.getRuntime(agent)
+      if (typeof runtime.prepareTurn === 'function') await runtime.prepareTurn()
+
+      const currentAgent = this.repository.getAgent(agentId)
+      if (!currentAgent) {
+        const error = new Error('Agent 不存在。')
+        error.statusCode = 404
+        throw error
+      }
+      if (currentAgent.archivedAt || this.runtimes.get(agentId) !== runtime) {
+        const error = new Error('Agent 状态已变化，请确认后重新发送。')
+        error.statusCode = 409
+        throw error
+      }
+      agent = currentAgent
+
+      const timelineContent = providerContent.map(({ absolutePath, ...block }) => block)
+      const isFirstTurn = !this.repository.hasTurns(agentId)
+      const patch = {}
+      if (isFirstTurn && agent.title === DEFAULT_AGENT_TITLE) {
+        const title = deriveAgentTitle(input.input.content)
+        if (title) patch.title = title
+      }
+      if (agent.requiresAttention) {
+        patch.requiresAttention = false
+        patch.attentionReason = null
+        patch.attentionAt = null
+      }
+      if (Object.keys(patch).length) {
+        agent = this.repository.updateAgent(agent.id, patch)
+        this.eventHub.publish(agent.id, { type: 'agent', agent })
+      }
+      const turn = this.repository.createTurn(agentId, input.clientMessageId)
+      this.activeTurns.set(agentId, turn)
+      this.commitTimeline({
+        agentId,
+        turnId: turn.id,
+        item: { type: 'user_message', clientMessageId: input.clientMessageId, content: timelineContent },
+      })
+      this.markStarted(agentId)
+      try {
+        const result = await runtime.startTurn(providerContent, input.clientMessageId)
+        if (result?.nativeTurnId) this.markStarted(agentId, result.nativeTurnId)
+        return this.repository.getTurn(turn.id)
+      } catch (error) {
+        this.finish(agentId, 'failed', { error })
+        throw error
+      }
+    } finally {
+      this.preparingTurns.delete(agentId)
+      if (
+        !this.activeTurns.has(agentId)
+        && runtime
+        && this.runtimes.get(agentId) === runtime
+        && typeof runtime.releaseThreadWriter === 'function'
+      ) {
+        this.runtimes.delete(agentId)
+        runtime.releaseThreadWriter()
+      }
     }
   }
 
@@ -140,7 +172,7 @@ export class AgentManager {
   async updateSettings(agentId, input) {
     const agent = this.repository.getAgent(agentId)
     if (!agent) throw new Error('Agent 不存在。')
-    if (this.activeTurns.has(agentId)) {
+    if (this.activeTurns.has(agentId) || this.preparingTurns.has(agentId)) {
       const error = new Error('Agent 运行期间不能切换模型或思考强度。')
       error.statusCode = 409
       throw error
@@ -231,6 +263,11 @@ export class AgentManager {
     })
     this.eventHub.publish(agentId, { type: 'turn', turn: updated })
     this.eventHub.publish(agentId, { type: 'agent', agent })
+    const runtime = this.runtimes.get(agentId)
+    if (runtime && typeof runtime.releaseThreadWriter === 'function') {
+      this.runtimes.delete(agentId)
+      runtime.releaseThreadWriter()
+    }
     void this.timelineSync.sync(agent).catch(() => {})
   }
 
@@ -259,6 +296,7 @@ export class AgentManager {
     this.coalescer.flushAll()
     for (const runtime of this.runtimes.values()) runtime.close()
     this.runtimes.clear()
+    this.preparingTurns.clear()
     this.controlStates.clear()
   }
 }

@@ -84,6 +84,17 @@ function mapAsset(row) {
   }
 }
 
+function mapTimelineRow(row) {
+  if (!row) return null
+  return {
+    seq: row.seq,
+    timestamp: row.timestamp,
+    ...(row.turn_id ? { turnId: row.turn_id } : {}),
+    ...(row.provider_message_id ? { providerMessageId: row.provider_message_id } : {}),
+    item: parseJson(row.item_json, { type: 'error', code: 'invalid_timeline_item', message: 'Timeline 数据损坏。' }),
+  }
+}
+
 export function normalizeWorkspacePath(input) {
   const resolved = fs.realpathSync(path.resolve(String(input || '').trim()))
   if (!fs.statSync(resolved).isDirectory()) throw new Error('工作区路径不是目录。')
@@ -392,14 +403,32 @@ export function createRepository(db) {
       const row = db.prepare('SELECT timeline_epoch, timeline_next_seq FROM agent_sessions WHERE id = ?').get(agentId)
       return row ? { epoch: row.timeline_epoch, nextSeq: row.timeline_next_seq } : null
     },
+    getTimelineBounds(agentId) {
+      const row = db.prepare(`SELECT COUNT(*) AS row_count, MIN(seq) AS min_seq, MAX(seq) AS max_seq
+        FROM agent_timeline_rows WHERE agent_session_id = ?`).get(agentId)
+      return {
+        count: Number(row?.row_count || 0),
+        minSeq: Number(row?.min_seq || 0),
+        maxSeq: Number(row?.max_seq || 0),
+      }
+    },
+    listTimelineWindow(agentId, { direction = 'tail', seq = 0, limit = 200 } = {}) {
+      const safeLimit = Math.max(1, Number(limit) || 200)
+      let rows
+      if (direction === 'before') {
+        rows = db.prepare(`SELECT * FROM agent_timeline_rows
+          WHERE agent_session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`).all(agentId, seq, safeLimit).reverse()
+      } else if (direction === 'after') {
+        rows = db.prepare(`SELECT * FROM agent_timeline_rows
+          WHERE agent_session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`).all(agentId, seq, safeLimit)
+      } else {
+        rows = db.prepare(`SELECT * FROM agent_timeline_rows
+          WHERE agent_session_id = ? ORDER BY seq DESC LIMIT ?`).all(agentId, safeLimit).reverse()
+      }
+      return rows.map(mapTimelineRow)
+    },
     listTimelineRows(agentId) {
-      return db.prepare('SELECT * FROM agent_timeline_rows WHERE agent_session_id = ? ORDER BY seq ASC').all(agentId).map((row) => ({
-        seq: row.seq,
-        timestamp: row.timestamp,
-        ...(row.turn_id ? { turnId: row.turn_id } : {}),
-        ...(row.provider_message_id ? { providerMessageId: row.provider_message_id } : {}),
-        item: parseJson(row.item_json, { type: 'error', code: 'invalid_timeline_item', message: 'Timeline 数据损坏。' }),
-      }))
+      return db.prepare('SELECT * FROM agent_timeline_rows WHERE agent_session_id = ? ORDER BY seq ASC').all(agentId).map(mapTimelineRow)
     },
   }
 }

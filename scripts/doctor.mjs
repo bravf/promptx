@@ -5,10 +5,10 @@ import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-import { resolvePromptxPaths } from '../apps/server/src/appPaths.js'
+import { resolvePromptxPaths } from './lib/promptxPaths.mjs'
 
 const DEFAULT_HOST = '127.0.0.1'
-const DEFAULT_PORT = 3000
+const DEFAULT_PORT = 3001
 const SUPPORTED_NODE_RANGES = [
   { min: [20, 19, 0], maxExclusiveMajor: 21, label: '20.19+' },
   { min: [22, 13, 0], maxExclusiveMajor: 23, label: '22.13+' },
@@ -18,7 +18,6 @@ const RECOMMENDED_NODE_MAJOR = 22
 const HUMAN_READABLE_NODE_SUPPORT = '推荐 Node 22 LTS，当前兼容 Node 20 / 22 / 24 稳定版本'
 const CODEX_BIN = process.env.CODEX_BIN || 'codex'
 const CLAUDE_CODE_BIN = process.env.CLAUDE_CODE_BIN || 'claude'
-const OPENCODE_BIN = process.env.OPENCODE_BIN || 'opencode'
 const KIMI_CODE_BIN = process.env.KIMI_CODE_BIN || 'kimi'
 const AGENT_CLI_CONFIGS = [
   {
@@ -33,13 +32,6 @@ const AGENT_CLI_CONFIGS = [
     name: 'Claude Code CLI',
     envName: 'CLAUDE_CODE_BIN',
     bin: CLAUDE_CODE_BIN,
-    versionArgs: ['--version'],
-  },
-  {
-    key: 'opencode',
-    name: 'OpenCode CLI',
-    envName: 'OPENCODE_BIN',
-    bin: OPENCODE_BIN,
     versionArgs: ['--version'],
   },
   {
@@ -244,11 +236,11 @@ async function isPortOccupied(host, port) {
 
 async function checkServicePort() {
   const host = String(process.env.HOST || DEFAULT_HOST).trim() || DEFAULT_HOST
-  const port = Math.max(1, Number(process.env.PORT || process.env.PROMPTX_SERVER_PORT) || DEFAULT_PORT)
+  const port = Math.max(1, Number(process.env.PORT || process.env.PROMPTX_DAEMON_PORT) || DEFAULT_PORT)
   const baseUrl = `http://${host}:${port}`
 
   try {
-    const response = await fetch(`${baseUrl}/health`)
+    const response = await fetch(`${baseUrl}/api/v2/health`)
     if (response.ok) {
       return createCheck('服务端口', 'pass', `${baseUrl} 已有 PromptX 服务在运行`)
     }
@@ -275,7 +267,7 @@ async function main() {
     : createCheck(
         '执行引擎',
         'fail',
-        '至少需要安装一个可用执行引擎：Codex / Claude Code / OpenCode'
+        '至少需要安装一个可用执行引擎：Codex / Claude Code / Kimi Code'
       )
   const checks = [
     checkNodeVersion(),

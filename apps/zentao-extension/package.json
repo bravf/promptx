@@ -1,9 +1,0 @@
-{
-  "name": "@promptx/zentao-extension",
-  "version": "0.0.1",
-  "private": true,
-  "scripts": {
-    "build": "node --check background.js && node --check content.js && node -e \"JSON.parse(require('fs').readFileSync('manifest.json', 'utf8')); console.log('extension: ok')\"",
-    "lint": "node -e \"console.log('extension: nothing to lint')\""
-  }
-}

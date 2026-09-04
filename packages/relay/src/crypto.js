@@ -70,6 +70,28 @@ export function deriveSharedKey(secretKey, peerPublicKey) {
   return sharedKey
 }
 
+export class NonceReplayWindow {
+  constructor(maxSize = 16_384) {
+    this.maxSize = Math.max(1, Number(maxSize) || 16_384)
+    this.values = new Set()
+  }
+
+  get size() {
+    return this.values.size
+  }
+
+  has(value) {
+    return this.values.has(value)
+  }
+
+  add(value) {
+    if (this.values.has(value)) return this
+    this.values.add(value)
+    while (this.values.size > this.maxSize) this.values.delete(this.values.values().next().value)
+    return this
+  }
+}
+
 export function encryptPayload(sharedKey, payload) {
   const key = normalizeBytes(sharedKey)
   const isText = typeof payload === 'string'

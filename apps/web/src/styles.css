@@ -95,10 +95,6 @@ body {
   transition: background-color 180ms ease, color 180ms ease;
 }
 
-.font-sans {
-  font-family: var(--theme-fontSans);
-}
-
 ::selection {
   background: var(--theme-selectionBg);
   color: var(--theme-selectionText);
@@ -125,12 +121,6 @@ body {
     border-color: var(--theme-borderDefault);
     background: var(--theme-appPanel);
     box-shadow: var(--theme-shadowPanel);
-  }
-
-  .dashed-panel {
-    @apply rounded-sm border border-dashed;
-    border-color: var(--theme-borderStrong);
-    background: var(--theme-appPanelMuted);
   }
 
   .tool-button {
@@ -195,11 +185,6 @@ body {
     background: color-mix(in srgb, var(--theme-appPanel) 90%, rgba(28, 28, 28, 0.78));
   }
 
-  .image-preview-overlay__image {
-    border-radius: 0.5rem;
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.34);
-  }
-
   .tool-button-primary {
     border-color: var(--theme-primaryBorder);
     background: var(--theme-primaryBg);
@@ -218,61 +203,6 @@ body {
 
   .tool-button-danger:hover {
     background: color-mix(in srgb, black 8%, var(--theme-danger));
-  }
-
-  .tool-button-danger-subtle {
-    border-color: color-mix(in srgb, var(--theme-danger) 36%, var(--theme-buttonBorder));
-    background: var(--theme-dangerSoft);
-    color: var(--theme-dangerText);
-  }
-
-  .tool-button-danger-subtle:hover {
-    background: color-mix(in srgb, var(--theme-dangerSoft) 82%, var(--theme-danger) 18%);
-    color: var(--theme-dangerText);
-  }
-
-  .tool-button-warning-subtle {
-    border-color: color-mix(in srgb, var(--theme-warning) 36%, var(--theme-buttonBorder));
-    background: var(--theme-warningSoft);
-    color: var(--theme-warningText);
-  }
-
-  .tool-button-warning-subtle:hover {
-    background: color-mix(in srgb, var(--theme-warningSoft) 82%, var(--theme-warning) 18%);
-    color: var(--theme-warningText);
-  }
-
-  .tool-button-success-subtle {
-    border-color: color-mix(in srgb, var(--theme-success) 36%, var(--theme-buttonBorder));
-    background: var(--theme-successSoft);
-    color: var(--theme-successText);
-  }
-
-  .tool-button-success-subtle:hover {
-    background: color-mix(in srgb, var(--theme-successSoft) 82%, var(--theme-success) 18%);
-    color: var(--theme-successText);
-  }
-
-  .tool-button-info-subtle {
-    border-color: color-mix(in srgb, var(--theme-info) 36%, var(--theme-buttonBorder));
-    background: var(--theme-infoSoft);
-    color: var(--theme-infoText);
-  }
-
-  .tool-button-info-subtle:hover {
-    background: color-mix(in srgb, var(--theme-infoSoft) 82%, var(--theme-info) 18%);
-    color: var(--theme-infoText);
-  }
-
-  .tool-button-accent-subtle {
-    border-color: color-mix(in srgb, var(--theme-accent) 38%, var(--theme-buttonBorder));
-    background: var(--theme-accentSoft);
-    color: var(--theme-accentText);
-  }
-
-  .tool-button-accent-subtle:hover {
-    background: color-mix(in srgb, var(--theme-accentSoft) 82%, var(--theme-accent) 18%);
-    color: var(--theme-accentText);
   }
 
   .tool-input {
@@ -502,409 +432,6 @@ body {
     background: transparent;
   }
 
-  .response-image-export-card .codex-table-wrap {
-    overflow: visible;
-  }
-
-  .response-image-export-card.codex-markdown table,
-  .response-image-export-card .codex-markdown table {
-    min-width: 0;
-    table-layout: fixed;
-  }
-
-  .response-image-export-card.codex-markdown th,
-  .response-image-export-card.codex-markdown td,
-  .response-image-export-card .codex-markdown th,
-  .response-image-export-card .codex-markdown td {
-    overflow-wrap: anywhere;
-    white-space: normal;
-    word-break: break-word;
-  }
-
-  .response-image-export-card.codex-markdown pre,
-  .response-image-export-card .codex-markdown pre {
-    overflow-x: visible;
-  }
-
-  .response-image-export-card.codex-markdown .codex-code-block pre,
-  .response-image-export-card .codex-markdown .codex-code-block pre {
-    padding-right: 0.6rem;
-  }
-
-  .response-image-export-card.codex-markdown pre code,
-  .response-image-export-card .codex-markdown pre code {
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .response-image-export-card.codex-markdown .codex-code-block__copy,
-  .response-image-export-card .codex-markdown .codex-code-block__copy {
-    display: none;
-  }
-
-  .process-detail {
-    font-size: 12px;
-    line-height: 1.65;
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .process-detail-panel > * {
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .process-detail-panel :is(ul, ol) {
-    width: 100%;
-    max-width: 100%;
-  }
-
-  .process-detail-panel :is(ul, ol, li) {
-    min-width: 0;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-
-  .process-detail .codex-markdown {
-    font-size: 12px;
-    line-height: 1.65;
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-
-  .process-detail .codex-markdown :is(p, li, blockquote, td, th, a, span) {
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-
-  .process-detail .codex-markdown > * + * {
-    margin-top: 0.55rem;
-  }
-
-  .process-detail .codex-markdown :is(ul, ol) {
-    padding-left: 1.15rem;
-  }
-
-  .process-detail .codex-markdown li {
-    line-height: 1.6;
-  }
-
-  .process-detail .codex-markdown li + li {
-    margin-top: 0.18rem;
-  }
-
-  .process-detail .codex-markdown li > :is(ul, ol) {
-    margin-top: 0.2rem;
-    padding-left: 0.95rem;
-  }
-
-  .process-detail .codex-markdown li > :is(ul, ol) > li + li {
-    margin-top: 0.12rem;
-  }
-
-  .process-detail .codex-markdown h1,
-  .process-detail .codex-markdown h2,
-  .process-detail .codex-markdown :is(h3, h4) {
-    font-size: 12px;
-  }
-
-  .process-detail .codex-markdown th,
-  .process-detail .codex-markdown td {
-    font-size: 12px;
-    line-height: 1.6;
-  }
-
-  .process-detail .codex-table-wrap,
-  .process-detail .codex-markdown pre {
-    max-width: 100%;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
-  }
-
-  .process-detail .codex-table-wrap {
-    margin-top: 0.55rem;
-  }
-
-  .process-detail .codex-markdown table {
-    min-width: max-content;
-  }
-
-  .process-detail .codex-markdown th,
-  .process-detail .codex-markdown td {
-    padding: 0.45rem 0.6rem;
-  }
-
-  .process-detail .codex-markdown th {
-    white-space: nowrap;
-  }
-
-  .process-detail .codex-markdown td {
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .process-detail .codex-markdown :not(pre) > code,
-  .process-detail .codex-markdown pre code {
-    font-size: 12px;
-    line-height: 1.65;
-  }
-
-  .process-detail .codex-markdown pre {
-    margin-top: 0.55rem;
-    padding: 0.65rem 0.75rem;
-  }
-
-  .process-detail .codex-markdown pre code {
-    display: block;
-    min-width: max-content;
-  }
-
-  .process-detail-markdown--reasoning {
-    margin: 0;
-    background: var(--theme-appPanelStrong);
-    padding: 0;
-  }
-
-  .process-detail-markdown--reasoning > * + * {
-    margin-top: 0.55rem;
-  }
-
-  .process-detail-markdown--reasoning :is(p, li, blockquote) {
-    color: currentColor;
-  }
-
-  .process-detail-markdown--reasoning blockquote {
-    border-left-color: var(--theme-borderDefault);
-    color: currentColor;
-  }
-
-  .process-detail-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    align-items: flex-start;
-  }
-
-  .process-detail-meta__item {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    max-width: 100%;
-    border: 1px dashed var(--theme-borderDefault);
-    border-radius: var(--theme-processDetailBadgeRadius);
-    background: transparent;
-    padding: 0.2rem 0.55rem;
-    font-size: 12px;
-    line-height: 1.4;
-  }
-
-  .process-detail-meta__item--long {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: start;
-    width: 100%;
-    border-radius: var(--theme-processDetailRadius);
-    padding: 0.45rem 0.6rem;
-  }
-
-  .process-detail-meta__item--value-only {
-    display: block;
-  }
-
-  .process-detail-meta__label {
-    flex-shrink: 0;
-  }
-
-  .process-detail-meta__value {
-    min-width: 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
-
-  .process-detail-meta__item--long .process-detail-meta__value {
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-    line-height: 1.55;
-  }
-
-  .process-detail-text {
-    margin: 0;
-    padding: 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-    font-size: 12px;
-    line-height: 1.65;
-    color: inherit;
-  }
-
-  .process-detail-footnote {
-    margin-top: 0.45rem;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 12px;
-    line-height: 1.5;
-  }
-
-  .process-detail-footnote--compact {
-    margin-top: 0.35rem;
-    padding: 0 0.75rem 0.65rem;
-  }
-
-  .process-detail-footnote__toggle {
-    border: 0;
-    background: transparent;
-    padding: 0;
-    font: inherit;
-    color: inherit;
-    cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 0.16em;
-  }
-
-  .process-detail-directory__heading {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.45rem;
-    margin-bottom: 0.45rem;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
-
-  .process-detail-directory__type,
-  .process-detail-filechange__kind {
-    display: inline-flex;
-    align-items: center;
-    border: 1px dashed var(--theme-borderDefault);
-    border-radius: var(--theme-processDetailBadgeRadius);
-    padding: 0.05rem 0.45rem;
-    font-size: 11px;
-    line-height: 1.5;
-    white-space: nowrap;
-    word-break: normal;
-    overflow-wrap: normal;
-    flex-shrink: 0;
-  }
-
-  .process-detail-directory__list {
-    display: grid;
-    gap: 0.35rem;
-    font-size: 12px;
-    line-height: 1.5;
-  }
-
-  .process-detail-directory__item,
-  .process-detail-filechange__item {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.55rem;
-    min-width: 0;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
-
-  .process-detail-filechange__path {
-    min-width: 0;
-    font-size: 12px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
-
-  .process-detail-subagent__preview {
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-height: 1.5;
-  }
-
-  @media (min-width: 640px) {
-    .process-detail-subagent__preview {
-      -webkit-line-clamp: 1;
-    }
-  }
-
-  .process-detail-mobile-code-scroll {
-    display: block;
-    width: 100%;
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
-
-  @media (max-width: 640px) {
-
-    .process-detail-meta__item--long {
-      grid-template-columns: 1fr;
-      gap: 0.25rem;
-    }
-
-    .process-detail-meta__item--long .process-detail-meta__value {
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-    }
-
-    .process-detail-filechange__item {
-      align-items: stretch;
-    }
-
-    .process-detail-filechange__item {
-      display: flex;
-      align-items: flex-start;
-    }
-  }
-
-  .process-detail-checklist__item {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.55rem;
-    min-width: 0;
-    font-size: 12px;
-    line-height: 1.6;
-  }
-
-  .process-detail-checklist__icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1rem;
-    height: 1rem;
-    margin-top: 0.1rem;
-    border: 1px solid var(--theme-borderDefault);
-    border-radius: var(--theme-processDetailBadgeRadius);
-    flex-shrink: 0;
-  }
-
-  .process-detail-checklist__icon.is-completed {
-    background: color-mix(in srgb, var(--theme-successSoft, #d9ead7) 65%, transparent);
-  }
-
-  .process-detail-checklist__icon.is-in_progress {
-    background: color-mix(in srgb, var(--theme-warningSoft, #f6e2b3) 72%, transparent);
-    border-color: color-mix(in srgb, var(--theme-warningText, #8a5a00) 24%, transparent);
-  }
-
-  .process-detail-checklist__dot {
-    width: 0.38rem;
-    height: 0.38rem;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--theme-warningText, #8a5a00) 90%, white 10%);
-  }
-
   .codex-markdown thead {
     background: color-mix(in srgb, var(--theme-appPanelMuted) 78%, var(--theme-accentSoft) 22%);
   }
@@ -968,10 +495,6 @@ body {
     color: var(--theme-dangerText);
   }
 
-  .theme-danger-hover:hover {
-    color: var(--theme-danger);
-  }
-
   .theme-icon-button {
     @apply inline-flex items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-60;
     color: var(--theme-textMuted);
@@ -980,24 +503,6 @@ body {
   .theme-icon-button:hover {
     background: var(--theme-appPanelHover);
     color: var(--theme-textPrimary);
-  }
-
-  .theme-empty-state {
-    @apply rounded-sm border border-dashed;
-    border-color: var(--theme-borderStrong);
-    background: var(--theme-appPanelMuted);
-    color: var(--theme-textMuted);
-  }
-
-  .transcript-card {
-    @apply border;
-    border-color: var(--theme-borderDefault);
-  }
-
-  .transcript-event-card {
-    min-width: 0;
-    max-width: 100%;
-    overflow-x: hidden;
   }
 
   .theme-popover {
@@ -1056,118 +561,15 @@ body {
     color: var(--theme-accentText);
   }
 
-  .theme-status-success {
-    border-color: color-mix(in srgb, var(--theme-success) 38%, var(--theme-borderDefault));
-    background: var(--theme-successSoft);
-    color: var(--theme-successText);
-  }
-
-  .theme-status-warning {
-    border-color: color-mix(in srgb, var(--theme-warning) 38%, var(--theme-borderDefault));
-    background: var(--theme-warningSoft);
-    color: var(--theme-warningText);
-  }
-
   .theme-status-danger {
     border-color: color-mix(in srgb, var(--theme-danger) 38%, var(--theme-borderDefault));
     background: var(--theme-dangerSoft);
     color: var(--theme-dangerText);
   }
 
-  .theme-status-info {
-    border-color: color-mix(in srgb, var(--theme-info) 38%, var(--theme-borderDefault));
-    background: var(--theme-infoSoft);
-    color: var(--theme-infoText);
-  }
-
   .theme-status-neutral {
     border-color: var(--theme-borderDefault);
     background: var(--theme-appPanelMuted);
-    color: var(--theme-textSecondary);
-  }
-
-  .theme-filter-active {
-    border-color: var(--theme-borderStrong);
-    background: var(--theme-appPanelActive);
-    color: var(--theme-textPrimary);
-  }
-
-  .theme-agent-selector-button {
-    display: inline-flex;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    border-radius: 0.125rem;
-    border-width: 1px;
-    padding: 0.375rem 0.625rem;
-    font-size: 11px;
-    line-height: 1rem;
-    transition:
-      background-color 150ms ease,
-      border-color 150ms ease,
-      color 150ms ease,
-      box-shadow 150ms ease;
-  }
-
-  .theme-filter-idle {
-    border-color: var(--theme-borderDefault);
-    background: var(--theme-appPanelStrong);
-    color: var(--theme-textSecondary);
-  }
-
-  .theme-filter-idle:hover {
-    background: var(--theme-appPanelHover);
-  }
-
-  @media (min-width: 640px) {
-    .theme-agent-selector-button {
-      font-size: 12px;
-    }
-  }
-
-  .theme-card-selected {
-    border-color: var(--theme-accent);
-    background: var(--theme-accentSoft);
-    color: var(--theme-textPrimary);
-    box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-accent) 18%, transparent);
-  }
-
-  .theme-card-warning {
-    border-color: var(--theme-warning);
-    background: var(--theme-appPanelMuted);
-    color: var(--theme-textPrimary);
-  }
-
-  .theme-card-warning:hover {
-    background: var(--theme-appPanelHover);
-  }
-
-  .theme-card-idle-muted {
-    border-color: var(--theme-borderDefault);
-    background: var(--theme-appPanelMuted);
-  }
-
-  .theme-card-idle-muted:hover {
-    background: var(--theme-appPanelHover);
-  }
-
-  .theme-card-idle-strong {
-    border-color: var(--theme-borderDefault);
-    background: var(--theme-appPanelStrong);
-  }
-
-  .theme-card-idle-strong:hover {
-    border-color: var(--theme-borderStrong);
-    background: var(--theme-appPanel);
-  }
-
-  .theme-selection-indicator {
-    background: var(--theme-accent);
-  }
-
-  .theme-badge-strong {
-    border-color: var(--theme-borderStrong);
-    background: var(--theme-appPanelStrong);
     color: var(--theme-textSecondary);
   }
 
@@ -1177,196 +579,9 @@ body {
     color: var(--theme-textMuted);
   }
 
-  .theme-list-row {
-    display: flex;
-    width: 100%;
-    align-items: flex-start;
-    gap: 0.5rem;
-    border: 1px solid transparent;
-    border-radius: 0.125rem;
-    padding: 0.5rem 0.625rem;
-    text-align: left;
-    outline: none;
-    transition:
-      background-color 150ms ease,
-      border-color 150ms ease,
-      box-shadow 150ms ease;
-  }
-
-  .theme-list-tree-item {
-    cursor: pointer;
-    border: 1px solid transparent;
-    border-radius: 0.125rem;
-    padding: 0.25rem 0.375rem;
-    outline: none;
-    transition:
-      background-color 150ms ease,
-      border-color 150ms ease,
-      box-shadow 150ms ease;
-  }
-
-  .theme-list-item-icon {
-    margin-top: 0.125rem;
-    height: 1rem;
-    width: 1rem;
-    flex-shrink: 0;
-    color: var(--theme-textMuted);
-  }
-
-  .theme-list-item-title {
-    color: var(--theme-textPrimary);
-    font-size: 13px;
-    line-height: 1.25rem;
-  }
-
-  .theme-list-item-title--strong {
-    font-weight: 500;
-  }
-
-  .theme-list-item-subtitle {
-    color: var(--theme-textMuted);
-    font-size: 10px;
-    line-height: 0.875rem;
-  }
-
-  .theme-list-item-subtitle--mono {
-    font-family: var(--theme-fontMono);
-  }
-
-  .theme-list-item-meta {
-    color: var(--theme-textMuted);
-    font-size: 11px;
-    line-height: 1rem;
-  }
-
-  .theme-list-item-badge {
-    margin-top: 0.125rem;
-    display: inline-flex;
-    flex-shrink: 0;
-    border-radius: 0.125rem;
-    border-width: 1px;
-    padding: 0.125rem 0.375rem;
-    font-size: 10px;
-    line-height: 1;
-  }
-
-  .theme-list-item-active {
-    border-color: var(--theme-accent);
-    background: var(--theme-accentSoft);
-    color: var(--theme-textPrimary);
-    box-shadow: inset 3px 0 0 var(--theme-accent);
-  }
-
-  .theme-list-item-expanded {
-    border-color: var(--theme-borderDefault);
-    background: var(--theme-appPanelMuted);
-  }
-
-  .theme-list-item-hover:hover,
-  .theme-list-item-expanded:hover {
-    background: var(--theme-appPanelHover);
-  }
-
-  .theme-search-highlight {
-    border-radius: 0.25rem;
-    background: var(--theme-warningSoft);
-    color: inherit;
-    padding: 0 0.125rem;
-  }
-
-  .theme-input-shell {
-    border-color: var(--theme-inputBorder);
-    background: var(--theme-inputBg);
-    color: var(--theme-textPrimary);
-  }
-
-  .theme-input-shell:focus-within {
-    border-color: var(--theme-borderStrong);
-    --tw-ring-color: var(--theme-focusRing);
-  }
-
-  .settings-section-card {
-    @apply rounded-sm border border-dashed;
-    border-color: var(--theme-borderDefault);
-    background: var(--theme-appPanelMuted);
-  }
-
-  .settings-form-card {
-    @apply rounded-sm border border-dashed;
-    border-color: var(--theme-borderDefault);
-    background: var(--theme-appPanelStrong);
-  }
-
-  .theme-content-panel {
-    @apply rounded-sm border border-dashed;
-    border-color: var(--theme-borderDefault);
-    background: var(--theme-appPanelStrong);
-  }
-
-  .theme-muted-panel {
-    background: var(--theme-appPanelMuted);
-  }
-
-  .theme-inline-panel {
-    border-color: var(--theme-borderDefault);
-    background: var(--theme-appPanelMuted);
-  }
-
-  .theme-empty-state-strong {
-    background: var(--theme-appPanelStrong);
-  }
-
   .theme-note-text {
     font-size: 0.75rem;
     line-height: 1.25rem;
-  }
-
-  .theme-patch-add {
-    background: var(--theme-successSoft);
-    color: var(--theme-successText);
-  }
-
-  .theme-patch-delete {
-    background: var(--theme-dangerSoft);
-    color: var(--theme-dangerText);
-  }
-
-  .theme-patch-hunk {
-    background: var(--theme-warningSoft);
-    color: var(--theme-warningText);
-  }
-
-  .theme-patch-meta {
-    background: var(--theme-appPanelMuted);
-    color: var(--theme-textMuted);
-  }
-
-  .theme-patch-context {
-    color: var(--theme-textSecondary);
-  }
-
-  .theme-process-running {
-    border-color: color-mix(in srgb, var(--theme-warning) 26%, var(--theme-borderDefault));
-    background: color-mix(in srgb, var(--theme-warningSoft) 65%, var(--theme-appPanel) 35%);
-    color: var(--theme-warningText);
-  }
-
-  .theme-process-completed {
-    border-color: var(--theme-processBorder);
-    background: var(--theme-processBg);
-    color: var(--theme-processText);
-  }
-
-  .theme-process-stopped {
-    border-color: var(--theme-borderDefault);
-    background: color-mix(in srgb, var(--theme-appPanelMuted) 80%, var(--theme-appPanel) 20%);
-    color: var(--theme-textMuted);
-  }
-
-  .theme-process-error {
-    border-color: color-mix(in srgb, var(--theme-danger) 28%, var(--theme-borderDefault));
-    background: color-mix(in srgb, var(--theme-dangerSoft) 72%, var(--theme-appPanel) 28%);
-    color: var(--theme-dangerText);
   }
 
   :root[data-theme='promptx-glass-light'] .app-shell::before,
@@ -1417,19 +632,11 @@ body {
   }
 
   :root[data-theme='promptx-glass-light'] .panel,
-  :root[data-theme='promptx-glass-light'] .dashed-panel,
   :root[data-theme='promptx-glass-light'] .theme-popover,
   :root[data-theme='promptx-glass-light'] .tool-button,
   :root[data-theme='promptx-glass-light'] .tool-input,
-  :root[data-theme='promptx-glass-light'] .theme-agent-selector-button,
-  :root[data-theme='promptx-glass-light'] .theme-empty-state,
   :root[data-theme='promptx-glass-light'] .theme-option,
-  :root[data-theme='promptx-glass-light'] .theme-filter-idle,
-  :root[data-theme='promptx-glass-light'] .theme-filter-active,
-  :root[data-theme='promptx-glass-light'] .theme-status-success,
-  :root[data-theme='promptx-glass-light'] .theme-status-warning,
   :root[data-theme='promptx-glass-light'] .theme-status-danger,
-  :root[data-theme='promptx-glass-light'] .theme-status-info,
   :root[data-theme='promptx-glass-light'] .theme-status-neutral {
     backdrop-filter: blur(var(--theme-backdropBlur)) saturate(var(--theme-backdropSaturate));
   }
@@ -1445,18 +652,6 @@ body {
       var(--theme-shadowPanel),
       inset 0 1px 0 var(--theme-panelHighlight),
       inset 0 -1px 0 color-mix(in srgb, var(--theme-panelChrome) 82%, transparent);
-  }
-
-  :root[data-theme='promptx-glass-light'] .dashed-panel,
-  :root[data-theme='promptx-glass-light'] .theme-empty-state {
-    border-color: color-mix(in srgb, var(--theme-borderStrong) 62%, white 38%);
-    border-radius: 0.65rem;
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--theme-appPanelMuted) 82%, transparent), color-mix(in srgb, var(--theme-appPanelStrong) 72%, transparent)),
-      var(--theme-appPanelMuted);
-    box-shadow:
-      inset 0 1px 0 var(--theme-panelHighlight),
-      inset 0 -1px 0 color-mix(in srgb, var(--theme-panelChrome) 72%, transparent);
   }
 
   :root[data-theme='promptx-glass-light'] .tool-button {
@@ -1476,26 +671,6 @@ body {
       var(--theme-buttonHover);
     box-shadow:
       0 14px 30px rgba(91, 113, 102, 0.14),
-      inset 0 1px 0 color-mix(in srgb, white 78%, transparent);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-agent-selector-button {
-    border-color: color-mix(in srgb, var(--theme-buttonBorder) 72%, white 28%);
-    border-radius: 0.55rem;
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--theme-buttonHighlight) 100%, transparent), color-mix(in srgb, var(--theme-buttonBg) 96%, transparent)),
-      var(--theme-buttonBg);
-    box-shadow:
-      0 10px 24px rgba(91, 113, 102, 0.08),
-      inset 0 1px 0 var(--theme-buttonHighlight);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-agent-selector-button.theme-filter-idle:hover {
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--theme-buttonHighlight) 100%, transparent), color-mix(in srgb, var(--theme-buttonHover) 96%, transparent)),
-      var(--theme-buttonHover);
-    box-shadow:
-      0 12px 26px rgba(91, 113, 102, 0.12),
       inset 0 1px 0 color-mix(in srgb, white 78%, transparent);
   }
 
@@ -1531,86 +706,6 @@ body {
       color-mix(in srgb, black 8%, var(--theme-danger));
   }
 
-  :root[data-theme='promptx-glass-light'] .tool-button-danger-subtle {
-    border-color: color-mix(in srgb, var(--theme-danger) 44%, white 56%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08)),
-      color-mix(in srgb, var(--theme-dangerSoft) 84%, var(--theme-appPanelStrong) 16%);
-    box-shadow:
-      0 14px 28px rgba(184, 93, 102, 0.1),
-      inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  }
-
-  :root[data-theme='promptx-glass-light'] .tool-button-danger-subtle:hover {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-dangerSoft) 76%, var(--theme-danger) 24%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .tool-button-warning-subtle {
-    border-color: color-mix(in srgb, var(--theme-warning) 44%, white 56%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08)),
-      color-mix(in srgb, var(--theme-warningSoft) 84%, var(--theme-appPanelStrong) 16%);
-    box-shadow:
-      0 14px 28px rgba(167, 119, 54, 0.1),
-      inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  }
-
-  :root[data-theme='promptx-glass-light'] .tool-button-warning-subtle:hover {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-warningSoft) 76%, var(--theme-warning) 24%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .tool-button-success-subtle {
-    border-color: color-mix(in srgb, var(--theme-success) 44%, white 56%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08)),
-      color-mix(in srgb, var(--theme-successSoft) 84%, var(--theme-appPanelStrong) 16%);
-    box-shadow:
-      0 14px 28px rgba(51, 132, 95, 0.1),
-      inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  }
-
-  :root[data-theme='promptx-glass-light'] .tool-button-success-subtle:hover {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-successSoft) 76%, var(--theme-success) 24%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .tool-button-info-subtle {
-    border-color: color-mix(in srgb, var(--theme-info) 44%, white 56%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08)),
-      color-mix(in srgb, var(--theme-infoSoft) 84%, var(--theme-appPanelStrong) 16%);
-    box-shadow:
-      0 14px 28px rgba(47, 104, 153, 0.1),
-      inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  }
-
-  :root[data-theme='promptx-glass-light'] .tool-button-info-subtle:hover {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-infoSoft) 76%, var(--theme-info) 24%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .tool-button-accent-subtle {
-    border-color: color-mix(in srgb, var(--theme-accent) 44%, white 56%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08)),
-      color-mix(in srgb, var(--theme-accentSoft) 84%, var(--theme-appPanelStrong) 16%);
-    box-shadow:
-      0 14px 28px rgba(47, 123, 104, 0.1),
-      inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  }
-
-  :root[data-theme='promptx-glass-light'] .tool-button-accent-subtle:hover {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-accentSoft) 76%, var(--theme-accent) 24%);
-  }
-
   :root[data-theme='promptx-glass-light'] .tool-input {
     border-color: color-mix(in srgb, var(--theme-inputBorder) 76%, white 24%);
     border-radius: 0.5rem;
@@ -1629,8 +724,7 @@ body {
       0 14px 30px rgba(91, 113, 102, 0.1);
   }
 
-  :root[data-theme='promptx-glass-light'] .theme-option-idle:hover,
-  :root[data-theme='promptx-glass-light'] .theme-filter-idle:hover {
+  :root[data-theme='promptx-glass-light'] .theme-option-idle:hover {
     background: color-mix(in srgb, var(--theme-appPanelStrong) 78%, transparent);
   }
 
@@ -1648,133 +742,6 @@ body {
     border-radius: 0.7rem;
     padding-top: 0.85rem;
     padding-bottom: 0.85rem;
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-toggle-card__preview > span {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.45),
-      0 10px 22px rgba(91, 113, 102, 0.08);
-  }
-
-  :root[data-theme='promptx-glass-light'] .settings-nav {
-    gap: 0.7rem;
-  }
-
-  :root[data-theme='promptx-glass-light'] .settings-nav__item,
-  :root[data-theme='promptx-glass-light'] .settings-section-card,
-  :root[data-theme='promptx-glass-light'] .workbench-task-card {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.56),
-      0 14px 26px rgba(91, 113, 102, 0.08);
-  }
-
-  :root[data-theme='promptx-glass-light'] .settings-nav__item {
-    border-radius: 0.7rem;
-  }
-
-  :root[data-theme='promptx-glass-light'] .settings-section-card {
-    border-radius: 0.8rem;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.12)),
-      var(--theme-appPanelMuted);
-  }
-
-  :root[data-theme='promptx-glass-light'] .workbench-select-trigger {
-    border-radius: 0.5rem;
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.68),
-      0 10px 24px rgba(91, 113, 102, 0.08);
-  }
-
-  :root[data-theme='promptx-glass-light'] .workbench-select-panel {
-    border-radius: 0.7rem;
-    box-shadow:
-      var(--theme-shadowPopover),
-      inset 0 1px 0 rgba(255, 255, 255, 0.58);
-  }
-
-  :root[data-theme='promptx-glass-light'] .workbench-select-option {
-    border-radius: 0.55rem;
-  }
-
-  :root[data-theme='promptx-glass-light'] .workbench-panel-header {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.08)),
-      color-mix(in srgb, var(--theme-appPanelMuted) 86%, white 14%);
-    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.2);
-  }
-
-  :root[data-theme='promptx-glass-light'] .workbench-task-card {
-    border-color: color-mix(in srgb, currentColor 6%, var(--theme-borderDefault));
-    border-radius: 0.8rem;
-    backdrop-filter: blur(calc(var(--theme-backdropBlur) * 0.72)) saturate(160%);
-    transition:
-      transform 180ms ease,
-      box-shadow 180ms ease,
-      border-color 180ms ease,
-      background-color 180ms ease;
-  }
-
-  :root[data-theme='promptx-glass-light'] .workbench-task-card:hover {
-    transform: translateY(-1px);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.62),
-      0 18px 34px rgba(91, 113, 102, 0.12);
-  }
-
-  :root[data-theme='promptx-glass-light'] .workbench-task-card--active {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.72),
-      0 20px 38px rgba(47, 123, 104, 0.14);
-  }
-
-  :root[data-theme='promptx-glass-light'] .workbench-task-card--running {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.58),
-      0 18px 34px rgba(167, 119, 54, 0.1);
-  }
-
-  :root[data-theme='promptx-glass-light'] .workbench-task-card__preview {
-    color: color-mix(in srgb, var(--theme-textSecondary) 90%, transparent);
-  }
-
-  :root[data-theme='promptx-glass-light'] .workbench-task-card--mobile {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.5),
-      0 10px 20px rgba(91, 113, 102, 0.06);
-  }
-
-  :root[data-theme='promptx-glass-light'] .transcript-card {
-    border-radius: 0.85rem;
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.54),
-      0 16px 30px rgba(91, 113, 102, 0.09);
-  }
-
-  :root[data-theme='promptx-glass-light'] .transcript-card--prompt {
-    background: var(--theme-promptBg);
-  }
-
-  :root[data-theme='promptx-glass-light'] .transcript-card--process {
-    background: var(--theme-processBg);
-  }
-
-  :root[data-theme='promptx-glass-light'] .transcript-card--response {
-    background: var(--theme-responseBg);
-  }
-
-  :root[data-theme='promptx-glass-light'] .transcript-card__toggle,
-  :root[data-theme='promptx-glass-light'] .transcript-card__pill {
-    border-radius: 0.5rem;
-    background: var(--theme-appPanelStrong);
-    box-shadow: none;
-  }
-
-  :root[data-theme='promptx-glass-light'] .transcript-card__subtle,
-  :root[data-theme='promptx-glass-light'] .transcript-card__media,
-  :root[data-theme='promptx-glass-light'] .transcript-event-card {
-    border-radius: 0.7rem;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
   }
 
   :root[data-theme='promptx-glass-light'] .codex-markdown {
@@ -1841,30 +808,6 @@ body {
     background: color-mix(in srgb, rgba(255, 255, 255, 0.28) 62%, var(--theme-appPanelMuted));
   }
 
-  :root[data-theme='promptx-glass-light'] .app-top-toast {
-    border-radius: 0.75rem;
-    box-shadow:
-      0 18px 36px rgba(47, 123, 104, 0.16),
-      inset 0 1px 0 rgba(255, 255, 255, 0.48);
-  }
-
-  :root[data-theme='promptx-glass-light'] .settings-dialog-panel {
-    box-shadow:
-      0 24px 56px rgba(64, 82, 74, 0.18),
-      inset 0 1px 0 rgba(255, 255, 255, 0.46);
-  }
-
-  :root[data-theme='promptx-glass-light'] .settings-dialog-header,
-  :root[data-theme='promptx-glass-light'] .settings-dialog-nav {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.08)),
-      color-mix(in srgb, var(--theme-appPanelMuted) 88%, white 12%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .settings-form-card {
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.44);
-  }
-
   :root[data-theme='promptx-glass-light'] .image-preview-overlay__button {
     color: #effaf5;
     border-color: rgba(255, 255, 255, 0.16);
@@ -1882,15 +825,7 @@ body {
       rgba(40, 58, 50, 0.64);
   }
 
-  :root[data-theme='promptx-glass-light'] .image-preview-overlay__image {
-    border-radius: 0.9rem;
-    box-shadow:
-      0 28px 64px rgba(0, 0, 0, 0.34),
-      inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-option-active,
-  :root[data-theme='promptx-glass-light'] .theme-filter-active {
+  :root[data-theme='promptx-glass-light'] .theme-option-active {
     border-color: color-mix(in srgb, var(--theme-accent) 36%, white 64%);
     background:
       linear-gradient(180deg, color-mix(in srgb, white 42%, var(--theme-accentSoft)), color-mix(in srgb, var(--theme-accentSoft) 88%, transparent)),
@@ -1900,76 +835,8 @@ body {
       0 10px 24px rgba(47, 123, 104, 0.08);
   }
 
-  :root[data-theme='promptx-glass-light'] .theme-card-selected {
-    border-color: color-mix(in srgb, var(--theme-accent) 42%, white 58%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.08)),
-      color-mix(in srgb, var(--theme-accentSoft) 84%, var(--theme-appPanelStrong) 16%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.52),
-      0 18px 34px rgba(47, 123, 104, 0.12);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-card-warning {
-    border-color: color-mix(in srgb, var(--theme-warning) 42%, white 58%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-appPanelMuted) 88%, var(--theme-warningSoft) 12%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.46),
-      0 16px 30px rgba(167, 119, 54, 0.08);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-card-warning:hover {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-appPanelHover) 82%, var(--theme-warningSoft) 18%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-card-idle-muted,
-  :root[data-theme='promptx-glass-light'] .theme-card-idle-strong {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.4),
-      0 12px 24px rgba(91, 113, 102, 0.06);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-card-idle-muted {
-    border-color: color-mix(in srgb, var(--theme-borderDefault) 60%, white 40%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.05)),
-      color-mix(in srgb, var(--theme-appPanelMuted) 88%, white 12%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-card-idle-muted:hover {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.05)),
-      color-mix(in srgb, var(--theme-appPanelHover) 84%, white 16%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-card-idle-strong {
-    border-color: color-mix(in srgb, var(--theme-borderDefault) 58%, white 42%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-appPanelStrong) 92%, white 8%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-card-idle-strong:hover {
-    border-color: color-mix(in srgb, var(--theme-borderStrong) 58%, white 42%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.05)),
-      color-mix(in srgb, var(--theme-appPanel) 88%, white 12%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-badge-strong,
   :root[data-theme='promptx-glass-light'] .theme-badge-muted {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-badge-strong {
-    border-color: color-mix(in srgb, var(--theme-borderStrong) 58%, white 42%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-appPanelStrong) 92%, white 8%);
   }
 
   :root[data-theme='promptx-glass-light'] .theme-badge-muted {
@@ -1977,88 +844,6 @@ body {
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.04)),
       color-mix(in srgb, var(--theme-appPanelStrong) 88%, var(--theme-appPanelMuted) 12%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-list-item-active,
-  :root[data-theme='promptx-glass-light'] .theme-list-item-expanded,
-  :root[data-theme='promptx-glass-light'] .theme-input-shell,
-  :root[data-theme='promptx-glass-light'] .settings-section-card,
-  :root[data-theme='promptx-glass-light'] .settings-form-card,
-  :root[data-theme='promptx-glass-light'] .theme-content-panel,
-  :root[data-theme='promptx-glass-light'] .theme-inline-panel {
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-list-item-active {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.04)),
-      color-mix(in srgb, var(--theme-accentSoft) 86%, white 14%);
-    border-color: color-mix(in srgb, var(--theme-accent) 44%, white 56%);
-    box-shadow:
-      inset 3px 0 0 var(--theme-accent),
-      inset 0 1px 0 rgba(255, 255, 255, 0.22);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-list-item-expanded {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.04)),
-      color-mix(in srgb, var(--theme-appPanelMuted) 88%, white 12%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-list-item-hover:hover,
-  :root[data-theme='promptx-glass-light'] .theme-list-item-expanded:hover {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.03)),
-      color-mix(in srgb, var(--theme-appPanelMuted) 82%, white 18%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-search-highlight {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-warningSoft) 84%, white 16%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-input-shell {
-    border-color: color-mix(in srgb, var(--theme-inputBorder) 76%, white 24%);
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--theme-inputHighlight) 100%, transparent), color-mix(in srgb, var(--theme-inputBg) 94%, transparent)),
-      var(--theme-inputBg);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-empty-state-strong {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-appPanelStrong) 92%, white 8%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .settings-section-card {
-    border-color: color-mix(in srgb, var(--theme-borderDefault) 64%, white 36%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.08)),
-      color-mix(in srgb, var(--theme-appPanelMuted) 90%, white 10%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .settings-form-card,
-  :root[data-theme='promptx-glass-light'] .theme-content-panel {
-    border-color: color-mix(in srgb, var(--theme-borderDefault) 60%, white 40%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-appPanelStrong) 92%, white 8%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-inline-panel {
-    border-color: color-mix(in srgb, var(--theme-borderDefault) 56%, white 44%);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05)),
-      color-mix(in srgb, var(--theme-appPanelMuted) 86%, white 14%);
-  }
-
-  :root[data-theme='promptx-glass-light'] .theme-input-shell:focus-within {
-    box-shadow:
-      inset 0 1px 0 var(--theme-inputHighlight),
-      0 0 0 1px color-mix(in srgb, var(--theme-accent) 22%, transparent),
-      0 14px 30px rgba(91, 113, 102, 0.1);
   }
 
   :root[data-theme='promptx-aqua-classic'] {
@@ -2089,8 +874,7 @@ body {
   }
 
   :root[data-theme='promptx-aqua-classic'] .panel,
-  :root[data-theme='promptx-aqua-classic'] .theme-popover,
-  :root[data-theme='promptx-aqua-classic'] .workbench-select-panel {
+  :root[data-theme='promptx-aqua-classic'] .theme-popover {
     border-color: color-mix(in srgb, var(--theme-borderDefault) 82%, white 18%);
     border-radius: 0.45rem;
     background:
@@ -2102,40 +886,7 @@ body {
       inset 0 -1px 0 var(--theme-panelChrome);
   }
 
-  :root[data-theme='promptx-aqua-classic'] .dashed-panel,
-  :root[data-theme='promptx-aqua-classic'] .theme-empty-state,
-  :root[data-theme='promptx-aqua-classic'] .settings-section-card,
-  :root[data-theme='promptx-aqua-classic'] .settings-form-card,
-  :root[data-theme='promptx-aqua-classic'] .theme-content-panel,
-  :root[data-theme='promptx-aqua-classic'] .theme-inline-panel {
-    border-color: color-mix(in srgb, var(--theme-borderDefault) 88%, white 12%);
-    border-radius: 0.45rem;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(226, 232, 239, 0.9)),
-      var(--theme-appPanelMuted);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.54),
-      inset 0 -1px 0 rgba(118, 134, 150, 0.08);
-  }
-
-  :root[data-theme='promptx-aqua-classic'] .workbench-panel-header,
-  :root[data-theme='promptx-aqua-classic'] .settings-dialog-header,
-  :root[data-theme='promptx-aqua-classic'] .settings-dialog-nav,
-  :root[data-theme='promptx-aqua-classic'] .workbench-mobile-header,
-  :root[data-theme='promptx-aqua-classic'] .workbench-mobile-tabs {
-    border-color: color-mix(in srgb, var(--theme-borderStrong) 62%, white 38%);
-    background:
-      linear-gradient(180deg, #f7f9fb 0%, #e2e7ed 52%, #d5dde6 100%),
-      var(--theme-appPanelMuted);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.82),
-      inset 0 -1px 0 rgba(92, 106, 122, 0.14);
-  }
-
-  :root[data-theme='promptx-aqua-classic'] .tool-button,
-  :root[data-theme='promptx-aqua-classic'] .theme-agent-selector-button,
-  :root[data-theme='promptx-aqua-classic'] .theme-input-shell,
-  :root[data-theme='promptx-aqua-classic'] .workbench-select-trigger {
+  :root[data-theme='promptx-aqua-classic'] .tool-button {
     border-color: color-mix(in srgb, var(--theme-buttonBorder) 88%, white 12%);
     border-radius: 0.4rem;
     background:
@@ -2147,9 +898,7 @@ body {
       inset 0 -1px 0 rgba(89, 104, 120, 0.14);
   }
 
-  :root[data-theme='promptx-aqua-classic'] .tool-button:hover,
-  :root[data-theme='promptx-aqua-classic'] .theme-agent-selector-button.theme-filter-idle:hover,
-  :root[data-theme='promptx-aqua-classic'] .workbench-select-trigger:hover {
+  :root[data-theme='promptx-aqua-classic'] .tool-button:hover {
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.82) 0%, rgba(241, 245, 249, 0.96) 58%, rgba(229, 236, 243, 0.98) 100%),
       var(--theme-buttonHover);
@@ -2197,24 +946,6 @@ body {
       color-mix(in srgb, white 8%, var(--theme-danger));
   }
 
-  :root[data-theme='promptx-aqua-classic'] .tool-button-danger-subtle {
-    border-color: color-mix(in srgb, var(--theme-danger) 44%, var(--theme-buttonBorder));
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.6), color-mix(in srgb, var(--theme-dangerSoft) 84%, var(--theme-appPanelStrong) 16%)),
-      var(--theme-dangerSoft);
-    color: var(--theme-dangerText);
-    box-shadow:
-      0 1px 2px rgba(169, 63, 63, 0.08),
-      inset 0 1px 0 rgba(255, 255, 255, 0.62);
-  }
-
-  :root[data-theme='promptx-aqua-classic'] .tool-button-danger-subtle:hover {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.52), color-mix(in srgb, var(--theme-dangerSoft) 74%, var(--theme-danger) 26%)),
-      color-mix(in srgb, var(--theme-dangerSoft) 82%, var(--theme-danger) 18%);
-    color: var(--theme-dangerText);
-  }
-
   :root[data-theme='promptx-aqua-classic'] .tool-input {
     border-color: var(--theme-inputBorder);
     border-radius: 0.35rem;
@@ -2226,8 +957,7 @@ body {
       inset 0 1px 0 var(--theme-inputHighlight);
   }
 
-  :root[data-theme='promptx-aqua-classic'] .tool-input:focus,
-  :root[data-theme='promptx-aqua-classic'] .theme-input-shell:focus-within {
+  :root[data-theme='promptx-aqua-classic'] .tool-input:focus {
     border-color: var(--theme-accent);
     box-shadow:
       inset 0 1px 3px rgba(63, 78, 94, 0.16),
@@ -2235,17 +965,13 @@ body {
   }
 
   :root[data-theme='promptx-aqua-classic'] .theme-toggle-current,
-  :root[data-theme='promptx-aqua-classic'] .theme-toggle-card,
-  :root[data-theme='promptx-aqua-classic'] .settings-nav__item,
-  :root[data-theme='promptx-aqua-classic'] .workbench-task-card,
-  :root[data-theme='promptx-aqua-classic'] .transcript-card {
+  :root[data-theme='promptx-aqua-classic'] .theme-toggle-card {
     box-shadow:
       0 6px 16px rgba(54, 68, 82, 0.08),
       inset 0 1px 0 rgba(255, 255, 255, 0.52);
   }
 
-  :root[data-theme='promptx-aqua-classic'] .theme-option-active,
-  :root[data-theme='promptx-aqua-classic'] .theme-list-item-active {
+  :root[data-theme='promptx-aqua-classic'] .theme-option-active {
     border-color: color-mix(in srgb, var(--theme-accent) 72%, var(--theme-borderStrong));
     background:
       linear-gradient(180deg, #edf6ff 0%, #d8e9fb 58%, #cfe2f7 100%),
@@ -2256,77 +982,14 @@ body {
       0 4px 12px rgba(47, 120, 196, 0.1);
   }
 
-  :root[data-theme='promptx-aqua-classic'] .theme-card-selected {
-    border-color: color-mix(in srgb, var(--theme-accent) 72%, var(--theme-borderStrong));
-    background:
-      linear-gradient(180deg, #edf6ff 0%, #d8e9fb 58%, #cfe2f7 100%),
-      var(--theme-accentSoft);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.58),
-      0 4px 12px rgba(47, 120, 196, 0.1);
-  }
-
-  :root[data-theme='promptx-aqua-classic'] .theme-filter-active {
-    border-color: color-mix(in srgb, var(--theme-accent) 72%, var(--theme-borderStrong));
-    background:
-      linear-gradient(180deg, #edf6ff 0%, #d8e9fb 58%, #cfe2f7 100%),
-      var(--theme-accentSoft);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.58),
-      0 4px 12px rgba(47, 120, 196, 0.1);
-  }
-
-  :root[data-theme='promptx-aqua-classic'] .theme-card-idle-muted,
-  :root[data-theme='promptx-aqua-classic'] .theme-card-idle-strong,
-  :root[data-theme='promptx-aqua-classic'] .theme-card-warning,
-  :root[data-theme='promptx-aqua-classic'] .workbench-task-card {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(226, 232, 239, 0.92)),
-      var(--theme-appPanelMuted);
-  }
-
-  :root[data-theme='promptx-aqua-classic'] .theme-card-idle-muted:hover,
-  :root[data-theme='promptx-aqua-classic'] .theme-card-idle-strong:hover,
-  :root[data-theme='promptx-aqua-classic'] .theme-card-warning:hover,
-  :root[data-theme='promptx-aqua-classic'] .workbench-task-card:hover,
-  :root[data-theme='promptx-aqua-classic'] .theme-option-idle:hover,
-  :root[data-theme='promptx-aqua-classic'] .theme-filter-idle:hover,
-  :root[data-theme='promptx-aqua-classic'] .theme-list-item-hover:hover,
-  :root[data-theme='promptx-aqua-classic'] .theme-list-item-expanded:hover {
+  :root[data-theme='promptx-aqua-classic'] .theme-option-idle:hover {
     border-color: color-mix(in srgb, var(--theme-borderStrong) 72%, white 28%);
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(231, 237, 244, 0.92)),
       var(--theme-appPanelHover);
   }
 
-  :root[data-theme='promptx-aqua-classic'] .transcript-card {
-    border-radius: 0.5rem;
-    border-color: color-mix(in srgb, var(--theme-borderDefault) 82%, white 18%);
-  }
-
-  :root[data-theme='promptx-aqua-classic'] .transcript-card--prompt {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(247, 239, 228, 0.96)),
-      var(--theme-promptBg);
-  }
-
-  :root[data-theme='promptx-aqua-classic'] .transcript-card--process {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(238, 242, 246, 0.96)),
-      var(--theme-processBg);
-  }
-
-  :root[data-theme='promptx-aqua-classic'] .transcript-card--response {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(225, 239, 251, 0.96)),
-      var(--theme-responseBg);
-  }
-
-  :root[data-theme='promptx-aqua-classic'] .transcript-card__toggle,
-  :root[data-theme='promptx-aqua-classic'] .transcript-card__pill,
-  :root[data-theme='promptx-aqua-classic'] .theme-badge-strong,
-  :root[data-theme='promptx-aqua-classic'] .theme-badge-muted,
-  :root[data-theme='promptx-aqua-classic'] .theme-list-item-badge {
+  :root[data-theme='promptx-aqua-classic'] .theme-badge-muted {
     border-radius: 0.35rem;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(226, 234, 242, 0.88)),
@@ -2334,9 +997,6 @@ body {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.64);
   }
 
-  :root[data-theme='promptx-aqua-classic'] .transcript-card__subtle,
-  :root[data-theme='promptx-aqua-classic'] .transcript-card__media,
-  :root[data-theme='promptx-aqua-classic'] .transcript-event-card,
   :root[data-theme='promptx-aqua-classic'] .codex-markdown pre,
   :root[data-theme='promptx-aqua-classic'] .codex-table-wrap {
     border-color: var(--theme-codeBorder);
@@ -2363,46 +1023,8 @@ body {
 }
 
 @media (max-width: 640px) {
-  .workbench-mobile-header,
-  .workbench-mobile-tabs,
-  .workbench-mobile-header-panel,
-  .workbench-mobile-tabs-panel,
-  .workbench-mobile-header-panel .panel,
-  .workbench-mobile-tabs-panel .panel {
-    border-radius: 0;
-  }
 
-  .workbench-mobile-header {
-    padding: 0.4rem 0.55rem;
-  }
-
-  .workbench-mobile-tabs {
-    padding: 0;
-  }
-
-  .workbench-mobile-tabs .tool-button {
-    min-height: 2.25rem;
-    font-size: 0.8125rem;
-  }
-
-  .workbench-mobile-header .tool-button,
-  .workbench-mobile-header .theme-icon-button,
-  .workbench-mobile-header input,
-  .workbench-mobile-header button {
-    min-height: 1.7rem;
-  }
-
-  .workbench-mobile-header input,
-  .workbench-mobile-header button[type='button'] {
-    font-size: 0.78rem;
-  }
-
-  .settings-dialog-panel {
-    height: min(100dvh - 1rem, 52rem);
-  }
-
-  .dialog-shell-panel,
-  .settings-dialog-panel {
+  .dialog-shell-panel {
     border-radius: 0;
   }
 
@@ -2413,49 +1035,6 @@ body {
   .dialog-shell-panel .theme-inline-panel,
   .dialog-shell-panel .theme-empty-state {
     border-radius: 0;
-  }
-
-  .settings-dialog-header {
-    padding: 0.85rem 0.95rem;
-  }
-
-  .settings-dialog-nav {
-    padding: 0.65rem 0.75rem;
-  }
-
-  .settings-dialog-body {
-    min-height: 0;
-  }
-
-  .settings-dialog-content {
-    padding: 0.85rem 0.9rem 1rem;
-  }
-
-  .settings-nav {
-    gap: 0.45rem;
-    padding-bottom: 0.1rem;
-    scroll-snap-type: x proximity;
-  }
-
-  .settings-nav__item {
-    min-width: 5.5rem;
-    flex: 0 0 auto;
-    padding: 0.7rem 0.8rem;
-    gap: 0.5rem;
-    scroll-snap-align: start;
-  }
-
-  .settings-nav__item .text-sm {
-    font-size: 0.8125rem;
-  }
-
-  .settings-form-footer {
-    align-items: stretch;
-  }
-
-  .settings-form-footer .tool-button {
-    width: 100%;
-    justify-content: center;
   }
 
   :root[data-theme='promptx-glass-light'] .app-shell::before {
@@ -2475,48 +1054,20 @@ body {
   }
 
   :root[data-theme='promptx-glass-light'] .panel,
-  :root[data-theme='promptx-glass-light'] .dashed-panel,
   :root[data-theme='promptx-glass-light'] .theme-popover,
   :root[data-theme='promptx-glass-light'] .tool-button,
   :root[data-theme='promptx-glass-light'] .tool-input,
-  :root[data-theme='promptx-glass-light'] .theme-status-success,
-  :root[data-theme='promptx-glass-light'] .theme-status-warning,
   :root[data-theme='promptx-glass-light'] .theme-status-danger,
-  :root[data-theme='promptx-glass-light'] .theme-status-info,
-  :root[data-theme='promptx-glass-light'] .theme-status-neutral,
-  :root[data-theme='promptx-glass-light'] .workbench-task-card,
-  :root[data-theme='promptx-glass-light'] .transcript-card {
+  :root[data-theme='promptx-glass-light'] .theme-status-neutral {
     backdrop-filter: blur(10px) saturate(145%);
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.46),
       0 10px 20px rgba(91, 113, 102, 0.06);
   }
 
-  :root[data-theme='promptx-glass-light'] .workbench-task-card:hover {
-    transform: none;
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.52),
-      0 12px 24px rgba(91, 113, 102, 0.08);
-  }
-
-  :root[data-theme='promptx-glass-light'] .transcript-card {
-    border-radius: 0.7rem;
-  }
-
   :root[data-theme='promptx-glass-light'] {
     --theme-processDetailRadius: 0.6rem;
     --theme-processDetailBadgeRadius: 0.6rem;
-  }
-
-  :root[data-theme='promptx-glass-light'] .transcript-card__subtle,
-  :root[data-theme='promptx-glass-light'] .transcript-card__media,
-  :root[data-theme='promptx-glass-light'] .transcript-event-card,
-  :root[data-theme='promptx-glass-light'] .theme-content-panel,
-  :root[data-theme='promptx-glass-light'] .theme-inline-panel,
-  :root[data-theme='promptx-glass-light'] .theme-empty-state,
-  :root[data-theme='promptx-glass-light'] .workbench-select-panel,
-  :root[data-theme='promptx-glass-light'] .settings-section-card {
-    border-radius: 0.6rem;
   }
 
   :root[data-theme='promptx-glass-light'] .codex-markdown pre,
@@ -2531,34 +1082,12 @@ body {
       0 8px 16px rgba(0, 0, 0, 0.14);
   }
 
-  :root[data-theme='promptx-glass-light'] .settings-dialog-panel {
-    box-shadow:
-      0 18px 36px rgba(64, 82, 74, 0.12),
-      inset 0 1px 0 rgba(255, 255, 255, 0.42);
-  }
-
-  :root[data-theme='promptx-glass-light'] .settings-dialog-header,
-  :root[data-theme='promptx-glass-light'] .settings-dialog-nav,
-  :root[data-theme='promptx-glass-light'] .workbench-mobile-header,
-  :root[data-theme='promptx-glass-light'] .workbench-mobile-tabs {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.06)),
-      color-mix(in srgb, var(--theme-appPanelMuted) 90%, white 10%);
-  }
-
   :root[data-theme='promptx-ink-landscape'] .panel,
-  :root[data-theme='promptx-ink-landscape'] .dashed-panel,
   :root[data-theme='promptx-ink-landscape'] .theme-popover,
   :root[data-theme='promptx-ink-landscape'] .tool-button,
   :root[data-theme='promptx-ink-landscape'] .tool-input,
-  :root[data-theme='promptx-ink-landscape'] .theme-empty-state,
   :root[data-theme='promptx-ink-landscape'] .theme-option,
-  :root[data-theme='promptx-ink-landscape'] .theme-filter-idle,
-  :root[data-theme='promptx-ink-landscape'] .theme-filter-active,
-  :root[data-theme='promptx-ink-landscape'] .theme-status-success,
-  :root[data-theme='promptx-ink-landscape'] .theme-status-warning,
   :root[data-theme='promptx-ink-landscape'] .theme-status-danger,
-  :root[data-theme='promptx-ink-landscape'] .theme-status-info,
   :root[data-theme='promptx-ink-landscape'] .theme-status-neutral {
     backdrop-filter: blur(var(--theme-backdropBlur)) saturate(var(--theme-backdropSaturate));
   }
@@ -2642,23 +1171,6 @@ body {
       inset 0 -1px 0 rgba(103, 112, 116, 0.08);
   }
 
-  :root[data-theme='promptx-ink-landscape'] .dashed-panel,
-  :root[data-theme='promptx-ink-landscape'] .theme-empty-state,
-  :root[data-theme='promptx-ink-landscape'] .theme-content-panel,
-  :root[data-theme='promptx-ink-landscape'] .theme-inline-panel,
-  :root[data-theme='promptx-ink-landscape'] .settings-section-card,
-  :root[data-theme='promptx-ink-landscape'] .settings-form-card {
-    border-color: color-mix(in srgb, var(--theme-borderStrong) 46%, white 28%);
-    border-radius: 0.7rem;
-    background:
-      linear-gradient(180deg, rgba(252, 253, 251, 0.28), rgba(241, 244, 241, 0.76)),
-      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 26px),
-      var(--theme-appPanelMuted);
-    box-shadow:
-      var(--theme-shadowPanel),
-      inset 0 1px 0 rgba(255, 255, 255, 0.26);
-  }
-
   :root[data-theme='promptx-ink-landscape'] .tool-button,
   :root[data-theme='promptx-ink-landscape'] .tool-input {
     border-color: color-mix(in srgb, var(--theme-buttonBorder) 78%, white 22%);
@@ -2695,11 +1207,7 @@ body {
   }
 
   :root[data-theme='promptx-ink-landscape'] .theme-toggle-current,
-  :root[data-theme='promptx-ink-landscape'] .theme-toggle-card,
-  :root[data-theme='promptx-ink-landscape'] .settings-nav__item,
-  :root[data-theme='promptx-ink-landscape'] .workbench-task-card,
-  :root[data-theme='promptx-ink-landscape'] .transcript-card,
-  :root[data-theme='promptx-ink-landscape'] .workbench-select-panel {
+  :root[data-theme='promptx-ink-landscape'] .theme-toggle-card {
     box-shadow:
       0 12px 26px rgba(34, 39, 41, 0.06),
       inset 0 1px 0 rgba(255, 255, 255, 0.14);
@@ -2711,9 +1219,7 @@ body {
       var(--theme-appPanelStrong);
   }
 
-  :root[data-theme='promptx-ink-landscape'] .theme-option-active,
-  :root[data-theme='promptx-ink-landscape'] .theme-filter-active,
-  :root[data-theme='promptx-ink-landscape'] .theme-card-selected {
+  :root[data-theme='promptx-ink-landscape'] .theme-option-active {
     border-color: color-mix(in srgb, var(--theme-accent) 76%, var(--theme-borderStrong));
     background:
       linear-gradient(180deg, rgba(244, 248, 249, 0.96), rgba(228, 235, 238, 0.98)),
@@ -2721,90 +1227,23 @@ body {
     box-shadow: 0 14px 30px rgba(83, 105, 117, 0.16);
   }
 
-  :root[data-theme='promptx-ink-landscape'] .theme-card-idle-muted,
-  :root[data-theme='promptx-ink-landscape'] .theme-card-idle-strong,
-  :root[data-theme='promptx-ink-landscape'] .theme-card-warning,
-  :root[data-theme='promptx-ink-landscape'] .workbench-task-card {
-    background:
-      linear-gradient(180deg, rgba(252, 253, 251, 0.3), rgba(241, 244, 241, 0.82)),
-      var(--theme-appPanelMuted);
-  }
-
-  :root[data-theme='promptx-ink-landscape'] .theme-card-idle-muted:hover,
-  :root[data-theme='promptx-ink-landscape'] .theme-card-idle-strong:hover,
-  :root[data-theme='promptx-ink-landscape'] .theme-card-warning:hover,
-  :root[data-theme='promptx-ink-landscape'] .workbench-task-card:hover {
-    background:
-      linear-gradient(180deg, rgba(252, 253, 251, 0.4), rgba(232, 238, 235, 0.88)),
-      var(--theme-appPanelHover);
-    border-color: color-mix(in srgb, var(--theme-borderStrong) 62%, white 18%);
-  }
-
-  :root[data-theme='promptx-ink-landscape'] .workbench-task-card--active {
-    background:
-      linear-gradient(180deg, rgba(243, 248, 249, 0.96), rgba(227, 235, 238, 0.98)),
-      var(--theme-accentSoft);
-  }
-
-  :root[data-theme='promptx-ink-landscape'] .workbench-panel-header,
-  :root[data-theme='promptx-ink-landscape'] .settings-dialog-header,
-  :root[data-theme='promptx-ink-landscape'] .settings-dialog-nav,
-  :root[data-theme='promptx-ink-landscape'] .workbench-mobile-header,
-  :root[data-theme='promptx-ink-landscape'] .workbench-mobile-tabs {
-    background:
-      linear-gradient(180deg, rgba(252, 253, 251, 0.34), rgba(242, 245, 243, 0.82)),
-      var(--theme-appPanelMuted);
-    border-color: color-mix(in srgb, var(--theme-borderMuted) 76%, white 12%);
-  }
-
-  :root[data-theme='promptx-ink-landscape'] .transcript-card--prompt {
-    background: var(--theme-promptBg);
-  }
-
-  :root[data-theme='promptx-ink-landscape'] .transcript-card--process {
-    background: var(--theme-processBg);
-  }
-
-  :root[data-theme='promptx-ink-landscape'] .transcript-card--response {
-    background: var(--theme-responseBg);
-  }
-
   :root[data-theme='promptx-ink-landscape'] .codex-markdown blockquote,
   :root[data-theme='promptx-ink-landscape'] .codex-markdown pre,
-  :root[data-theme='promptx-ink-landscape'] .codex-table-wrap,
-  :root[data-theme='promptx-ink-landscape'] .transcript-card__subtle,
-  :root[data-theme='promptx-ink-landscape'] .transcript-card__media,
-  :root[data-theme='promptx-ink-landscape'] .transcript-event-card {
+  :root[data-theme='promptx-ink-landscape'] .codex-table-wrap {
     border-color: var(--theme-borderDefault);
     background: var(--theme-appPanelStrong);
   }
 
   :root[data-theme='promptx-wechat-light'] .panel,
-  :root[data-theme='promptx-wechat-light'] .theme-popover,
-  :root[data-theme='promptx-wechat-light'] .workbench-select-panel {
+  :root[data-theme='promptx-wechat-light'] .theme-popover {
     border-color: var(--theme-borderDefault);
     border-radius: 0;
     background: var(--theme-appPanelStrong);
     box-shadow: var(--theme-shadowPanel);
   }
 
-  :root[data-theme='promptx-wechat-light'] .dashed-panel,
-  :root[data-theme='promptx-wechat-light'] .theme-empty-state,
-  :root[data-theme='promptx-wechat-light'] .settings-section-card,
-  :root[data-theme='promptx-wechat-light'] .settings-form-card,
-  :root[data-theme='promptx-wechat-light'] .theme-content-panel,
-  :root[data-theme='promptx-wechat-light'] .theme-inline-panel {
-    border-style: solid;
-    border-color: var(--theme-borderDefault);
-    border-radius: 0;
-    background: var(--theme-appPanelStrong);
-    box-shadow: none;
-  }
-
   :root[data-theme='promptx-wechat-light'] .tool-button,
-  :root[data-theme='promptx-wechat-light'] .tool-input,
-  :root[data-theme='promptx-wechat-light'] .theme-input-shell,
-  :root[data-theme='promptx-wechat-light'] .workbench-select-trigger {
+  :root[data-theme='promptx-wechat-light'] .tool-input {
     border-color: var(--theme-inputBorder);
     border-radius: 0;
     background: var(--theme-inputBg);
@@ -2818,17 +1257,6 @@ body {
   :root[data-theme='promptx-wechat-light'] .tool-button:hover {
     background: var(--theme-buttonHover);
     box-shadow: none;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .tool-button-accent-subtle {
-    border-color: var(--theme-accent);
-    background: var(--theme-accentSoft);
-    color: var(--theme-accentText);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .tool-button-accent-subtle:hover {
-    background: color-mix(in srgb, var(--theme-accentSoft) 88%, var(--theme-accent) 12%);
-    color: var(--theme-accentText);
   }
 
   :root[data-theme='promptx-wechat-light'] .tool-button-primary {
@@ -2853,227 +1281,23 @@ body {
     background: color-mix(in srgb, black 8%, var(--theme-danger));
   }
 
-  :root[data-theme='promptx-wechat-light'] .tool-button-danger-subtle {
-    border-color: color-mix(in srgb, var(--theme-danger) 36%, var(--theme-buttonBorder));
-    background: var(--theme-dangerSoft);
-    color: var(--theme-dangerText);
-    box-shadow: none;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .tool-button-danger-subtle:hover {
-    background: color-mix(in srgb, var(--theme-dangerSoft) 82%, var(--theme-danger) 18%);
-    color: var(--theme-dangerText);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .tool-button-warning-subtle {
-    border-color: color-mix(in srgb, var(--theme-warning) 36%, var(--theme-buttonBorder));
-    background: var(--theme-warningSoft);
-    color: var(--theme-warningText);
-    box-shadow: none;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .tool-button-warning-subtle:hover {
-    background: color-mix(in srgb, var(--theme-warningSoft) 82%, var(--theme-warning) 18%);
-    color: var(--theme-warningText);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .tool-button-success-subtle {
-    border-color: color-mix(in srgb, var(--theme-success) 36%, var(--theme-buttonBorder));
-    background: var(--theme-successSoft);
-    color: var(--theme-successText);
-    box-shadow: none;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .tool-button-success-subtle:hover {
-    background: color-mix(in srgb, var(--theme-successSoft) 82%, var(--theme-success) 18%);
-    color: var(--theme-successText);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .tool-button-info-subtle {
-    border-color: color-mix(in srgb, var(--theme-info) 36%, var(--theme-buttonBorder));
-    background: var(--theme-infoSoft);
-    color: var(--theme-infoText);
-    box-shadow: none;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .tool-button-info-subtle:hover {
-    background: color-mix(in srgb, var(--theme-infoSoft) 82%, var(--theme-info) 18%);
-    color: var(--theme-infoText);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-panel-header,
-  :root[data-theme='promptx-wechat-light'] .settings-dialog-header,
-  :root[data-theme='promptx-wechat-light'] .settings-dialog-nav {
-    background: var(--theme-appBg);
-    border-color: var(--theme-borderDefault);
-    box-shadow: none;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-desktop-layout,
-  :root[data-theme='promptx-wechat-light'] .workbench-detail-layout {
-    gap: 0;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-sidebar-panel,
-  :root[data-theme='promptx-wechat-light'] .workbench-activity-shell,
-  :root[data-theme='promptx-wechat-light'] .workbench-input-shell,
-  :root[data-theme='promptx-wechat-light'] .workbench-task-card,
-  :root[data-theme='promptx-wechat-light'] .transcript-card,
   :root[data-theme='promptx-wechat-light'] .tool-button,
-  :root[data-theme='promptx-wechat-light'] .tool-input,
-  :root[data-theme='promptx-wechat-light'] .theme-input-shell,
-  :root[data-theme='promptx-wechat-light'] .workbench-select-trigger,
-  :root[data-theme='promptx-wechat-light'] .theme-empty-state,
-  :root[data-theme='promptx-wechat-light'] .theme-content-panel,
-  :root[data-theme='promptx-wechat-light'] .theme-inline-panel,
-  :root[data-theme='promptx-wechat-light'] .settings-section-card,
-  :root[data-theme='promptx-wechat-light'] .settings-form-card {
+  :root[data-theme='promptx-wechat-light'] .tool-input {
     border-radius: 0;
   }
 
-  :root[data-theme='promptx-wechat-light'] .workbench-sidebar-panel {
-    border-color: var(--theme-borderDefault);
-    background: var(--theme-appPanelStrong);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-sidebar-panel .workbench-panel-header {
-    background: var(--theme-appPanelStrong);
-    border-bottom-color: var(--theme-borderDefault);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-activity-shell,
-  :root[data-theme='promptx-wechat-light'] .workbench-input-shell {
-    border-color: var(--theme-borderMuted);
-    background: var(--theme-appPanelStrong);
-    border-left-width: 0;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-transcript {
-    background: var(--theme-appPanelStrong);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-activity-shell .workbench-panel-header,
-  :root[data-theme='promptx-wechat-light'] .workbench-input-shell .workbench-panel-header {
-    background: #f7f7f7;
-    border-bottom-color: var(--theme-borderDefault);
-  }
-
   :root[data-theme='promptx-wechat-light'] .theme-toggle-current,
-  :root[data-theme='promptx-wechat-light'] .theme-toggle-card,
-  :root[data-theme='promptx-wechat-light'] .settings-nav__item,
-  :root[data-theme='promptx-wechat-light'] .workbench-task-card,
-  :root[data-theme='promptx-wechat-light'] .transcript-card {
+  :root[data-theme='promptx-wechat-light'] .theme-toggle-card {
     box-shadow: none;
   }
 
-  :root[data-theme='promptx-wechat-light'] .theme-option-active,
-  :root[data-theme='promptx-wechat-light'] .theme-filter-active,
-  :root[data-theme='promptx-wechat-light'] .theme-card-selected {
+  :root[data-theme='promptx-wechat-light'] .theme-option-active {
     border-color: var(--theme-accent);
     background: var(--theme-accentSoft);
     box-shadow: none;
   }
 
-  :root[data-theme='promptx-wechat-light'] .theme-card-idle-muted,
-  :root[data-theme='promptx-wechat-light'] .theme-card-idle-strong,
-  :root[data-theme='promptx-wechat-light'] .theme-card-warning {
-    border-color: var(--theme-borderDefault);
-    background: var(--theme-appPanelMuted);
-    box-shadow: none;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .theme-card-idle-muted:hover,
-  :root[data-theme='promptx-wechat-light'] .theme-card-idle-strong:hover,
-  :root[data-theme='promptx-wechat-light'] .theme-card-warning:hover {
-    background: var(--theme-appPanelHover);
-    border-color: var(--theme-borderStrong);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-task-card--running {
-    border-color: var(--theme-warning);
-    background: var(--theme-appPanelMuted);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-task-card__preview {
-    color: var(--theme-textMuted);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .transcript-card {
-    border-style: solid;
-    border-color: transparent;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .transcript-card--prompt {
-    border-color: var(--theme-promptBorder);
-    background: var(--theme-promptBg);
-    font-family: var(--theme-fontSans);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .transcript-card--process {
-    border-color: var(--theme-processBorder);
-    background: var(--theme-processBg);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .transcript-card--response {
-    border-color: var(--theme-responseBorder);
-    background: var(--theme-responseBg);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .transcript-card--response .transcript-card__toggle {
-    background: rgba(255, 255, 255, 0.9);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .transcript-card__toggle,
-  :root[data-theme='promptx-wechat-light'] .transcript-card__pill {
-    border-radius: 0;
-    background: var(--theme-appPanelStrong);
-    box-shadow: none;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .transcript-card--prompt .transcript-card__toggle,
-  :root[data-theme='promptx-wechat-light'] .transcript-card--response .transcript-card__toggle {
-    background: rgba(255, 255, 255, 0.78);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .transcript-card__subtle,
-  :root[data-theme='promptx-wechat-light'] .transcript-card__media,
-  :root[data-theme='promptx-wechat-light'] .transcript-event-card {
-    border-style: solid;
-    border-color: var(--theme-borderDefault);
-    border-radius: 0;
-    background: var(--theme-appPanelStrong);
-    box-shadow: none;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .process-detail-panel,
-  :root[data-theme='promptx-wechat-light'] .process-detail-meta__item,
-  :root[data-theme='promptx-wechat-light'] .process-detail-directory__type,
-  :root[data-theme='promptx-wechat-light'] .process-detail-filechange__kind {
-    border-style: solid;
-    border-color: var(--theme-borderDefault);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-input-shell .workbench-panel-header {
-    border-color: var(--theme-borderDefault);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-input-shell [data-promptx-editor-scroll='tiptap'] {
-    background: var(--theme-appPanelStrong);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-input-shell .tool-button-primary {
-    padding-left: 0.95rem;
-    padding-right: 0.95rem;
-  }
-
-  :root[data-theme='promptx-wechat-light'] .workbench-select-trigger {
-    background: var(--theme-appPanelStrong);
-  }
-
-  :root[data-theme='promptx-wechat-light'] .theme-option-idle:hover,
-  :root[data-theme='promptx-wechat-light'] .theme-filter-idle:hover,
-  :root[data-theme='promptx-wechat-light'] .theme-list-item-hover:hover,
-  :root[data-theme='promptx-wechat-light'] .theme-list-item-expanded:hover {
+  :root[data-theme='promptx-wechat-light'] .theme-option-idle:hover {
     background: var(--theme-appPanelHover);
   }
 

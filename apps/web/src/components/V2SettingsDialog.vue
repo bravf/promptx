@@ -128,10 +128,10 @@ watch(
   >
     <template #title>
       <div class="flex h-full items-center justify-between gap-4">
-        <div class="theme-heading flex min-w-0 items-center gap-2 text-sm font-semibold">
+        <h2 class="theme-heading flex min-w-0 items-center gap-2 text-sm font-semibold">
           <Settings2 class="h-4 w-4 shrink-0" />
           <span>设置</span>
-        </div>
+        </h2>
         <button type="button" class="quiet-icon-button h-8 w-8 shrink-0" title="关闭设置" aria-label="关闭设置" @click="emit('close')">
           <X class="h-4 w-4" />
         </button>

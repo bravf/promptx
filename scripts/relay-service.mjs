@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
-import { resolvePromptxPaths } from '../apps/server/src/appPaths.js'
+import { resolvePromptxPaths } from './lib/promptxPaths.mjs'
 import { formatLocalLogDate } from '../packages/shared/src/dailyLogStream.js'
 
 const DEFAULT_RELAY_PORT = 3030

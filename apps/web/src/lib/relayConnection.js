@@ -7,6 +7,7 @@ import {
   encryptPayload,
   generateKeyPair,
   importPublicKey,
+  NonceReplayWindow,
   parseJsonFrame,
   splitBytes,
 } from '@promptx/relay'
@@ -46,7 +47,7 @@ export class EncryptedRelayConnection {
     this.WebSocketClass = options.WebSocketClass || globalThis.WebSocket
     this.socket = null
     this.sharedKey = null
-    this.seenNonces = new Set()
+    this.seenNonces = new NonceReplayWindow()
     this.pending = new Map()
     this.connectPromise = null
     this.reconnectTimer = null
@@ -77,7 +78,7 @@ export class EncryptedRelayConnection {
     clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
     this.sharedKey = null
-    this.seenNonces = new Set()
+    this.seenNonces = new NonceReplayWindow()
     this.updateStatus({ state: this.reconnectAttempt ? 'reconnecting' : 'connecting', error: '' })
     this.connectPromise = new Promise((resolve, reject) => {
       const keyPair = generateKeyPair()
@@ -112,7 +113,7 @@ export class EncryptedRelayConnection {
           }
           this.sharedKey = sharedKey
           clearTimeout(handshakeTimer)
-          this.seenNonces = new Set()
+          this.seenNonces = new NonceReplayWindow()
           this.reconnectAttempt = 0
           this.updateStatus({ state: 'ready', error: '', connectedAt: new Date().toISOString() })
           resolve()

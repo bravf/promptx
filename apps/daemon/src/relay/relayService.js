@@ -10,6 +10,7 @@ import {
   encryptPayload,
   importPublicKey,
   importSecretKey,
+  NonceReplayWindow,
   parseJsonFrame,
   splitBytes,
 } from '../../../../packages/relay/src/index.js'
@@ -33,6 +34,7 @@ const excludedHeaders = new Set([
   'cookie',
   'host',
   'keep-alive',
+  'origin',
   'proxy-authenticate',
   'proxy-authorization',
   'te',
@@ -337,7 +339,7 @@ export class RelayService {
       connectionId,
       socket,
       sharedKey: null,
-      seenNonces: new Set(),
+      seenNonces: new NonceReplayWindow(),
       requests: new Map(),
       handshakeTimer: null,
     }

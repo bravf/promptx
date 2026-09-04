@@ -2,188 +2,92 @@
 
 [中文 README](README.md)
 
-PromptX is a local workspace for AI agents.
+PromptX is a local-first workspace for AI coding agents. It keeps working directories, agent conversations, execution timelines, replies, file browsing, and Git diffs in one interface, with encrypted remote access through Relay.
 
-It takes the CLI tools you already use — `Codex`, `Claude Code`, and `OpenCode` — and organizes them into a workflow that is easier to keep running over time:
+The V2 data model is:
 
 ```text
-Task -> Project -> Directory -> Thread -> Run -> Diff
+Workspace -> Agent conversation -> Turn -> Timeline
 ```
 
-You keep using the agent and model you already know. PromptX brings structured input, project binding, execution logs, final replies, code review, and source browsing into one workspace.
+Each workspace maps to a real directory and may contain multiple Codex, Claude, or Kimi conversations. PromptX resumes native provider sessions and reconciles their histories into one local timeline format.
 
-PromptX can also reuse sessions with these agent CLIs in both directions:
+## Features
 
-- Start a session in `Codex`, `Claude Code`, or `OpenCode`, then continue it inside PromptX
-- Start and advance a project inside PromptX, then resume the same session back in the agent CLI
-
-## Why It Is More Useful Now
-
-- One project can attach multiple agents, and you can switch the send target from the right panel
-- Review `PromptX` input cards, execution logs, final replies, and run history on the same page
-- Browse the current project source code in read-only mode, with path and content search
-- Inspect workspace-level, task-level, or per-run diffs without leaving the app
-- Insert useful fragments from prompts, replies, source files, and diffs back into the editor
-- Multiple built-in themes are available; the screenshots below use the `WeChat` theme
-- Relay support lets you access your local PromptX from mobile or external networks
+- Codex, Claude Code, and Kimi Code providers.
+- Import existing local sessions from all three providers.
+- Live user messages, reasoning, tool activity, and final replies.
+- In-memory drafts per conversation; drafts survive switching conversations but not a page reload.
+- Workspace file browsing and staged, unstaged, or untracked Git diffs.
+- One responsive desktop and mobile UI with browser-back navigation on mobile pages and dialogs.
+- End-to-end encryption between the browser and Daemon; the public Relay only forwards ciphertext.
 
 ## Quick Start
 
-### Requirements
+Requirements:
 
-- Recommended: `Node 22 LTS`
-- Currently compatible with stable `Node 20 / 22 / 24`
-- At least one supported engine installed locally:
-  - `codex --version`
-  - `claude --version`
-  - `opencode --version`
-
-### Install
+- Node 22 LTS is recommended. Node 20.19+, 22.13+, and 24.x are supported.
+- Install at least one supported provider CLI: `codex`, `claude`, or `kimi`.
 
 ```bash
 npm install -g @muyichengshayu/promptx
 promptx doctor
+promptx start
 ```
 
-### Start
-
-Default URL: `http://127.0.0.1:3000`
+Open `http://127.0.0.1:3001`.
 
 ```bash
-promptx start
 promptx status
+promptx restart
 promptx stop
 ```
 
-### Basic Workflow
-
-1. Create a task and prepare the requirements, logs, screenshots, and files you want to send
-2. Bind that task to a project
-3. Choose a working directory, default engine, and optional collaborating agents
-4. Pick which agent should receive this round from the right panel
-5. Send and review logs, replies, source files, and diffs in the same workspace
-6. Insert useful snippets back into the editor and continue the next round
-
-## Core Features
-
-- Structured input: text, images, `md`, `txt`, and `pdf`
-- Project reuse: keep a stable directory and default engine/thread context
-- Multi-agent collaboration: one project can attach `Codex`, `Claude Code`, and `OpenCode`
-- Visible process: inspect execution logs, final replies, and run history
-- Source browser: read-only source browsing with path search and content search
-- Built-in diff review: inspect workspace, accumulated task, or per-run changes
-- Context reinsertion: insert content from prompts, replies, source files, and diffs back into the editor
-- Session interoperability: PromptX can reuse sessions with `Codex`, `Claude Code`, and `OpenCode`
-- Remote access: connect from mobile or external networks through Relay
-
-## Screenshots
-
-All screenshots below use the `WeChat` theme.
-
-### 1. Workspace Overview
-
-See the task list, agent filter, input cards, execution logs, and final replies together.
-
-![PromptX workspace overview](docs/assets/readme-workbench-wechat.png)
-
-### 2. Execution Logs and Replies
-
-Review prompts, process logs, and final replies from the same round without bouncing between the terminal and diff tools.
-
-![PromptX execution focus](docs/assets/readme-execution-focus-wechat.png)
-
-### 3. Multi-Agent Project Management
-
-One project can attach multiple agents while sharing the same directory. Each agent builds its own thread on first send.
-
-![PromptX multi-agent project management](docs/assets/readme-project-manager-wechat.png)
-
-### 4. Read-Only Source Browser
-
-Use the directory tree and search results on the left, with file preview on the right, to inspect code and send context back into the editor.
-
-![PromptX source browser](docs/assets/readme-source-browser-wechat.png)
-
-### 5. Diff Review
-
-Inspect workspace-level, task-level, or single-run changes to understand exactly what an agent changed.
-
-![PromptX diff review](docs/assets/readme-diff-wechat.png)
-
-### 6. Settings and System Panels
-
-Theme, shortcuts, remote access, and system configuration all live in the same settings dialog.
-
-![PromptX theme settings](docs/assets/readme-settings-theme-wechat.png)
-
-![PromptX system settings](docs/assets/readme-settings-system-wechat.png)
-
-### 7. Mobile
-
-With Relay or local network access, you can keep reading replies and pushing work forward from your phone.
-
-![PromptX mobile](docs/assets/readme-mobile-wechat.png)
-
-## Good Fit For
-
-- Preparing requirements, screenshots, logs, and files before sending them to an agent
-- Reusing the same project, directory, and thread across many rounds
-- Coordinating multiple agents in one task without bouncing between terminals
-- Reviewing execution logs, replies, source files, and code changes together
-- Continuing local PromptX work from your phone when you are away from your desk
+Runtime data is stored under `~/.promptx/`. PromptX currently targets a local single-user workflow and does not include accounts or team authorization.
 
 ## Development
 
 ```bash
 pnpm install
 pnpm dev
-pnpm build
 ```
 
-Workspace structure:
+Development defaults:
 
-- `apps/web`: Vue 3 + Vite frontend
-- `apps/server`: Fastify backend
-- `apps/runner`: standalone runner process
-- `packages/shared`: shared constants and event protocol
+- Web: `http://127.0.0.1:5174`
+- Daemon: `http://127.0.0.1:3001`
+
+```bash
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm release:check
+```
+
+Workspace layout:
+
+- `apps/web`: Vue 3 and Vite frontend.
+- `apps/daemon`: Fastify Daemon that owns providers, timelines, SQLite, and filesystem access.
+- `apps/android`: Android WebView shell for the remote H5 app.
+- `packages/protocol`: shared API schemas and timeline projection.
+- `packages/relay`: E2EE, pairing protocol, and the public Relay Server.
+- `packages/shared`: cross-module utilities.
+
+V2 does not read or migrate V1 data and no longer includes the old Server/Runner split. See the [V2 architecture baseline](docs/v2-architecture-baseline.md).
 
 ## Remote Access
 
-For Relay setup, see:
+After starting PromptX, open Settings -> Remote Access and scan the QR code. Treat the full pairing URL as a credential and do not share it publicly.
 
-- `docs/relay-quickstart.md`
+- [Relay quick start](docs/relay-quickstart.md)
+- [E2EE Relay architecture](docs/relay-e2ee-architecture.md)
 
-That guide covers:
+The repository also includes the Aliyun deployment script:
 
-- Connecting a local PromptX client to Relay
-- Starting and managing Relay on a server
-- Multi-tenant subdomain setup
-- `promptx relay tenant add/list/remove`
-- `promptx relay start/stop/restart/status`
-
-## Zentao Extension
-
-The repository includes a Zentao Chrome extension at `apps/zentao-extension`.
-
-Notes:
-
-- The published npm package does not include this extension directory
-- If you need it, clone the repo and load it manually
-
-Steps:
-
-1. Open `chrome://extensions`
-2. Enable developer mode
-3. Click “Load unpacked”
-4. Select `apps/zentao-extension`
-
-## Notes
-
-- PromptX is currently optimized for local-first, mostly single-user workflows
-- Different engines may expose different tool capabilities and event richness
-- Use Relay if you need cross-device access
-- Runtime data is stored under `~/.promptx/`
+```bash
+pnpm deploy:relay:aliyun
+```
 
 ## License
 
-PromptX is licensed under `Apache-2.0`. See `LICENSE`.
+PromptX is licensed under Apache-2.0. See [LICENSE](LICENSE).

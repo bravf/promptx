@@ -134,7 +134,7 @@ function readPackageMeta() {
 async function runChecks() {
   const steps = [
     ['pnpm', ['build']],
-    ['pnpm', ['--filter', '@promptx/server', 'test']],
+    ['pnpm', ['test']],
     ['node', ['scripts/check-package-runtime-imports.mjs']],
     ['node', ['bin/promptx.js', 'doctor']],
     ['npm', ['pack', '--dry-run']],

@@ -11,6 +11,7 @@ const props = defineProps({
   workspaceId: { type: String, required: true },
   running: { type: Boolean, default: false },
   sending: { type: Boolean, default: false },
+  blockedReason: { type: String, default: '' },
   control: { type: Object, default: null },
   settingsLoading: { type: Boolean, default: false },
   onSubmit: { type: Function, required: true },
@@ -30,7 +31,7 @@ const preview = ref(null)
 const uploading = computed(() => attachments.value.some((item) => item.status === 'uploading'))
 const sendDisabled = computed(() => {
   const hasContent = Boolean(text.value.trim()) || attachments.value.some((item) => item.status === 'ready')
-  return !hasContent || uploading.value || submitting.value || props.sending || props.running
+  return !hasContent || uploading.value || submitting.value || props.sending || props.running || Boolean(props.blockedReason)
 })
 const contextUsage = computed(() => props.control?.contextUsage || null)
 const contextPercentage = computed(() => Math.max(0, Math.min(100, Number(contextUsage.value?.percentage || 0))))
@@ -339,7 +340,7 @@ onBeforeUnmount(() => {
           </svg>
         </div>
         <button v-if="running" type="button" class="quiet-icon-button h-8 w-8" title="停止" @click="emit('cancel')"><CircleStop class="h-4 w-4" /></button>
-        <button v-else type="button" class="tool-button tool-button-primary round-icon-button h-8 w-8" title="发送" :disabled="sendDisabled" @click="submit">
+        <button v-else type="button" class="tool-button tool-button-primary round-icon-button h-8 w-8" :title="blockedReason || '发送'" :disabled="sendDisabled" @click="submit">
           <LoaderCircle v-if="submitting || sending" class="h-4 w-4 animate-spin" />
           <Send v-else class="h-4 w-4" />
         </button>

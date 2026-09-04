@@ -34,6 +34,7 @@ const timelineSyncing = ref(false)
 const timelineSyncError = ref('')
 const sending = ref(false)
 const agentControl = ref(null)
+const sendBlockedReason = ref('')
 const settingsLoading = ref(false)
 const error = ref('')
 const dialog = ref('')
@@ -316,6 +317,7 @@ async function selectAgent(id, { navigate = false } = {}) {
   timelineSyncing.value = true
   timelineSyncError.value = ''
   error.value = ''
+  sendBlockedReason.value = ''
   agentControl.value = null
   settingsLoading.value = false
   loadingOlderHistory.value = false
@@ -667,7 +669,10 @@ async function loadImportSessions() {
       limit: 200,
       signal: controller.signal,
     })
-    if (dialog.value === 'import' && importSearchController === controller) importSessions.value = result.sessions || []
+    if (dialog.value === 'import' && importSearchController === controller) {
+      importSessions.value = result.sessions || []
+      importError.value = (result.errors || []).map((item) => `${item.providerLabel || item.providerId}：${item.message}`).join('；')
+    }
   } catch (cause) {
     if (cause.name !== 'AbortError' && importSearchController === controller) {
       importSessions.value = []
@@ -903,9 +908,14 @@ async function submitPrompt(content) {
   error.value = ''
   try {
     const result = await v2Api.startTurn(activeAgentId.value, content, crypto.randomUUID())
+    sendBlockedReason.value = ''
     upsertTurn(result.turn)
   } catch (cause) {
-    error.value = cause.message
+    if (cause.code === 'codex_thread_active_writer') {
+      sendBlockedReason.value = cause.message
+    } else {
+      error.value = cause.message
+    }
     throw cause
   } finally {
     sending.value = false
@@ -1115,11 +1125,16 @@ onBeforeUnmount(() => {
 
       <footer v-if="activeAgent" class="composer-wrap shrink-0 p-3 sm:p-4">
         <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
+        <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex max-w-3xl items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs">
+          <span>{{ sendBlockedReason }}</span>
+          <button type="button" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</button>
+        </div>
         <AgentComposer
           :key="activeAgentId"
           :workspace-id="activeWorkspaceId"
           :running="isRunning"
           :sending="sending"
+          :blocked-reason="sendBlockedReason"
           :control="agentControl"
           :settings-loading="settingsLoading"
           :draft-content="draftContent"
@@ -1318,6 +1333,7 @@ onBeforeUnmount(() => {
 .status-dot-running { background: var(--theme-warning); }
 .timeline { background: var(--theme-appPanel); }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
+.writer-blocked-row { border-color: var(--theme-warning); background: var(--theme-warningSoft); color: var(--theme-warningText); }
 .directory-suggestions { background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
 .directory-suggestion:hover { background: var(--theme-appPanelHover); }
 .sidebar-primary-action, .sidebar-secondary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .settings-entry, .import-session-row, .import-provider-filter, .import-query-clear {

@@ -1,95 +1,93 @@
-# Agent Run 事件协议
+# V2 Agent 与 Timeline 协议
 
-本文档定义 PromptX 在“单轮执行”里的统一事件协议，目标是让不同执行引擎在进入前端与持久化层之前，先收敛到同一套结构。
+本文说明 PromptX V2 如何把 Codex、Claude 和 ACP/Kimi 的原生事件统一为前端可消费、SQLite 可持久化的 Timeline。完整领域模型见 [V2 架构基线](./v2-architecture-baseline.md)。
 
-## 设计原则
+## 边界
 
-- 使用“两层协议”，不要把所有事件压成一层
-- 第一层是运行时包络事件，描述项目会话、流式输出与轮次结束状态
-- 第二层是标准 agent 事件，描述思考、工具调用、文件改动、子代理协作等细粒度语义
-- 引擎适配器负责把 Codex、Claude Code、OpenCode 等原始事件先映射到第二层，再装进第一层
+```text
+Provider 原生事件
+  -> Provider Runtime
+  -> 标准 TimelineItem
+  -> TimelineStore
+  -> SQLite + SSE
+  -> Web Timeline
+```
 
-## 第一层：运行时包络事件
+- Provider Runtime 负责启动、恢复和取消原生会话，并将原始事件映射为标准事件。
+- `AgentManager` 负责 Turn 并发、生命周期和事件发布。
+- `TimelineStore` 是实时事件写入与分页读取入口。
+- `TimelineSyncCoordinator` 负责将 Provider 历史与本地 Timeline 对账。
+- Relay 只转发端到端加密后的 HTTP/SSE 帧，不理解本协议。
 
-顶层结构统一为：
+## Turn
+
+一次用户提交对应一个 Turn：
+
+```text
+queued -> running -> completed
+                  -> failed
+                  -> canceled
+```
+
+同一 Agent Session 最多只有一个 `queued` 或 `running` Turn。客户端必须生成 `clientMessageId`；相同 Agent Session 内重复提交同一 ID 时复用原 Turn，以保证重试幂等。
+
+## Timeline Row
+
+每条记录由 Daemon 分配严格递增的 `seq`：
 
 ```json
 {
-  "type": "agent_event",
-  "event": {
-    "type": "item.completed",
-    "item": {
-      "type": "agent_message",
-      "text": "已完成修改"
-    }
+  "seq": 42,
+  "timestamp": "2026-09-04T10:00:00.000Z",
+  "turnId": "local-turn-id",
+  "providerMessageId": "optional-provider-id",
+  "item": {
+    "type": "assistant_message",
+    "phase": "final_answer",
+    "text": "已完成"
   }
 }
 ```
 
-当前约定的包络事件类型如下：
+`item.type` 当前包括：
 
-- `session`：当前轮绑定的 PromptX 项目
-- `session.updated`：项目对应的引擎线程已更新
-- `status`：运行启动、恢复、重试中的状态提示
-- `stdout`：原始标准输出文本
-- `stderr`：原始标准错误文本
-- `agent_event`：标准 agent 事件包络
-- `completed`：本轮执行已正常结束
-- `stopped`：本轮执行被手动停止
-- `error`：运行时级别错误，通常表示包络层失败，而不是 agent 自身业务错误
-
-说明：
-
-- 历史包络类型 `codex` 现在视为 `agent_event` 的兼容别名
-- 新增引擎时，不应再引入新的顶层事件名来替代 `agent_event`
-
-## 第二层：标准 agent 事件
-
-标准 agent 事件定义在 `packages/shared/src/agentRunEvents.js`，当前核心类型包括：
-
-- `thread.started`
-- `turn.started`
-- `turn.completed`
-- `turn.failed`
-- `error`
-- `item.started`
-- `item.updated`
-- `item.completed`
-
-其中 `item.type` 继续承载 richer 语义，而不是退化成统一的 `tool_started/tool_completed`：
-
+- `user_message`
 - `reasoning`
-- `web_search`
-- `command_execution`
-- `file_change`
-- `todo_list`
-- `collab_tool_call`
-- `agent_message`
+- `assistant_message`
+- `tool_call`
+- `todo`
+- `system_notice`
+- `error`
 
-这层语义直接服务于前端摘要、时间线和状态卡片，不建议为了“协议统一”而丢失。
+具体字段由 `packages/protocol/src/timeline.js` 中的 Zod Schema 定义。Provider SDK 对象、进程句柄和私有协议字段不得进入 Timeline。
 
-## 适配要求
+## 实时与分页
 
-任意执行引擎接入时，应满足以下要求：
+- 初次读取使用 `direction=tail`，只返回末尾窗口。
+- 加载旧历史使用 `direction=before`，不得触发 Provider 全量同步。
+- SSE 重连使用 `direction=after` 和 `epoch:seq` cursor 补齐增量。
+- cursor epoch 过期或本地窗口存在缺口时，服务端返回 `reset=true` 和最新尾页。
+- 前端首次加载显示骨架；已有缓存时保留内容并后台同步；局部动作只显示局部 loading。
 
-1. 原始输出先映射为标准 agent 事件
-2. 标准 agent 事件再包装为 `agent_event`
-3. 启动/恢复提示走 `status`
-4. 最终文本结果走 `completed`
-5. 运行时失败优先使用包络层 `error`；模型自身错误优先映射到标准 agent 事件 `error` 或 `turn.failed`
+## 历史对账
 
-## 兼容策略
+Provider 历史是跨客户端会话内容的来源，本地 SQLite 是 PromptX 的规范化视图。对账器通过 Provider revision、原生 Turn ID、客户端消息 ID 和规范化用户文本匹配 Turn：
 
-- 前端读取持久化历史时，必须同时接受 `agent_event` 与旧值 `codex`
-- 查询 run 历史时，事件加载语义统一使用 `events=none|latest|all`
-- 旧参数 `includeEvents`、`includeLatestEvents` 仅保留兼容，不再推荐新增调用继续使用
+- 历史只有追加内容时执行 append。
+- 中间 Turn 缺失、顺序变化或历史被裁剪时执行 rebuild。
+- 本地实时事件比 Provider 快时保留本地丰富事件，避免被较稀疏的历史快照降级。
+- 同步写入以 `expectedNextSeq` 做乐观并发检查；并发变化时放弃本次结果并重新同步。
+- 外部历史文件出现未结束 Turn 不等于 Provider 仍在运行，不能据此永久锁定输入。
 
 ## 参考实现
 
-- 包络事件定义：`packages/shared/src/agentRunEnvelopeEvents.js`
-- 标准 agent 事件定义：`packages/shared/src/agentRunEvents.js`
-- Codex 适配：`apps/server/src/codex.js`
-- Claude Code 适配：`apps/server/src/agents/claudeCodeRunner.js`
-- OpenCode 适配：`apps/server/src/agents/openCodeRunner.js`
-- 前端消费：`apps/web/src/composables/codexSessionPanelTurns.js`
-- 契约测试：`apps/server/src/agents/runnerContract.test.js`
+- Schema：`packages/protocol/src/timeline.js`
+- Timeline 投影：`packages/protocol/src/timelineProjection.js`
+- Agent 生命周期：`apps/daemon/src/agent/agentManager.js`
+- 历史对账：`apps/daemon/src/agent/history/historyReconciler.js`
+- 同步协调：`apps/daemon/src/agent/history/timelineSyncCoordinator.js`
+- Codex：`apps/daemon/src/agent/providers/codex.js`
+- Claude：`apps/daemon/src/agent/providers/claude.js`
+- ACP/Kimi：`apps/daemon/src/agent/providers/acp.js`
+- API 与 SSE：`apps/daemon/src/api/routes.js`
+- 前端：`apps/web/src/views/WorkbenchView.vue`

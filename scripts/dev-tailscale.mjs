@@ -2,8 +2,8 @@ import { spawn, execFileSync } from 'node:child_process'
 import process from 'node:process'
 import path from 'node:path'
 
-const DEFAULT_SERVER_PORT = 3000
-const DEFAULT_WEB_PORT = 5173
+const DEFAULT_DAEMON_PORT = 3001
+const DEFAULT_WEB_PORT = 5174
 
 function resolvePnpmCommand() {
   if (process.platform !== 'win32') {
@@ -107,8 +107,8 @@ PromptX Tailscale 开发启动脚本
 
 可选环境变量：
   TAILSCALE_IP          Tailscale IPv4
-  PROMPTX_SERVER_PORT   后端端口，默认 3000
-  PROMPTX_WEB_PORT      前端端口，默认 5173
+  PROMPTX_DAEMON_PORT   Daemon 端口，默认 3001
+  PROMPTX_WEB_PORT      前端端口，默认 5174
 `.trim())
 }
 
@@ -196,22 +196,24 @@ async function main() {
     throw new Error(`Tailscale IP 不合法：${tailscaleIp}`)
   }
 
-  const serverPort = Math.max(1, Number(process.env.PORT || process.env.PROMPTX_SERVER_PORT) || DEFAULT_SERVER_PORT)
+  const daemonPort = Math.max(1, Number(process.env.PORT || process.env.PROMPTX_DAEMON_PORT) || DEFAULT_DAEMON_PORT)
   const webPort = Math.max(1, Number(process.env.WEB_PORT || process.env.PROMPTX_WEB_PORT) || DEFAULT_WEB_PORT)
   const pnpmCommand = resolvePnpmCommand()
 
   console.log(`[promptx] Tailscale IP: ${tailscaleIp}`)
   console.log(`[promptx] Web:    http://${tailscaleIp}:${webPort}`)
-  console.log(`[promptx] Server: http://${tailscaleIp}:${serverPort}`)
+  console.log(`[promptx] Daemon: http://${tailscaleIp}:${daemonPort}`)
   console.log('[promptx] 按 Ctrl+C 可同时停止前后端。')
 
-  const serverProcess = spawnChild(
+  const daemonProcess = spawnChild(
     pnpmCommand,
-    ['--filter', '@promptx/server', 'dev'],
+    ['--filter', '@promptx/daemon', 'dev'],
     {
       env: {
         HOST: tailscaleIp,
-        PORT: String(serverPort),
+        PORT: String(daemonPort),
+        PROMPTX_DAEMON_PORT: String(daemonPort),
+        PROMPTX_ALLOWED_ORIGINS: `http://${tailscaleIp}:${webPort}`,
       },
     }
   )
@@ -221,12 +223,13 @@ async function main() {
     ['--filter', '@promptx/web', 'exec', 'vite', '--host', tailscaleIp, '--port', String(webPort)],
     {
       env: {
-        VITE_API_PORT: String(serverPort),
+        VITE_API_PORT: String(daemonPort),
+        PROMPTX_WEB_ALLOWED_HOSTS: tailscaleIp,
       },
     }
   )
 
-  const children = [serverProcess, webProcess]
+  const children = [daemonProcess, webProcess]
   let shuttingDown = false
 
   const shutdown = (code = 0) => {
@@ -244,11 +247,11 @@ async function main() {
   process.on('SIGINT', () => shutdown(0))
   process.on('SIGTERM', () => shutdown(0))
 
-  serverProcess.on('exit', (code, signal) => {
+  daemonProcess.on('exit', (code, signal) => {
     if (shuttingDown) {
       return
     }
-    console.error(`[promptx] 后端已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`)
+    console.error(`[promptx] Daemon 已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`)
     shutdown(Number(code) || 1)
   })
 

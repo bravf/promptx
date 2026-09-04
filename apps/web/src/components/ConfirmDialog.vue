@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import { TriangleAlert } from 'lucide-vue-next'
 import DialogShell from './DialogShell.vue'
-import { useI18n } from '../composables/useI18n.js'
 
 const props = defineProps({
   open: {
@@ -36,11 +35,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['cancel', 'confirm'])
-const { t } = useI18n()
 
-const resolvedTitle = computed(() => props.title || t('common.confirm'))
-const resolvedConfirmText = computed(() => props.confirmText || t('common.confirm'))
-const resolvedCancelText = computed(() => props.cancelText || t('common.cancel'))
+const resolvedTitle = computed(() => props.title || '确认操作')
+const resolvedConfirmText = computed(() => props.confirmText || '确认')
+const resolvedCancelText = computed(() => props.cancelText || '取消')
 
 </script>
 
@@ -82,7 +80,7 @@ const resolvedCancelText = computed(() => props.cancelText || t('common.cancel')
         :disabled="loading"
         @click="emit('confirm')"
       >
-        {{ loading ? t('common.processing') : resolvedConfirmText }}
+        {{ loading ? '处理中...' : resolvedConfirmText }}
       </button>
     </div>
   </DialogShell>

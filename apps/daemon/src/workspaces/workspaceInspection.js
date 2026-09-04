@@ -1,12 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 const MAX_TEXT_BYTES = 2 * 1024 * 1024
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_DIFF_BYTES = 2 * 1024 * 1024
+const MAX_DIFF_LINES = 8000
 const GIT_TIMEOUT_MS = 10_000
 
 const IMAGE_TYPES = new Map([
@@ -277,21 +278,86 @@ export async function getWorkspaceGitStatus(cwd) {
   }
 }
 
-function truncateDiff(value) {
-  const text = String(value || '')
-  if (Buffer.byteLength(text) <= MAX_DIFF_BYTES) return { text, truncated: false }
-  return { text: Buffer.from(text).subarray(0, MAX_DIFF_BYTES).toString('utf8'), truncated: true }
+function limitedChunk(chunk, remainingBytes, remainingLines) {
+  let end = Math.min(chunk.length, remainingBytes)
+  let lines = 0
+  for (let index = 0; index < end; index += 1) {
+    if (chunk[index] !== 0x0a) continue
+    lines += 1
+    if (lines > remainingLines) {
+      end = index
+      lines -= 1
+      break
+    }
+  }
+  return { value: chunk.subarray(0, end), lines, truncated: end < chunk.length }
+}
+
+function runGitDiff(cwd, args, { allowedExitCodes = [0] } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const stdout = []
+    const stderr = []
+    let byteCount = 0
+    let stderrByteCount = 0
+    let lineCount = 0
+    let truncated = false
+    let timedOut = false
+    let settled = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGTERM')
+    }, GIT_TIMEOUT_MS)
+
+    child.stdout.on('data', (rawChunk) => {
+      if (truncated) return
+      const chunk = Buffer.from(rawChunk)
+      const limited = limitedChunk(chunk, MAX_DIFF_BYTES - byteCount, MAX_DIFF_LINES - lineCount)
+      if (limited.value.length) stdout.push(limited.value)
+      byteCount += limited.value.length
+      lineCount += limited.lines
+      if (limited.truncated || byteCount >= MAX_DIFF_BYTES || lineCount >= MAX_DIFF_LINES) {
+        truncated = true
+        child.kill('SIGTERM')
+      }
+    })
+    child.stderr.on('data', (chunk) => {
+      if (stderrByteCount >= 64 * 1024) return
+      const value = Buffer.from(chunk).subarray(0, 64 * 1024 - stderrByteCount)
+      if (value.length) stderr.push(value)
+      stderrByteCount += value.length
+    })
+    child.on('error', (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on('close', (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (timedOut) {
+        const error = new Error(`Git 命令超过 ${GIT_TIMEOUT_MS / 1000} 秒未完成。`)
+        error.code = 'ETIMEDOUT'
+        reject(error)
+        return
+      }
+      const text = Buffer.concat(stdout).toString('utf8')
+      if (truncated || allowedExitCodes.includes(code)) {
+        resolve({ text, truncated })
+        return
+      }
+      const error = new Error(Buffer.concat(stderr).toString('utf8').trim() || `Git 命令退出，状态码 ${code}。`)
+      error.code = code
+      reject(error)
+    })
+  })
 }
 
 async function untrackedDiff(cwd, relativePath) {
   resolveWorkspaceTarget(cwd, relativePath)
-  try {
-    const { stdout } = await runGit(cwd, ['diff', '--no-index', '--no-color', '--', '/dev/null', relativePath])
-    return stdout
-  } catch (error) {
-    if (error?.code === 1 && typeof error.stdout === 'string') return error.stdout
-    throw error
-  }
+  return runGitDiff(cwd, ['diff', '--no-index', '--no-color', '--', '/dev/null', relativePath], { allowedExitCodes: [0, 1] })
 }
 
 export async function getWorkspaceGitDiff(cwd, requestedPath) {
@@ -303,16 +369,15 @@ export async function getWorkspaceGitDiff(cwd, requestedPath) {
   if (!file) return { path: normalized, staged: '', unstaged: '', truncated: false }
 
   try {
-    const stagedResult = file.staged
-      ? await runGit(cwd, ['diff', '--cached', '--no-ext-diff', '--no-color', '--', normalized])
-      : { stdout: '' }
-    let unstaged = ''
-    if (file.status === 'untracked') unstaged = await untrackedDiff(cwd, normalized)
-    else if (file.unstaged) {
-      unstaged = (await runGit(cwd, ['diff', '--no-ext-diff', '--no-color', '--', normalized])).stdout
-    }
-    const staged = truncateDiff(stagedResult.stdout)
-    const working = truncateDiff(unstaged)
+    const stagedPromise = file.staged
+      ? runGitDiff(cwd, ['diff', '--cached', '--no-ext-diff', '--no-color', '--', normalized])
+      : Promise.resolve({ text: '', truncated: false })
+    const workingPromise = file.status === 'untracked'
+      ? untrackedDiff(cwd, normalized)
+      : file.unstaged
+        ? runGitDiff(cwd, ['diff', '--no-ext-diff', '--no-color', '--', normalized])
+        : Promise.resolve({ text: '', truncated: false })
+    const [staged, working] = await Promise.all([stagedPromise, workingPromise])
     return {
       path: normalized,
       staged: staged.text,

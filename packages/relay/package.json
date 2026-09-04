@@ -7,14 +7,18 @@
     ".": "./src/index.js",
     "./crypto": "./src/crypto.js",
     "./offer": "./src/offer.js",
-    "./protocol": "./src/protocol.js"
+    "./protocol": "./src/protocol.js",
+    "./server": "./src/server.js"
   },
   "scripts": {
-    "build": "node --check src/index.js && node --check src/crypto.js && node --check src/offer.js && node --check src/protocol.js",
+    "build": "node --check src/index.js && node --check src/crypto.js && node --check src/offer.js && node --check src/protocol.js && node --check src/server.js",
     "lint": "node -e \"console.log('relay: nothing to lint')\"",
     "test": "node --test"
   },
   "dependencies": {
-    "tweetnacl": "^1.0.3"
+    "@fastify/static": "^9.0.0",
+    "fastify": "^5.8.2",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.18.3"
   }
 }

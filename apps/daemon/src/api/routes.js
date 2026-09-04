@@ -30,27 +30,30 @@ function sseWrite(raw, event) {
   raw.write(`data: ${JSON.stringify(event)}\n\n`)
 }
 
-export function createSseHeaders(origin = '') {
-  return {
+export function createSseHeaders(origin = '', allowsOrigin = () => false) {
+  const headers = {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
-    'Access-Control-Allow-Origin': origin || '*',
-    Vary: 'Origin',
   }
+  if (origin && allowsOrigin(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin
+    headers.Vary = 'Origin'
+  }
+  return headers
 }
 
 export function registerRoutes(app, context) {
-  const { repository, timelineStore, providerRegistry, agentManager, sessionImport, eventHub, assetsDir } = context
+  const { repository, timelineStore, providerRegistry, agentManager, sessionImport, eventHub, assetsDir, corsPolicy } = context
 
   app.get('/api/v2/health', async () => ({ ok: true, version: 2 }))
   app.get('/api/v2/providers', async () => ({ providers: providerRegistry.list() }))
-  app.get('/api/v2/import/sessions', async (request) => ({ sessions: await sessionImport.list({
+  app.get('/api/v2/import/sessions', async (request) => sessionImport.list({
     providerId: request.query.providerId,
     query: request.query.q,
     limit: request.query.limit,
-  }) }))
+  }))
   app.post('/api/v2/import/sessions', async (request, reply) => {
     const result = await sessionImport.import(request.body || {})
     reply.code(result.imported ? 201 : 200)
@@ -95,7 +98,7 @@ export function registerRoutes(app, context) {
   app.get('/api/v2/events', (request, reply) => {
     reply.hijack()
     const raw = reply.raw
-    raw.writeHead(200, createSseHeaders(request.headers.origin))
+    raw.writeHead(200, createSseHeaders(request.headers.origin, (origin) => corsPolicy.allows(origin)))
     const writeAgent = (agent) => sseWrite(raw, { type: 'agent', agent })
     const unsubscribe = eventHub.subscribeAll((event) => {
       if (event.type === 'agent') writeAgent(event.agent)
@@ -222,7 +225,9 @@ export function registerRoutes(app, context) {
   app.get('/api/v2/agents/:agentId/timeline', async (request, reply) => {
     const agent = repository.getAgent(request.params.agentId)
     if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
-    void agentManager.syncTimeline(agent.id).catch((error) => request.log.warn(error, 'Timeline 后台同步失败'))
+    if (request.query.direction !== 'before') {
+      void agentManager.syncTimeline(agent.id).catch((error) => request.log.warn(error, 'Timeline 后台同步失败'))
+    }
     return { timeline: timelineStore.fetch(agent.id, {
       direction: request.query.direction,
       limit: request.query.limit,
@@ -243,7 +248,7 @@ export function registerRoutes(app, context) {
     if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
     reply.hijack()
     const raw = reply.raw
-    raw.writeHead(200, createSseHeaders(request.headers.origin))
+    raw.writeHead(200, createSseHeaders(request.headers.origin, (origin) => corsPolicy.allows(origin)))
     const unsubscribe = eventHub.subscribe(agentId, (event) => sseWrite(raw, event))
     const cursor = parseCursor(request.headers['last-event-id'] || request.query.cursor)
     const snapshot = timelineStore.fetch(agentId, { direction: cursor ? 'after' : 'tail', cursor })

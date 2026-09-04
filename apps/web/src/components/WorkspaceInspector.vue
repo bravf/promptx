@@ -352,7 +352,7 @@ defineExpose({ openPath, refreshGit })
         <div v-if="!selectedDiffPath" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><GitBranch class="mb-2 h-6 w-6" />选择文件查看 Diff</div>
         <template v-else>
           <div class="preview-heading sticky top-0 z-[1] border-b px-3 py-2 font-mono text-[11px]">{{ displayedDiffPath || selectedDiffPath }}</div>
-          <div v-if="diff?.truncated" class="inspector-warning border-b px-3 py-2 text-[10px]">Diff 过大，仅显示前 2 MB</div>
+          <div v-if="diff?.truncated" class="inspector-warning border-b px-3 py-2 text-[10px]">Diff 过大，仅显示前 2 MB 或 8000 行</div>
           <div v-if="diff && !diffSections.length" class="theme-muted-text px-4 py-8 text-center text-xs">没有可显示的文本 Diff</div>
           <section v-for="section in diffSections" :key="section.key">
             <div class="diff-section-title sticky top-[33px] z-[1] border-b px-3 py-1.5 text-[10px] font-medium">{{ section.title }}</div>
