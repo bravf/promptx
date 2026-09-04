@@ -123,11 +123,6 @@ onBeforeUnmount(() => clearInterval(clockTimer))
       <div v-else-if="entry.item.type === 'system_notice'" class="theme-muted-text ml-7 text-xs">{{ entry.item.text }}</div>
     </article>
 
-    <div v-if="running" class="timeline-generating-indicator mb-5 ml-7 flex items-center gap-1" role="status" aria-label="正在生成">
-      <span class="timeline-generating-dot" aria-hidden="true">.</span>
-      <span class="timeline-generating-dot" aria-hidden="true">.</span>
-      <span class="timeline-generating-dot" aria-hidden="true">.</span>
-    </div>
   </section>
 </template>
 
@@ -135,12 +130,4 @@ onBeforeUnmount(() => clearInterval(clockTimer))
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .workspace-path-link { color: var(--theme-accentText); }
 .workspace-path-link:hover { text-decoration: underline; }
-.timeline-generating-indicator { color: var(--theme-textMuted); font-size: 1.25rem; font-weight: 600; line-height: 0.75rem; }
-.timeline-generating-dot { animation: timeline-generating-pulse 1.15s ease-in-out infinite; opacity: 0.28; }
-.timeline-generating-dot:nth-child(2) { animation-delay: 160ms; }
-.timeline-generating-dot:nth-child(3) { animation-delay: 320ms; }
-@keyframes timeline-generating-pulse { 0%, 55%, 100% { opacity: 0.28; } 25% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) {
-  .timeline-generating-dot { animation: none; opacity: 0.72; }
-}
 </style>

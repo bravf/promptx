@@ -160,6 +160,21 @@ function clearViewedAgentAttention(agent) {
     .finally(() => attentionClearPending.delete(agent.id))
 }
 
+function applyAgentEvent(agent) {
+  const isActiveAgent = agent?.id === activeAgentId.value
+  const wasRunning = isActiveAgent && (isRunning.value || sending.value)
+  const shouldPinAfterCompletion = wasRunning && agent.lifecycle !== 'running' && followingTimeline.value
+  upsertAgent(agent)
+  if (!isActiveAgent) return
+  clearViewedAgentAttention(agent)
+  sending.value = agent.lifecycle === 'running'
+  reconcileTerminalAgentTurns(agent)
+  if (shouldPinAfterCompletion) {
+    pinTimelineToBottom(timelineRequestVersion)
+    scrollToBottom({ force: true })
+  }
+}
+
 function cacheTimeline(agentId = displayedAgentId.value || activeAgentId.value) {
   if (!agentId || displayedAgentId.value !== agentId || !timelineEpoch.value) return
   const snapshot = {
@@ -499,10 +514,7 @@ function openEvents(agentId, epoch, seq) {
   eventSource.addEventListener('agent', (event) => {
     if (activeAgentId.value !== agentId) return
     const { agent } = JSON.parse(event.data)
-    upsertAgent(agent)
-    clearViewedAgentAttention(agent)
-    sending.value = agent.lifecycle === 'running'
-    reconcileTerminalAgentTurns(agent)
+    applyAgentEvent(agent)
   })
   eventSource.addEventListener('turn', (event) => {
     if (activeAgentId.value !== agentId) return
@@ -592,9 +604,7 @@ function openGlobalEvents() {
   globalEventSource = createEventSource(globalEventsUrl())
   globalEventSource.addEventListener('agent', (event) => {
     const { agent } = JSON.parse(event.data)
-    upsertAgent(agent)
-    clearViewedAgentAttention(agent)
-    reconcileTerminalAgentTurns(agent)
+    applyAgentEvent(agent)
   })
 }
 
@@ -1133,6 +1143,19 @@ onBeforeUnmount(() => {
               <article v-else-if="entry.item?.type === 'error'" class="error-row mb-5 ml-7 rounded-sm border px-3 py-2 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.message }}</article>
               <article v-else-if="entry.item?.type === 'system_notice'" class="theme-muted-text mb-5 ml-7 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.text }}</article>
             </template>
+            <div class="timeline-generating-slot ml-7 flex h-8 items-start">
+              <div
+                class="timeline-generating-indicator flex items-center gap-1"
+                :class="isRunning || sending ? 'is-visible' : ''"
+                role="status"
+                :aria-hidden="!(isRunning || sending)"
+                :aria-label="isRunning || sending ? '正在生成' : undefined"
+              >
+                <span class="timeline-generating-dot" aria-hidden="true">.</span>
+                <span class="timeline-generating-dot" aria-hidden="true">.</span>
+                <span class="timeline-generating-dot" aria-hidden="true">.</span>
+              </div>
+            </div>
           </div>
           <div v-if="timelineSyncError && timelineHasContent" class="timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sm border px-3 py-2 text-xs shadow-sm"><span class="theme-muted-text">同步失败</span><button class="font-medium" @click="selectAgent(activeAgentId)">重试</button></div>
         </div>
@@ -1365,6 +1388,13 @@ onBeforeUnmount(() => {
 .status-dot { background: var(--theme-success); }
 .status-dot-running { background: var(--theme-warning); }
 .timeline { background: var(--theme-appPanel); }
+.timeline-generating-slot { contain: layout; }
+.timeline-generating-indicator { color: var(--theme-textMuted); font-size: 1.25rem; font-weight: 600; line-height: 0.75rem; opacity: 0; transition: opacity 150ms ease; }
+.timeline-generating-indicator.is-visible { opacity: 1; }
+.timeline-generating-dot { animation: timeline-generating-pulse 1.15s ease-in-out infinite; opacity: 0.28; }
+.timeline-generating-dot:nth-child(2) { animation-delay: 160ms; }
+.timeline-generating-dot:nth-child(3) { animation-delay: 320ms; }
+@keyframes timeline-generating-pulse { 0%, 55%, 100% { opacity: 0.28; } 25% { opacity: 1; } }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .writer-blocked-row { border-color: var(--theme-warning); background: var(--theme-warningSoft); color: var(--theme-warningText); }
 .directory-suggestions { background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
@@ -1399,6 +1429,8 @@ onBeforeUnmount(() => {
   .import-session-row, .import-provider-filter, .import-query-clear,
   .import-state-enter-active, .import-state-leave-active,
   .import-session-enter-active, .import-session-leave-active, .import-session-move { transition: none; }
+  .timeline-generating-indicator { transition: none; }
+  .timeline-generating-dot { animation: none; opacity: 0.72; }
 }
 @media (max-width: 900px) {
   .v2-shell { grid-template-columns: 200px minmax(0, 1fr); }
