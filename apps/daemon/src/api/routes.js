@@ -209,14 +209,23 @@ export function registerRoutes(app, context) {
     return { agent: updated }
   })
 
-  app.get('/api/v2/agents/:agentId/timeline', async (request) => ({
-    timeline: timelineStore.fetch(request.params.agentId, {
+  app.get('/api/v2/agents/:agentId/timeline', async (request, reply) => {
+    const agent = repository.getAgent(request.params.agentId)
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    void agentManager.syncTimeline(agent.id).catch((error) => request.log.warn(error, 'Timeline 后台同步失败'))
+    return { timeline: timelineStore.fetch(agent.id, {
       direction: request.query.direction,
       limit: request.query.limit,
       mode: request.query.mode,
       cursor: parseCursor(request.query.cursor),
-    }),
-  }))
+    }) }
+  })
+
+  app.post('/api/v2/agents/:agentId/timeline/sync', async (request, reply) => {
+    const agent = repository.getAgent(request.params.agentId)
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    return { sync: await agentManager.syncTimeline(agent.id) }
+  })
 
   app.get('/api/v2/agents/:agentId/events', (request, reply) => {
     const agentId = request.params.agentId
@@ -231,8 +240,10 @@ export function registerRoutes(app, context) {
     if (snapshot.reset) sseWrite(raw, { type: 'reset', timeline: snapshot })
     else snapshot.rows.forEach((row) => sseWrite(raw, { type: 'timeline', epoch: snapshot.epoch, row }))
     sseWrite(raw, { type: 'agent', agent: repository.getAgent(agentId) })
+    sseWrite(raw, { type: 'timeline-synced', sync: { status: 'current', turns: repository.listTurns(agentId, 1000) } })
     const control = agentManager.controlStates.get(agentId)
     if (control) sseWrite(raw, { type: 'control', control })
+    void agentManager.syncTimeline(agentId).catch((error) => request.log.warn(error, 'Timeline 重连同步失败'))
     const heartbeat = setInterval(() => raw.write(': heartbeat\n\n'), 15000)
     heartbeat.unref?.()
     raw.on('close', () => {

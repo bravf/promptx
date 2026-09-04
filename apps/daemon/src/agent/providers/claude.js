@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { filePromptText, imageBase64 } from '../promptAttachments.js'
 import { createControlState, effortLabel, normalizeContextUsage } from '../controlState.js'
+import { readClaudeHistorySnapshot } from '../history/providers/claudeHistory.js'
 
 class AsyncMessageQueue {
   constructor() {
@@ -163,6 +164,10 @@ export class ClaudeRuntime extends EventEmitter {
   async getControlState() {
     await this.connect()
     return this.controlState
+  }
+
+  async readHistorySnapshot(options = {}) {
+    return readClaudeHistorySnapshot({ cwd: this.cwd, sessionId: this.sessionId, ...options })
   }
 
   async startTurn(content, clientMessageId) {

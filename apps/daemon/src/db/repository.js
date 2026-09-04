@@ -109,6 +109,126 @@ export function createRepository(db) {
     return { seq, timestamp, ...(turnId ? { turnId } : {}), ...(options.providerMessageId ? { providerMessageId: options.providerMessageId } : {}), item }
   })
 
+  const applyTimelineSync = db.transaction((agentId, input) => {
+    const agent = db.prepare('SELECT timeline_epoch, timeline_next_seq FROM agent_sessions WHERE id = ?').get(agentId)
+    if (!agent) throw new Error('Agent 不存在。')
+    if (input.expectedNextSeq !== undefined && Number(agent.timeline_next_seq) !== input.expectedNextSeq) {
+      const error = new Error('Timeline 在同步期间发生变化，需要重新对账。')
+      error.code = 'TIMELINE_SYNC_STALE'
+      throw error
+    }
+    const previousSync = db.prepare(
+      'SELECT manifest_json FROM agent_timeline_sync_state WHERE agent_session_id = ?',
+    ).get(agentId)
+    const previousManifest = parseJson(previousSync?.manifest_json, { turns: [] })
+
+    const turnIds = new Map()
+    for (const turn of input.turns || []) {
+      let current = turn.localTurnId
+        ? mapTurn(db.prepare('SELECT * FROM agent_turns WHERE id = ? AND agent_session_id = ?').get(turn.localTurnId, agentId))
+        : null
+      if (!current) current = mapTurn(db.prepare(
+        'SELECT * FROM agent_turns WHERE agent_session_id = ? AND native_turn_id = ?',
+      ).get(agentId, turn.sourceTurnId))
+      if (!current && turn.clientMessageId) {
+        current = mapTurn(db.prepare(
+          'SELECT * FROM agent_turns WHERE agent_session_id = ? AND client_message_id = ?',
+        ).get(agentId, turn.clientMessageId))
+      }
+      if (!current) {
+        const id = randomUUID()
+        db.prepare(`INSERT INTO agent_turns
+          (id, agent_session_id, client_message_id, native_turn_id, status, error_message,
+           usage_json, created_at, started_at, finished_at)
+          VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?, ?)`).run(
+          id,
+          agentId,
+          turn.clientMessageId || `provider:${input.providerId}:${turn.sourceTurnId}`,
+          turn.sourceTurnId,
+          turn.status || 'completed',
+          turn.errorMessage || '',
+          turn.startedAt || turn.finishedAt || nowIso(),
+          turn.startedAt || null,
+          turn.finishedAt || null,
+        )
+        current = mapTurn(db.prepare('SELECT * FROM agent_turns WHERE id = ?').get(id))
+      } else {
+        db.prepare(`UPDATE agent_turns SET native_turn_id = ?, status = ?, error_message = ?,
+          started_at = COALESCE(?, started_at), finished_at = COALESCE(?, finished_at)
+          WHERE id = ?`).run(
+          turn.sourceTurnId,
+          turn.status || current.status,
+          turn.errorMessage || '',
+          turn.startedAt || null,
+          turn.finishedAt || null,
+          current.id,
+        )
+      }
+      turnIds.set(turn.sourceTurnId, current.id)
+    }
+
+    let epoch = agent.timeline_epoch
+    let nextSeq = Number(agent.timeline_next_seq)
+    if (input.mode === 'replace') {
+      db.prepare('DELETE FROM agent_timeline_rows WHERE agent_session_id = ?').run(agentId)
+      const nextSourceTurnIds = new Set((input.turns || []).map((turn) => turn.sourceTurnId))
+      for (const previous of previousManifest.turns || []) {
+        if (!previous.sourceTurnId || nextSourceTurnIds.has(previous.sourceTurnId)) continue
+        db.prepare(`DELETE FROM agent_turns WHERE agent_session_id = ? AND native_turn_id = ?
+          AND status NOT IN ('queued', 'running')`).run(agentId, previous.sourceTurnId)
+      }
+      epoch = randomUUID()
+      nextSeq = 1
+    }
+
+    const inserted = []
+    for (const entry of input.rows || []) {
+      const turnId = entry.localTurnId || turnIds.get(entry.sourceTurnId) || null
+      if (entry.providerMessageId) {
+        const existing = db.prepare(`SELECT seq FROM agent_timeline_rows
+          WHERE agent_session_id = ? AND provider_message_id = ?`).get(agentId, entry.providerMessageId)
+        if (existing) continue
+      }
+      const timestamp = entry.timestamp || nowIso()
+      db.prepare(`INSERT INTO agent_timeline_rows
+        (agent_session_id, seq, timestamp, turn_id, provider_message_id, item_type, item_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+        agentId,
+        nextSeq,
+        timestamp,
+        turnId,
+        entry.providerMessageId || null,
+        entry.item.type,
+        JSON.stringify(entry.item),
+      )
+      inserted.push({
+        seq: nextSeq,
+        timestamp,
+        ...(turnId ? { turnId } : {}),
+        ...(entry.providerMessageId ? { providerMessageId: entry.providerMessageId } : {}),
+        item: entry.item,
+      })
+      nextSeq += 1
+    }
+
+    const syncedAt = nowIso()
+    db.prepare(`INSERT INTO agent_timeline_sync_state
+      (agent_session_id, provider_id, source_id, manifest_json, synced_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(agent_session_id) DO UPDATE SET provider_id = excluded.provider_id,
+        source_id = excluded.source_id, manifest_json = excluded.manifest_json,
+        synced_at = excluded.synced_at`).run(
+      agentId,
+      input.providerId,
+      input.sourceId,
+      JSON.stringify(input.manifest || {}),
+      syncedAt,
+    )
+    db.prepare(`UPDATE agent_sessions SET timeline_epoch = ?, timeline_next_seq = ?,
+      updated_at = ?, last_active_at = ? WHERE id = ?`).run(epoch, nextSeq, syncedAt, syncedAt, agentId)
+    return { mode: input.mode, epoch, rows: inserted, syncedAt }
+  })
+
   return {
     listWorkspaces() {
       return db.prepare('SELECT * FROM workspaces ORDER BY sort_order ASC, last_opened_at DESC').all().map(mapWorkspace)
@@ -249,6 +369,18 @@ export function createRepository(db) {
     },
     appendTimeline(agentId, turnId, item, options) {
       return insertTimeline(agentId, turnId, item, options)
+    },
+    getTimelineSyncState(agentId) {
+      const row = db.prepare('SELECT * FROM agent_timeline_sync_state WHERE agent_session_id = ?').get(agentId)
+      return row ? {
+        providerId: row.provider_id,
+        sourceId: row.source_id,
+        manifest: parseJson(row.manifest_json),
+        syncedAt: row.synced_at,
+      } : null
+    },
+    applyTimelineSync(agentId, input) {
+      return applyTimelineSync(agentId, input)
     },
     getTimelineState(agentId) {
       const row = db.prepare('SELECT timeline_epoch, timeline_next_seq FROM agent_sessions WHERE id = ?').get(agentId)

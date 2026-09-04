@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { TimelineCoalescer } from '../timeline/timelineCoalescer.js'
 import { DEFAULT_AGENT_TITLE, deriveAgentTitle } from './sessionTitle.js'
+import { TimelineSyncCoordinator } from './history/timelineSyncCoordinator.js'
 
 function nowIso() {
   return new Date().toISOString()
@@ -16,6 +17,13 @@ export class AgentManager {
     this.activeTurns = new Map()
     this.controlStates = new Map()
     this.coalescer = new TimelineCoalescer((payload) => this.commitTimeline(payload))
+    this.timelineSync = new TimelineSyncCoordinator({
+      repository,
+      timelineStore,
+      eventHub,
+      getRuntime: (agent) => this.getRuntime(agent),
+      getActiveTurnId: (agentId) => this.activeTurns.get(agentId)?.id || '',
+    })
   }
 
   getRuntime(agent) {
@@ -63,6 +71,11 @@ export class AgentManager {
     if (agent.archivedAt) throw new Error('已归档的 Agent 不能发送消息。')
     const existing = this.repository.getTurnByClientMessage(agentId, input.clientMessageId)
     if (existing) return existing
+    if (this.activeTurns.has(agentId)) {
+      const error = new Error('Agent 正在运行，请等待当前任务完成后再发送。')
+      error.statusCode = 409
+      throw error
+    }
     const providerContent = input.input.content.map((block) => {
       if (block.type === 'text') return block
       const asset = this.repository.getAsset(block.assetId)
@@ -116,6 +129,12 @@ export class AgentManager {
     const control = await this.getRuntime(agent).getControlState()
     this.controlStates.set(agentId, control)
     return control
+  }
+
+  async syncTimeline(agentId) {
+    const agent = this.repository.getAgent(agentId)
+    if (!agent) throw new Error('Agent 不存在。')
+    return this.timelineSync.sync(agent)
   }
 
   async updateSettings(agentId, input) {
@@ -212,6 +231,7 @@ export class AgentManager {
     })
     this.eventHub.publish(agentId, { type: 'turn', turn: updated })
     this.eventHub.publish(agentId, { type: 'agent', agent })
+    void this.timelineSync.sync(agent).catch(() => {})
   }
 
   commitTimeline({ agentId, turnId, item }) {

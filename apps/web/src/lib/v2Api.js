@@ -48,6 +48,7 @@ export const v2Api = {
     if (options.cursor) query.set('cursor', options.cursor)
     return request(`/api/v2/agents/${agentId}/timeline?${query}`)
   },
+  syncTimeline: (agentId) => request(`/api/v2/agents/${agentId}/timeline/sync`, { method: 'POST' }),
   startTurn: (agentId, content, clientMessageId) => request(`/api/v2/agents/${agentId}/turns`, {
     method: 'POST',
     body: JSON.stringify({ clientMessageId, input: { content } }),

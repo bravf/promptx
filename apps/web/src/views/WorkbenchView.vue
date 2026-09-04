@@ -23,6 +23,7 @@ const agentsByWorkspace = ref({})
 const expandedWorkspaceIds = ref(new Set())
 const rows = ref([])
 const turns = ref([])
+const draftContent = ref([])
 const activeWorkspaceId = ref('')
 const activeAgentId = ref('')
 const displayedAgentId = ref('')
@@ -63,11 +64,13 @@ const turnReconcilePending = new Set()
 let timelineRequestVersion = 0
 let positioningTimeline = false
 const timelineCache = new Map()
+const draftsByAgent = new Map()
 const MAX_TIMELINE_CACHE_SIZE = 10
 let directorySearchTimer = null
 let directorySearchController = null
 let markdownScrollFrame = null
 let inspectorRefreshTimer = null
+let timelineWakeSyncAt = 0
 
 const activeWorkspace = computed(() => workspaces.value.find((item) => item.id === activeWorkspaceId.value))
 const activeWorkspaceDirectoryName = computed(() => {
@@ -178,6 +181,7 @@ function resetTimelineSelection() {
   settingsLoading.value = false
   rows.value = []
   turns.value = []
+  draftContent.value = []
   timelineEpoch.value = ''
   hasOlderHistory.value = false
   loadingOlderHistory.value = false
@@ -188,6 +192,14 @@ function resetTimelineSelection() {
   timelineSyncError.value = ''
   sending.value = false
   closeEvents()
+}
+
+function saveAgentDraft(content) {
+  const agentId = activeAgentId.value
+  if (!agentId) return
+  const snapshot = Array.isArray(content) ? content.map((item) => ({ ...item })) : []
+  draftsByAgent.set(agentId, snapshot)
+  draftContent.value = snapshot
 }
 
 function upsertTurn(turn) {
@@ -272,6 +284,7 @@ async function selectAgent(id, { navigate = false } = {}) {
   const requestVersion = ++timelineRequestVersion
   positioningTimeline = true
   activeAgentId.value = id
+  draftContent.value = draftsByAgent.get(id)?.map((item) => ({ ...item })) || []
   const hasCachedTimeline = restoreTimelineCache(id)
   const cachedTimeline = timelineCache.get(id)
   if (!hasCachedTimeline) {
@@ -396,9 +409,33 @@ function handleTimelineScroll(event) {
   if (element.scrollTop <= 64) loadOlderHistory()
 }
 
+async function syncVisibleTimeline() {
+  if (document.visibilityState !== 'visible' || !activeAgentId.value) return
+  const now = Date.now()
+  if (now - timelineWakeSyncAt < 2_000) return
+  timelineWakeSyncAt = now
+  const agentId = activeAgentId.value
+  const requestVersion = timelineRequestVersion
+  timelineSyncing.value = true
+  timelineSyncError.value = ''
+  try {
+    const { sync } = await v2Api.syncTimeline(agentId)
+    if (requestVersion !== timelineRequestVersion || activeAgentId.value !== agentId) return
+    if (sync?.turns) {
+      turns.value = sync.turns
+      cacheTimeline(agentId)
+    }
+  } catch (cause) {
+    if (requestVersion === timelineRequestVersion && activeAgentId.value === agentId) timelineSyncError.value = cause.message
+  } finally {
+    if (requestVersion === timelineRequestVersion && activeAgentId.value === agentId) timelineSyncing.value = false
+  }
+}
+
 function openEvents(agentId, epoch, seq) {
   eventSource = createEventSource(agentEventsUrl(agentId, seq ? `${epoch}:${seq}` : ''))
   eventSource.addEventListener('timeline', (event) => {
+    if (activeAgentId.value !== agentId) return
     const { row } = JSON.parse(event.data)
     if (rows.value.some((item) => item.seq === row.seq)) return
     const shouldFollow = isTimelineAtBottom(timelineElement.value)
@@ -410,6 +447,7 @@ function openEvents(agentId, epoch, seq) {
     else hasNewTimelineItems.value = true
   })
   eventSource.addEventListener('agent', (event) => {
+    if (activeAgentId.value !== agentId) return
     const { agent } = JSON.parse(event.data)
     upsertAgent(agent)
     clearViewedAgentAttention(agent)
@@ -417,14 +455,24 @@ function openEvents(agentId, epoch, seq) {
     reconcileTerminalAgentTurns(agent)
   })
   eventSource.addEventListener('turn', (event) => {
+    if (activeAgentId.value !== agentId) return
     const turn = JSON.parse(event.data).turn
     upsertTurn(turn)
     if (['completed', 'failed', 'canceled'].includes(turn.status)) scheduleInspectorRefresh()
   })
+  eventSource.addEventListener('timeline-synced', (event) => {
+    if (activeAgentId.value !== agentId) return
+    const { sync } = JSON.parse(event.data)
+    if (!sync?.turns) return
+    turns.value = sync.turns
+    cacheTimeline(agentId)
+  })
   eventSource.addEventListener('control', (event) => {
+    if (activeAgentId.value !== agentId) return
     agentControl.value = JSON.parse(event.data).control
   })
   eventSource.addEventListener('reset', (event) => {
+    if (activeAgentId.value !== agentId) return
     const { timeline } = JSON.parse(event.data)
     rows.value = timeline.rows
     timelineEpoch.value = timeline.epoch
@@ -665,6 +713,7 @@ async function removeAgent(agent) {
   try {
     await v2Api.deleteAgent(agent.id)
     clearTimelineCache(agent.id)
+    draftsByAgent.delete(agent.id)
     const remainingAgents = workspaceAgents.filter((item) => item.id !== agent.id)
     setWorkspaceAgents(agent.workspaceId, remainingAgents)
     if (activeAgentId.value !== agent.id) return
@@ -685,7 +734,10 @@ async function removeWorkspace(workspace) {
     danger: true,
   })) return
   await v2Api.deleteWorkspace(workspace.id)
-  agentsForWorkspace(workspace.id).forEach((agent) => clearTimelineCache(agent.id))
+  agentsForWorkspace(workspace.id).forEach((agent) => {
+    clearTimelineCache(agent.id)
+    draftsByAgent.delete(agent.id)
+  })
   workspaces.value = workspaces.value.filter((item) => item.id !== workspace.id)
   const nextAgentsByWorkspace = { ...agentsByWorkspace.value }
   delete nextAgentsByWorkspace[workspace.id]
@@ -760,6 +812,7 @@ function updateMobileState(event) {
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('popstate', handleMobileHistoryPop)
+  document.addEventListener('visibilitychange', syncVisibleTimeline)
   mobileMediaQuery = window.matchMedia('(max-width: 720px)')
   updateMobileState(mobileMediaQuery)
   mobileMediaQuery.addEventListener('change', updateMobileState)
@@ -769,6 +822,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('popstate', handleMobileHistoryPop)
+  document.removeEventListener('visibilitychange', syncVisibleTimeline)
   mobileMediaQuery?.removeEventListener('change', updateMobileState)
   closeEvents()
   closeGlobalEvents()
@@ -893,9 +947,11 @@ onBeforeUnmount(() => {
           :sending="sending"
           :control="agentControl"
           :settings-loading="settingsLoading"
+          :draft-content="draftContent"
           :on-submit="submitPrompt"
           :on-settings-change="updateAgentSettings"
           @cancel="v2Api.cancel(activeAgentId)"
+          @draft-change="saveAgentDraft"
         />
       </footer>
     </main>

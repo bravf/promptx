@@ -391,3 +391,33 @@ test('Agent 控制接口持久化模型和思考强度，并在运行中拒绝�
     await app.close()
   }
 })
+
+test('运行中的 Agent 拒绝新的 Turn，重复请求保持幂等', async () => {
+  const { registry } = createControlTestRegistry()
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
+  try {
+    const conversation = await app.inject({
+      method: 'POST',
+      url: '/api/v2/conversations',
+      payload: { cwd: process.cwd(), providerId: 'codex' },
+    })
+    const { agent } = conversation.json()
+    const firstPayload = {
+      clientMessageId: 'running-first',
+      input: { content: [{ type: 'text', text: '当前任务' }] },
+    }
+    const first = await app.inject({ method: 'POST', url: `/api/v2/agents/${agent.id}/turns`, payload: firstPayload })
+    assert.equal(first.statusCode, 202)
+    const duplicate = await app.inject({ method: 'POST', url: `/api/v2/agents/${agent.id}/turns`, payload: firstPayload })
+    assert.equal(duplicate.statusCode, 202)
+    assert.equal(duplicate.json().turn.id, first.json().turn.id)
+    const rejected = await app.inject({
+      method: 'POST',
+      url: `/api/v2/agents/${agent.id}/turns`,
+      payload: { clientMessageId: 'running-second', input: { content: [{ type: 'text', text: '不应发送' }] } },
+    })
+    assert.equal(rejected.statusCode, 409)
+  } finally {
+    await app.close()
+  }
+})

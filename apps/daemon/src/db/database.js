@@ -125,6 +125,15 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
 
     CREATE INDEX IF NOT EXISTS idx_agent_timeline_session_seq
       ON agent_timeline_rows(agent_session_id, seq);
+
+    CREATE TABLE IF NOT EXISTS agent_timeline_sync_state (
+      agent_session_id TEXT PRIMARY KEY,
+      provider_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      manifest_json TEXT NOT NULL DEFAULT '{}',
+      synced_at TEXT NOT NULL,
+      FOREIGN KEY (agent_session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
+    );
   `)
   // Keep the v2 database usable after adding attention state to existing local data.
   ensureColumn(db, 'agent_sessions', 'requires_attention', 'INTEGER NOT NULL DEFAULT 0')

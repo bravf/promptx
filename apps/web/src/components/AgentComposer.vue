@@ -15,9 +15,10 @@ const props = defineProps({
   settingsLoading: { type: Boolean, default: false },
   onSubmit: { type: Function, required: true },
   onSettingsChange: { type: Function, required: true },
+  draftContent: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['cancel'])
+const emit = defineEmits(['cancel', 'draft-change'])
 const textarea = ref(null)
 const fileInput = ref(null)
 const text = ref('')
@@ -75,9 +76,48 @@ function releaseAttachment(item) {
   if (item.objectUrl) URL.revokeObjectURL(item.objectUrl)
 }
 
+function draftSnapshot() {
+  const content = []
+  if (text.value) content.push({ type: 'text', text: text.value })
+  for (const item of attachments.value) {
+    if (item.status !== 'ready' || !item.asset) continue
+    content.push({
+      type: IMAGE_MIME_TYPES.has(item.asset.mimeType) ? 'image' : 'file',
+      assetId: item.asset.id,
+      mimeType: item.asset.mimeType,
+      name: item.asset.name,
+      size: item.asset.size,
+    })
+  }
+  return content
+}
+
+function emitDraftChange() {
+  emit('draft-change', draftSnapshot())
+}
+
+function restoreDraft(content = []) {
+  if (!Array.isArray(content)) return
+  const textBlock = content.find((item) => item.type === 'text')
+  text.value = textBlock?.text || ''
+  attachments.value = content
+    .filter((item) => ['image', 'file'].includes(item.type) && item.assetId)
+    .map((item) => ({
+      localId: `draft:${item.assetId}`,
+      file: { name: item.name, size: item.size, type: item.mimeType },
+      objectUrl: '',
+      status: 'ready',
+      error: '',
+      asset: item,
+      controller: null,
+    }))
+  nextTick(resizeTextarea)
+}
+
 function removeAttachment(item) {
   releaseAttachment(item)
   attachments.value = attachments.value.filter((entry) => entry.localId !== item.localId)
+  emitDraftChange()
 }
 
 async function uploadAttachment(item) {
@@ -91,10 +131,12 @@ async function uploadAttachment(item) {
     if (item.controller !== controller) return
     item.asset = result.asset
     item.status = 'ready'
+    emitDraftChange()
   } catch (cause) {
     if (cause.name === 'AbortError' || item.controller !== controller) return
     item.status = 'error'
     item.error = cause.message
+    emitDraftChange()
   } finally {
     if (item.controller === controller) item.controller = null
   }
@@ -192,7 +234,13 @@ function clearDraft() {
   nextTick(resizeTextarea)
 }
 
-watch(text, () => nextTick(resizeTextarea))
+watch(text, () => {
+  nextTick(resizeTextarea)
+  emitDraftChange()
+})
+watch(() => props.draftContent, (content) => {
+  if (!text.value && !attachments.value.length && content?.length) restoreDraft(content)
+}, { deep: true, immediate: true })
 watch(() => props.workspaceId, clearDraft)
 
 onMounted(() => {
@@ -239,7 +287,6 @@ onBeforeUnmount(() => {
       class="composer-input block w-full resize-none bg-transparent px-3 pb-1 pt-3 text-sm leading-6 outline-none"
       rows="1"
       placeholder="向 Agent 发送消息"
-      :disabled="running"
       @keydown="handleKeydown"
       @paste="handlePaste"
     />

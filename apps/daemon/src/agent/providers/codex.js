@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { JsonRpcProcess } from '../jsonRpcProcess.js'
 import { filePromptText } from '../promptAttachments.js'
 import { createControlState, effortLabel, normalizeContextUsage } from '../controlState.js'
+import { readCodexHistorySnapshot } from '../history/providers/codexHistory.js'
 
 export function buildCodexInput(content) {
   return content.map((block) => {
@@ -160,6 +161,10 @@ export class CodexRuntime extends EventEmitter {
   async getControlState() {
     await this.connect()
     return this.controlState
+  }
+
+  async readHistorySnapshot(options) {
+    return readCodexHistorySnapshot(this, options)
   }
 
   async startTurn(content, clientMessageId) {

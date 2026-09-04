@@ -4,6 +4,7 @@ import { Readable, Writable } from 'node:stream'
 import { ClientSideConnection, PROTOCOL_VERSION, ndJsonStream } from '@agentclientprotocol/sdk'
 import { filePromptText, imageBase64 } from '../promptAttachments.js'
 import { createControlState, effortLabel, flattenAcpOptions, normalizeContextUsage } from '../controlState.js'
+import { readKimiHistorySnapshot } from '../history/providers/kimiHistory.js'
 
 export async function buildAcpPrompt(content) {
   return Promise.all(content.map(async (block) => {
@@ -190,6 +191,11 @@ export class AcpRuntime extends EventEmitter {
   async getControlState() {
     await this.connect()
     return this.controlState
+  }
+
+  async readHistorySnapshot(options) {
+    if (!this.sessionId) return { status: 'unsupported' }
+    return readKimiHistorySnapshot(this.sessionId, options)
   }
 
   async updateSettings({ modelId = this.modelId, reasoningEffort = this.reasoningEffort } = {}) {
