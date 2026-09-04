@@ -378,7 +378,7 @@ defineExpose({ openPath, refreshGit })
 .tab-count { min-width: 1rem; border-radius: 999px; background: var(--theme-appPanelStrong); padding: 0 0.3rem; text-align: center; font-size: 9px; }
 .tree-row, .change-row { transition: background-color 140ms ease, color 140ms ease; }
 .tree-row:hover, .change-row:hover { background: var(--theme-appPanelHover); }
-.tree-row.is-selected, .change-row.is-selected { background: var(--theme-appPanelInset); }
+.tree-row.is-selected, .change-row.is-selected { background: var(--theme-appPanelActive); }
 .folder-icon { color: var(--theme-warningText); }
 .preview-heading, .diff-section-title { background: var(--theme-appPanelStrong); }
 .inspector-error { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }

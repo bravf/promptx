@@ -266,7 +266,7 @@ watch(
 }
 
 .v2-settings-nav-item.is-active {
-  background: var(--theme-appPanelInset);
+  background: var(--theme-appPanelActive);
   color: var(--theme-textPrimary);
 }
 

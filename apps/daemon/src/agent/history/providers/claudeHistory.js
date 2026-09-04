@@ -41,6 +41,40 @@ function parseLines(content) {
   return result
 }
 
+export function listClaudeHistorySessions() {
+  const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+  const root = path.join(configDir, 'projects')
+  if (!fs.existsSync(root)) return []
+  const sessions = []
+  for (const project of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!project.isDirectory()) continue
+    const directory = path.join(root, project.name)
+    for (const file of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (!file.isFile() || !file.name.endsWith('.jsonl')) continue
+      const fullPath = path.join(directory, file.name)
+      let stat
+      try { stat = fs.statSync(fullPath) } catch { continue }
+      const content = readStableHistoryFile(fullPath).content || ''
+      const entries = parseLines(content)
+      const first = entries.find(visibleUser)
+      const users = entries.filter(visibleUser)
+      const cwd = entries.find((entry) => entry.cwd)?.cwd || ''
+      const preview = textContent(first?.message?.content).trim()
+      const lastPrompt = textContent(users.at(-1)?.message?.content).trim()
+      sessions.push({
+        providerId: 'claude',
+        providerHandleId: file.name.slice(0, -'.jsonl'.length),
+        cwd,
+        title: preview.slice(0, 80) || 'Claude 会话',
+        firstPromptPreview: preview.slice(0, 160),
+        lastPromptPreview: lastPrompt.slice(0, 160),
+        lastActivityAt: stat.mtime.toISOString(),
+      })
+    }
+  }
+  return sessions.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
+}
+
 function visibleUser(entry) {
   if (entry.type !== 'user' || entry.isSidechain || entry.isMeta || entry.isCompactSummary) return false
   const content = entry.message?.content

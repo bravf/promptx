@@ -13,6 +13,16 @@ test('将 Timeline Markdown 中的工作区文件链接转换为抽屉目标', (
     intent: 'file',
     line: null,
   })
+  assert.deepEqual(workspaceLinkForHref('/code/demo/src/App.vue:1065', '/code/demo'), {
+    path: 'src/App.vue',
+    intent: 'file',
+    line: 1065,
+  })
+  assert.deepEqual(workspaceLinkForHref('src/App.vue:27:4', '/code/demo'), {
+    path: 'src/App.vue',
+    intent: 'file',
+    line: 27,
+  })
 })
 
 test('Timeline Markdown 外链和工作区外路径不进入抽屉', () => {

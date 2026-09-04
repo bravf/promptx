@@ -62,6 +62,10 @@ function isMissingThreadError(error) {
   return /no rollout found for thread id|thread[^\n]*not found/i.test(error?.message || '')
 }
 
+function isPaginatedThreadsError(error) {
+  return /paginated_threads/i.test(error?.message || '')
+}
+
 export class CodexRuntime extends EventEmitter {
   constructor({ cwd, nativeHandle = {}, modelId = '', config = {} }) {
     super()
@@ -74,6 +78,7 @@ export class CodexRuntime extends EventEmitter {
     this.connectPromise = null
     this.threadId = nativeHandle.threadId || ''
     this.turnId = ''
+    this.historyOnly = false
     this.messagePhases = new Map()
     this.messageTextSeen = new Set()
     this.controlState = createControlState({ requestedModelId: modelId, requestedReasoningEffort: this.reasoningEffort })
@@ -136,12 +141,22 @@ export class CodexRuntime extends EventEmitter {
         ...(this.modelId ? { model: this.modelId } : {}),
       }
       let result
+      this.historyOnly = false
       if (this.threadId) {
         try {
           result = await rpc.request('thread/resume', { threadId: this.threadId, ...params })
         } catch (error) {
-          if (!isMissingThreadError(error)) throw error
-          result = await rpc.request('thread/start', params)
+          if (isMissingThreadError(error)) {
+            result = await rpc.request('thread/start', params)
+          } else if (isPaginatedThreadsError(error)) {
+            // Codex 0.152 can expose paginated Desktop threads but cannot
+            // resume them through app-server yet. Keep the connection alive
+            // so the history provider can read the rollout JSONL.
+            this.historyOnly = true
+            result = { thread: { id: this.threadId } }
+          } else {
+            throw error
+          }
         }
       } else {
         result = await rpc.request('thread/start', params)
@@ -169,6 +184,9 @@ export class CodexRuntime extends EventEmitter {
 
   async startTurn(content, clientMessageId) {
     await this.connect()
+    if (this.historyOnly) {
+      throw new Error('该 Codex 会话使用 paginated 历史，当前 Codex 版本暂不支持继续运行，请升级 Codex。')
+    }
     this.messagePhases.clear()
     this.messageTextSeen.clear()
     const input = buildCodexInput(content)

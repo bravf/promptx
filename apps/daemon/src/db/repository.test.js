@@ -24,6 +24,24 @@ function row(sourceTurnId, providerMessageId, text = '完成') {
   }
 }
 
+test('导入 Agent 会保留原生句柄并支持按 Provider 去重', () => {
+  const db = openDatabase(':memory:')
+  const repository = createRepository(db)
+  try {
+    const workspace = repository.createWorkspace({ cwd: process.cwd(), title: '导入测试' })
+    const agent = repository.createAgent(workspace.id, {
+      providerId: 'codex',
+      title: '已有线程',
+      nativeHandle: { threadId: 'thread-imported' },
+    })
+    assert.deepEqual(repository.getAgent(agent.id).nativeHandle, { threadId: 'thread-imported' })
+    assert.equal(repository.findAgentByProviderHandle('codex', { threadId: 'thread-imported' }).id, agent.id)
+    assert.equal(repository.findAgentByProviderHandle('codex', { threadId: 'other' }), null)
+  } finally {
+    db.close()
+  }
+})
+
 test('同步会把已有本地 Turn 回填原生 ID，不创建重复 Turn', () => {
   const { db, repository, agent } = setup()
   try {

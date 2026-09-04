@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { test } from 'node:test'
-import { mapCodexHistorySnapshot, readCodexHistorySnapshot } from './codexHistory.js'
+import { mapCodexHistorySnapshot, mapCodexRolloutSnapshot, readCodexHistorySnapshot } from './codexHistory.js'
 import { mapClaudeHistorySnapshot } from './claudeHistory.js'
 import { mapKimiHistorySnapshot } from './kimiHistory.js'
 
@@ -17,13 +20,14 @@ test('Codex thread/read 映射为统一历史快照', () => {
     }],
   })
   assert.equal(snapshot.sourceId, 'codex-thread')
-  assert.equal(snapshot.revision, '1788500002')
+  assert.equal(snapshot.revision, '1788500002:1788500000')
   assert.deepEqual(snapshot.turns[0].items.map((entry) => entry.item.type), ['user_message', 'reasoning', 'assistant_message'])
   assert.equal(snapshot.turns[0].items[0].item.clientMessageId, 'client-1')
 })
 
-test('Codex 同步版本使用 recencyAt，避免 updatedAt 固定为创建时间导致漏同步', async () => {
+test('Codex 即使 recencyAt 未变化也读取完整 Turn，避免漏掉稍后完成的回复', async () => {
   const requests = []
+  let completed = false
   const runtime = {
     threadId: 'codex-thread',
     async connect() {},
@@ -31,19 +35,80 @@ test('Codex 同步版本使用 recencyAt，避免 updatedAt 固定为创建时�
       async request(method, params) {
         requests.push({ method, params })
         if (!params.includeTurns) return { thread: { id: 'codex-thread', updatedAt: 10, recencyAt: 20 } }
-        return { thread: { id: 'codex-thread', updatedAt: 10, recencyAt: 20, turns: [] } }
+        return {
+          thread: {
+            id: 'codex-thread', updatedAt: completed ? 30 : 10, recencyAt: 20,
+            turns: completed ? [{
+              id: 'turn-1', status: 'completed', startedAt: 20, completedAt: 30,
+              items: [
+                { type: 'userMessage', id: 'user-1', content: [{ type: 'text', text: '问题' }] },
+                { type: 'agentMessage', id: 'answer-1', phase: 'final_answer', text: '回复' },
+              ],
+            }] : [],
+          },
+        }
       },
     },
   }
   const snapshot = await readCodexHistorySnapshot(runtime, { knownRevision: '10' })
-  assert.equal(snapshot.revision, '20')
+  assert.equal(snapshot.revision, '20:10')
   assert.equal(snapshot.turns.length, 0)
   assert.equal(requests.length, 2)
 
   requests.length = 0
-  const unchanged = await readCodexHistorySnapshot(runtime, { knownRevision: '20' })
-  assert.equal(unchanged.status, 'unchanged')
-  assert.equal(requests.length, 1)
+  completed = true
+  const updated = await readCodexHistorySnapshot(runtime, { knownRevision: '20:10' })
+  assert.equal(updated.revision, '20:30')
+  assert.equal(updated.turns[0].items.at(-1).item.text, '回复')
+  assert.equal(requests.length, 2)
+})
+
+test('Codex paginated rollout JSONL 映射 item_completed 历史', () => {
+  const content = [
+    { timestamp: '2026-09-04T05:45:30.919Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } },
+    { timestamp: '2026-09-04T05:45:30.953Z', type: 'event_msg', payload: { type: 'item_completed', turn_id: 'turn-1', item: { type: 'UserMessage', id: 'user-1', client_id: 'client-1', content: [{ type: 'text', text: '你好' }] } } },
+    { timestamp: '2026-09-04T05:45:34.711Z', type: 'event_msg', payload: { type: 'item_completed', turn_id: 'turn-1', item: { type: 'AgentMessage', id: 'answer-1', phase: 'final_answer', content: [{ type: 'Text', text: '你好。' }] } } },
+    { timestamp: '2026-09-04T05:45:34.828Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-1' } },
+  ].map(JSON.stringify).join('\n')
+  const snapshot = mapCodexRolloutSnapshot({ id: 'thread-1' }, content, '12:34')
+  assert.equal(snapshot.sourceId, 'thread-1')
+  assert.equal(snapshot.revision, '12:34')
+  assert.equal(snapshot.turns[0].sourceTurnId, 'turn-1')
+  assert.equal(snapshot.turns[0].status, 'completed')
+  assert.deepEqual(snapshot.turns[0].items.map((entry) => entry.item.type), ['user_message', 'assistant_message'])
+  assert.equal(snapshot.turns[0].items[0].item.clientMessageId, 'client-1')
+  assert.equal(snapshot.turns[0].items[1].item.text, '你好。')
+})
+
+test('Codex paginated thread/read 报错时回退到 thread.path rollout 文件', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-codex-'))
+  const file = path.join(directory, 'rollout.jsonl')
+  fs.writeFileSync(file, [
+    { timestamp: '2026-09-04T05:45:30.919Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } },
+    { timestamp: '2026-09-04T05:45:30.953Z', type: 'event_msg', payload: { type: 'item_completed', turn_id: 'turn-1', item: { type: 'UserMessage', id: 'user-1', content: [{ type: 'text', text: '导入测试' }] } } },
+    { timestamp: '2026-09-04T05:45:34.828Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-1' } },
+  ].map(JSON.stringify).join('\n'))
+  const requests = []
+  const runtime = {
+    threadId: 'thread-1',
+    async connect() {},
+    rpc: {
+      async request(method, params) {
+        requests.push({ method, params })
+        if (!params.includeTurns) return { thread: { id: 'thread-1', historyMode: 'paginated', path: file, recencyAt: 20 } }
+        throw new Error('paginated_threads is not supported yet')
+      },
+    },
+  }
+  try {
+    const snapshot = await readCodexHistorySnapshot(runtime)
+    assert.equal(snapshot.sourceId, 'thread-1')
+    assert.equal(snapshot.turns[0].status, 'completed')
+    assert.equal(snapshot.turns[0].items[0].item.content[0].text, '导入测试')
+    assert.equal(requests.length, 2)
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 test('Claude JSONL 映射用户、思考、工具和最终回复', () => {
@@ -72,4 +137,16 @@ test('Kimi wire JSONL 映射完整 Turn', () => {
   assert.equal(snapshot.turns[0].status, 'completed')
   assert.deepEqual(snapshot.turns[0].items.map((entry) => entry.item.type), ['user_message', 'reasoning', 'tool_call', 'assistant_message'])
   assert.equal(snapshot.turns[0].items[2].item.status, 'completed')
+})
+
+test('新版 Kimi Code session wire 映射 turn.prompt 和 loop event', () => {
+  const lines = [
+    { type: 'turn.prompt', promptId: 'prompt-1', input: [{ type: 'text', text: '你好2026' }], time: 1788500442911 },
+    { type: 'context.append_loop_event', turnId: '0', event: { type: 'content.part', part: { type: 'think', think: '先回应问候' } }, time: 1788500447051 },
+    { type: 'context.append_loop_event', turnId: '0', event: { type: 'content.part', part: { type: 'text', text: '你好！' } }, time: 1788500447051 },
+    { type: 'prompt.completed', promptId: 'prompt-1', finishedAt: '2026-09-04T05:40:47.054Z' },
+  ]
+  const snapshot = mapKimiHistorySnapshot('session_new', lines.map(JSON.stringify).join('\n'))
+  assert.equal(snapshot.turns[0].status, 'completed')
+  assert.deepEqual(snapshot.turns[0].items.map((entry) => entry.item.type), ['user_message', 'reasoning', 'assistant_message'])
 })

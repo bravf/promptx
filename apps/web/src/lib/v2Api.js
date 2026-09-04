@@ -3,6 +3,14 @@ import { transportObjectUrl } from './transport.js'
 
 export const v2Api = {
   listProviders: () => request('/api/v2/providers'),
+  listImportableSessions: (options = {}) => {
+    const query = new URLSearchParams()
+    if (options.providerId) query.set('providerId', options.providerId)
+    if (options.query) query.set('q', options.query)
+    if (options.limit) query.set('limit', String(options.limit))
+    return request(`/api/v2/import/sessions?${query}`, { cache: 'no-store', signal: options.signal })
+  },
+  importSession: (input) => request('/api/v2/import/sessions', { method: 'POST', body: JSON.stringify(input) }),
   searchDirectories: (query = '', options = {}) => {
     const search = new URLSearchParams({
       q: query,

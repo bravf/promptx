@@ -42,10 +42,20 @@ export function createSseHeaders(origin = '') {
 }
 
 export function registerRoutes(app, context) {
-  const { repository, timelineStore, providerRegistry, agentManager, eventHub, assetsDir } = context
+  const { repository, timelineStore, providerRegistry, agentManager, sessionImport, eventHub, assetsDir } = context
 
   app.get('/api/v2/health', async () => ({ ok: true, version: 2 }))
   app.get('/api/v2/providers', async () => ({ providers: providerRegistry.list() }))
+  app.get('/api/v2/import/sessions', async (request) => ({ sessions: await sessionImport.list({
+    providerId: request.query.providerId,
+    query: request.query.q,
+    limit: request.query.limit,
+  }) }))
+  app.post('/api/v2/import/sessions', async (request, reply) => {
+    const result = await sessionImport.import(request.body || {})
+    reply.code(result.imported ? 201 : 200)
+    return result
+  })
   app.get('/api/v2/directories/search', async (request) => searchDirectories({
     query: request.query.q,
     limit: request.query.limit,

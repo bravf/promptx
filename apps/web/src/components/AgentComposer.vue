@@ -276,8 +276,8 @@ onBeforeUnmount(() => {
             <span>{{ item.status === 'uploading' ? '上传中' : formatBytes(item.asset?.size || item.file.size) }}</span>
           </div>
         </div>
-        <button v-if="item.status === 'error' && item.file.size <= MAX_FILE_SIZE" type="button" class="attachment-action absolute right-1 top-1 h-6 w-6" title="重试" @click="uploadAttachment(item)"><RotateCcw class="h-3 w-3" /></button>
-        <button type="button" class="attachment-action absolute bottom-1 right-1 h-6 w-6" title="移除附件" @click="removeAttachment(item)"><X class="h-3 w-3" /></button>
+        <button v-if="item.status === 'error' && item.file.size <= MAX_FILE_SIZE" type="button" class="attachment-action round-icon-button absolute right-1 top-1 h-6 w-6" title="重试" @click="uploadAttachment(item)"><RotateCcw class="h-3 w-3" /></button>
+        <button type="button" class="attachment-action round-icon-button absolute bottom-1 right-1 h-6 w-6" title="移除附件" @click="removeAttachment(item)"><X class="h-3 w-3" /></button>
       </div>
     </div>
 
@@ -339,7 +339,7 @@ onBeforeUnmount(() => {
           </svg>
         </div>
         <button v-if="running" type="button" class="quiet-icon-button h-8 w-8" title="停止" @click="emit('cancel')"><CircleStop class="h-4 w-4" /></button>
-        <button v-else type="button" class="tool-button tool-button-primary h-8 w-8" title="发送" :disabled="sendDisabled" @click="submit">
+        <button v-else type="button" class="tool-button tool-button-primary round-icon-button h-8 w-8" title="发送" :disabled="sendDisabled" @click="submit">
           <LoaderCircle v-if="submitting || sending" class="h-4 w-4 animate-spin" />
           <Send v-else class="h-4 w-4" />
         </button>
@@ -348,7 +348,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div v-if="preview" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-6" @click.self="preview = null">
-    <button type="button" class="tool-button absolute right-4 top-4 h-9 w-9" title="关闭预览" @click="preview = null"><X class="h-4 w-4" /></button>
+    <button type="button" class="image-preview-overlay__button tool-button round-icon-button absolute right-4 top-4 h-9 w-9" title="关闭预览" @click="preview = null"><X class="h-4 w-4" /></button>
     <img :src="preview.objectUrl" :alt="preview.file.name" class="max-h-full max-w-full object-contain" />
   </div>
 </template>

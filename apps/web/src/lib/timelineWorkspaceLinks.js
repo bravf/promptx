@@ -51,6 +51,11 @@ export function workspaceLinkForHref(value, workspaceCwd = '') {
     href = href.slice(0, lineMatch.index)
   } else {
     href = href.replace(/[?#].*$/, '')
+    const locationMatch = href.match(/:(\d+)(?::\d+)?$/)
+    if (locationMatch) {
+      line = Number(locationMatch[1])
+      href = href.slice(0, locationMatch.index)
+    }
   }
 
   const filePath = normalizePath(href, workspaceCwd)

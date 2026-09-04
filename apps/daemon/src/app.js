@@ -13,6 +13,7 @@ import { ProviderRegistry } from './agent/providerRegistry.js'
 import { AgentManager } from './agent/agentManager.js'
 import { registerRoutes } from './api/routes.js'
 import { registerRelayRoutes, RelayService } from './relay/relayService.js'
+import { SessionImportService } from './agent/sessionImport.js'
 
 export async function createApp(options = {}) {
   const app = Fastify({ logger: options.logger ?? true })
@@ -34,9 +35,10 @@ export async function createApp(options = {}) {
   const eventHub = new EventHub()
   const providerRegistry = options.providerRegistry || new ProviderRegistry()
   const agentManager = new AgentManager({ repository, timelineStore, providerRegistry, eventHub })
+  const sessionImport = new SessionImportService({ repository, providerRegistry, agentManager })
   app.decorate('sqliteRepository', repository)
   repository.failActiveTurnsOnStartup()
-  registerRoutes(app, { repository, timelineStore, eventHub, providerRegistry, agentManager, assetsDir })
+  registerRoutes(app, { repository, timelineStore, eventHub, providerRegistry, agentManager, sessionImport, assetsDir })
   const relay = new RelayService({
     localBaseUrl: options.localBaseUrl || `http://127.0.0.1:${process.env.PORT || process.env.PROMPTX_DAEMON_PORT || 3001}`,
     logger: app.log,

@@ -145,7 +145,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div v-if="preview" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-6" @click.self="closePreview">
-    <button type="button" class="tool-button absolute right-4 top-4 h-9 w-9" title="关闭预览" @click="closePreview"><X class="h-4 w-4" /></button>
+    <button type="button" class="image-preview-overlay__button tool-button round-icon-button absolute right-4 top-4 h-9 w-9" title="关闭预览" @click="closePreview"><X class="h-4 w-4" /></button>
     <div v-if="previewLoading" class="theme-muted-text absolute inset-0 flex items-center justify-center gap-2 text-xs">
       <LoaderCircle class="h-4 w-4 animate-spin" />
       <span>正在加载大图</span>
@@ -167,7 +167,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.user-message { background: var(--theme-promptBg); color: var(--theme-promptText); }
+.user-message {
+  min-width: 0;
+  max-width: 85%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  background: var(--theme-promptBg);
+  color: var(--theme-promptText);
+}
 .message-image { width: 112px; height: 84px; background: var(--theme-appPanelInset); transition: background-color 160ms ease, opacity 160ms ease; }
 .message-image:disabled { cursor: wait; }
 .message-image[data-state='ready'] { cursor: zoom-in; }

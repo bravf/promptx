@@ -296,10 +296,16 @@ export function createRepository(db) {
         (id, workspace_id, provider_id, title, lifecycle, model_id, mode_id, config_json,
          capabilities_json, native_handle_json, timeline_epoch, timeline_next_seq, last_error,
          requires_attention, attention_reason, attention_at, created_at, updated_at, last_active_at)
-        VALUES (?, ?, ?, ?, 'initializing', ?, ?, ?, ?, '{}', ?, 1, '', 0, NULL, NULL, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, 'initializing', ?, ?, ?, ?, ?, ?, 1, '', 0, NULL, NULL, ?, ?, ?)`)
         .run(id, workspaceId, input.providerId, input.title || DEFAULT_AGENT_TITLE, input.modelId || '', input.modeId || '',
-          JSON.stringify(input.providerConfig || {}), JSON.stringify(capabilities), randomUUID(), now, now, now)
+          JSON.stringify(input.providerConfig || {}), JSON.stringify(capabilities), JSON.stringify(input.nativeHandle || {}), randomUUID(), now, now, now)
       return this.getAgent(id)
+    },
+    findAgentByProviderHandle(providerId, nativeHandle = {}) {
+      const key = providerId === 'codex' ? nativeHandle.threadId : nativeHandle.sessionId
+      if (!key) return null
+      const rows = db.prepare('SELECT * FROM agent_sessions WHERE provider_id = ? AND native_handle_json LIKE ?').all(providerId, `%${key}%`)
+      return mapAgent(rows.find((row) => parseJson(row.native_handle_json)?.[providerId === 'codex' ? 'threadId' : 'sessionId'] === key))
     },
     updateAgent(id, patch = {}) {
       const current = this.getAgent(id)

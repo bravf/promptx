@@ -1,9 +1,10 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, ArrowLeft, Bot, ChevronRight, FileDiff, Files, FolderOpen, LoaderCircle, Plus, Search, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, Bot, FileDiff, Files, Folder, FolderOpen, LoaderCircle, Plus, Search, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
 import { v2Api, agentEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
 import { createEventSource } from '../lib/eventSource.js'
+import { createMobileDialogHistoryState, getMobileDialogHistoryState } from '../lib/mobileDialogHistory.js'
 import { createMobileTimelineHistoryState, hasMobileTimelineHistoryState } from '../lib/mobileTimelineHistory.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupTimelineTurns, isTimelineTurnRunning } from '../lib/timelinePresentation.js'
@@ -36,6 +37,12 @@ const agentControl = ref(null)
 const settingsLoading = ref(false)
 const error = ref('')
 const dialog = ref('')
+const importSessions = ref([])
+const importProviderFilter = ref('')
+const importQuery = ref('')
+const importLoading = ref(false)
+const importError = ref('')
+const importingId = ref('')
 const timelineEpoch = ref('')
 const hasOlderHistory = ref(false)
 const loadingOlderHistory = ref(false)
@@ -71,6 +78,11 @@ let directorySearchController = null
 let markdownScrollFrame = null
 let inspectorRefreshTimer = null
 let timelineWakeSyncAt = 0
+let importSearchTimer = null
+let importSearchController = null
+let dialogUsesHistory = false
+let dialogHistoryClosePromise = null
+let resolveDialogHistoryClose = null
 
 const activeWorkspace = computed(() => workspaces.value.find((item) => item.id === activeWorkspaceId.value))
 const activeWorkspaceDirectoryName = computed(() => {
@@ -114,12 +126,18 @@ function toggleWorkspace(workspaceId) {
   setWorkspaceExpanded(workspaceId, !expandedWorkspaceIds.value.has(workspaceId))
 }
 
+function handleWorkspaceRowClick(workspace) {
+  toggleWorkspace(workspace.id)
+}
+
 function providerLabel(providerId) {
   return providers.value.find((provider) => provider.id === providerId)?.label || providerId
 }
 
-function workspaceInitial(workspace) {
-  return String(workspace.title || workspace.cwd || 'W').trim().charAt(0).toUpperCase()
+function formatImportActivity(value) {
+  const timestamp = Date.parse(String(value || ''))
+  if (!Number.isFinite(timestamp)) return '更新时间未知'
+  return `最近更新 ${new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(timestamp)}`
 }
 
 function agentStatusClass(agent) {
@@ -519,6 +537,13 @@ function enterMobileTimeline() {
 }
 
 function handleMobileHistoryPop(event) {
+  const historyDialog = getMobileDialogHistoryState(event.state)
+  if (dialogUsesHistory && historyDialog !== dialog.value) {
+    finishDialogClose()
+  } else if (!dialogUsesHistory && isMobile.value && historyDialog) {
+    restoreDialogFromHistory(historyDialog)
+  }
+
   if (!isMobile.value) return
   drawerMode.value = null
   mobileView.value = hasMobileTimelineHistoryState(event.state) && activeAgentId.value
@@ -609,15 +634,137 @@ async function openConversationDialog(workspace = null) {
   directorySearchError.value = ''
   directorySuggestionsOpen.value = false
   selectedDirectoryIndex.value = -1
-  dialog.value = 'conversation'
+  openManagedDialog('conversation')
   await nextTick()
   workspacePathInput.value?.focus()
 }
 
-function closeDialog() {
+async function openImportDialog() {
+  openManagedDialog('import')
+  importProviderFilter.value = ''
+  importQuery.value = ''
+  importError.value = ''
+  await loadImportSessions()
+}
+
+function cancelImportSearch() {
+  if (importSearchTimer) clearTimeout(importSearchTimer)
+  importSearchTimer = null
+  importSearchController?.abort()
+  importSearchController = null
+}
+
+async function loadImportSessions() {
+  importLoading.value = true
+  importError.value = ''
+  importSearchController?.abort()
+  const controller = new AbortController()
+  importSearchController = controller
+  try {
+    const result = await v2Api.listImportableSessions({
+      providerId: importProviderFilter.value,
+      query: importQuery.value,
+      limit: 200,
+      signal: controller.signal,
+    })
+    if (dialog.value === 'import' && importSearchController === controller) importSessions.value = result.sessions || []
+  } catch (cause) {
+    if (cause.name !== 'AbortError' && importSearchController === controller) {
+      importSessions.value = []
+      importError.value = cause.message
+    }
+  } finally {
+    if (importSearchController === controller) {
+      importSearchController = null
+      importLoading.value = false
+    }
+  }
+}
+
+function scheduleImportSearch() {
+  if (importSearchTimer) clearTimeout(importSearchTimer)
+  importSearchTimer = setTimeout(() => {
+    importSearchTimer = null
+    loadImportSessions()
+  }, 220)
+}
+
+function clearImportQuery() {
+  importQuery.value = ''
+  scheduleImportSearch()
+}
+
+async function selectImportProvider(providerId) {
+  if (importProviderFilter.value === providerId) return
+  importProviderFilter.value = providerId
+  await loadImportSessions()
+}
+
+async function importSession(session) {
+  if (importingId.value) return
+  importingId.value = session.providerHandleId
+  importError.value = ''
+  try {
+    const result = await v2Api.importSession({
+      providerId: session.providerId,
+      providerHandleId: session.providerHandleId,
+      cwd: session.cwd || activeWorkspace.value?.cwd || '',
+      title: session.title,
+    })
+    const agent = result.agent
+    const workspace = result.workspace || workspaces.value.find((item) => item.id === agent.workspaceId)
+    if (workspace && !workspaces.value.some((item) => item.id === workspace.id)) workspaces.value.push(workspace)
+    upsertAgent(agent)
+    await closeDialog()
+    setWorkspaceExpanded(agent.workspaceId)
+    await selectAgent(agent.id, { navigate: true })
+  } catch (cause) {
+    importError.value = cause.message
+  } finally {
+    importingId.value = ''
+  }
+}
+
+function openManagedDialog(dialogId) {
+  dialog.value = dialogId
+  if (!isMobile.value) return
+  if (getMobileDialogHistoryState(window.history.state) === dialogId) {
+    dialogUsesHistory = true
+    return
+  }
+  dialogUsesHistory = true
+  window.history.pushState(createMobileDialogHistoryState(window.history.state, dialogId), '')
+}
+
+function restoreDialogFromHistory(dialogId) {
+  dialogUsesHistory = true
+  dialog.value = dialogId
+  if (dialogId === 'import') loadImportSessions()
+}
+
+function finishDialogClose() {
   cancelDirectorySearch()
+  cancelImportSearch()
   directorySuggestionsOpen.value = false
   dialog.value = ''
+  dialogUsesHistory = false
+  resolveDialogHistoryClose?.()
+  dialogHistoryClosePromise = null
+  resolveDialogHistoryClose = null
+}
+
+function closeDialog() {
+  if (dialogUsesHistory && getMobileDialogHistoryState(window.history.state) === dialog.value) {
+    if (!dialogHistoryClosePromise) {
+      dialogHistoryClosePromise = new Promise((resolve) => {
+        resolveDialogHistoryClose = resolve
+      })
+      window.history.back()
+    }
+    return dialogHistoryClosePromise
+  }
+  finishDialogClose()
+  return Promise.resolve()
 }
 
 function selectDirectory(directory) {
@@ -673,7 +820,7 @@ async function createConversation() {
     if (!workspaces.value.some((item) => item.id === workspace.id)) workspaces.value.push(workspace)
     upsertAgent(agent)
     workspacePath.value = ''
-    closeDialog()
+    await closeDialog()
     setWorkspaceExpanded(workspace.id)
     await selectAgent(agent.id, { navigate: true })
   } catch (cause) {
@@ -807,6 +954,9 @@ function updateMobileState(event) {
   mobileView.value = event.matches
     ? (hasMobileTimelineHistoryState(window.history.state) ? 'timeline' : 'sidebar')
     : 'timeline'
+  if (event.matches && dialog.value && !dialogUsesHistory) {
+    openManagedDialog(dialog.value)
+  }
 }
 
 onMounted(async () => {
@@ -817,6 +967,8 @@ onMounted(async () => {
   updateMobileState(mobileMediaQuery)
   mobileMediaQuery.addEventListener('change', updateMobileState)
   await loadInitial()
+  const historyDialog = getMobileDialogHistoryState(window.history.state)
+  if (isMobile.value && historyDialog) restoreDialogFromHistory(historyDialog)
   openGlobalEvents()
 })
 onBeforeUnmount(() => {
@@ -827,6 +979,7 @@ onBeforeUnmount(() => {
   closeEvents()
   closeGlobalEvents()
   cancelDirectorySearch()
+  cancelImportSearch()
   if (markdownScrollFrame) cancelAnimationFrame(markdownScrollFrame)
   if (inspectorRefreshTimer) clearTimeout(inspectorRefreshTimer)
 })
@@ -855,37 +1008,51 @@ onBeforeUnmount(() => {
           <Plus class="h-4 w-4 shrink-0" />
           <span>新对话</span>
         </button>
+        <button class="sidebar-secondary-action mt-1 flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs" @click="openImportDialog">
+          <FolderOpen class="h-3.5 w-3.5 shrink-0" />
+          <span>导入会话</span>
+        </button>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <div class="theme-muted-text flex h-8 items-center px-2 text-[10px] font-medium uppercase tracking-wide">工作区</div>
         <div v-for="workspace in workspaces" :key="workspace.id" class="workspace-group mb-2">
-          <div class="workspace-heading group flex h-9 min-w-0 items-center rounded-sm" :class="workspace.id === activeWorkspaceId ? 'workspace-active' : ''">
-            <button class="workspace-toggle flex h-7 w-6 shrink-0 items-center justify-center" :title="expandedWorkspaceIds.has(workspace.id) ? '收起工作区' : '展开工作区'" @click="toggleWorkspace(workspace.id)">
-              <ChevronRight class="h-3.5 w-3.5 transition-transform" :class="expandedWorkspaceIds.has(workspace.id) ? 'rotate-90' : ''" />
+          <div class="workspace-heading group flex h-9 min-w-0 cursor-pointer items-center rounded-sm" :class="workspace.id === activeWorkspaceId ? 'workspace-active' : ''" @click="handleWorkspaceRowClick(workspace)">
+            <button
+              class="workspace-toggle round-icon-button flex h-7 w-7 shrink-0 items-center justify-center"
+              :title="expandedWorkspaceIds.has(workspace.id) ? '收起工作区' : '展开工作区'"
+              :aria-label="expandedWorkspaceIds.has(workspace.id) ? '收起工作区' : '展开工作区'"
+              :aria-expanded="expandedWorkspaceIds.has(workspace.id)"
+              @click.stop="toggleWorkspace(workspace.id)"
+            >
+              <FolderOpen v-if="expandedWorkspaceIds.has(workspace.id)" class="h-4 w-4" />
+              <Folder v-else class="h-4 w-4" />
             </button>
-            <button class="flex min-w-0 flex-1 items-center gap-2 py-1 text-left" :title="workspace.cwd" @click="selectWorkspace(workspace.id)">
-              <span class="workspace-mark flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-[10px] font-semibold">{{ workspaceInitial(workspace) }}</span>
+            <button class="flex min-w-0 flex-1 items-center gap-2 py-1 text-left" :title="workspace.cwd" @click.stop="handleWorkspaceRowClick(workspace)">
               <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ workspace.title }}</span>
             </button>
-            <button class="workspace-action flex h-7 w-7 shrink-0 items-center justify-center" :title="`在 ${workspace.title} 中新建对话`" @click="openConversationDialog(workspace)"><Plus class="h-3.5 w-3.5" /></button>
-            <button class="workspace-action workspace-delete flex h-7 w-7 shrink-0 items-center justify-center" :title="`移除 ${workspace.title}`" @click="removeWorkspace(workspace)"><Trash2 class="h-3.5 w-3.5" /></button>
+            <button class="workspace-action round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`在 ${workspace.title} 中新建对话`" @click.stop="openConversationDialog(workspace)"><Plus class="h-3.5 w-3.5" /></button>
+            <button class="workspace-action workspace-delete round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`移除 ${workspace.title}`" @click.stop="removeWorkspace(workspace)"><Trash2 class="h-3.5 w-3.5" /></button>
           </div>
-          <div v-if="expandedWorkspaceIds.has(workspace.id)" class="agent-list ml-6 mt-0.5">
-            <div v-for="agent in agentsForWorkspace(workspace.id)" :key="agent.id" class="agent-row group flex min-w-0 items-center rounded-sm" :class="agent.id === activeAgentId ? 'row-active' : ''">
-              <button class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${agent.title} · ${providerLabel(agent.providerId)}`" @click="selectAgent(agent.id, { navigate: true })">
-                <span v-if="agentStatusClass(agent)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(agent)" />
-                <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="agent.title" />
-                <LoaderCircle v-if="agent.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
-              </button>
-              <button class="agent-delete flex h-7 w-7 shrink-0 items-center justify-center" :title="`删除 ${agent.title}`" @click="removeAgent(agent)"><X class="h-3 w-3" /></button>
+          <Transition name="workspace-agents">
+            <div v-if="expandedWorkspaceIds.has(workspace.id)" class="workspace-agents-wrapper">
+              <div class="agent-list ml-6">
+                <div v-for="agent in agentsForWorkspace(workspace.id)" :key="agent.id" class="agent-row group flex min-w-0 items-center rounded-sm" :class="agent.id === activeAgentId ? 'row-active' : ''">
+                  <button class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${agent.title} · ${providerLabel(agent.providerId)}`" @click="selectAgent(agent.id, { navigate: true })">
+                    <span v-if="agentStatusClass(agent)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(agent)" />
+                    <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="agent.title" />
+                    <LoaderCircle v-if="agent.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
+                  </button>
+                  <button class="agent-delete round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`删除 ${agent.title}`" @click="removeAgent(agent)"><X class="h-3 w-3" /></button>
+                </div>
+                <button v-if="!agentsForWorkspace(workspace.id).length" class="theme-muted-text flex h-8 w-full items-center gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(workspace)"><Plus class="h-3 w-3" />新对话</button>
+              </div>
             </div>
-            <button v-if="!agentsForWorkspace(workspace.id).length" class="theme-muted-text flex h-8 w-full items-center gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(workspace)"><Plus class="h-3 w-3" />新对话</button>
-          </div>
+          </Transition>
         </div>
         <div v-if="!workspaces.length && !loading" class="theme-muted-text px-3 py-8 text-center text-xs">还没有工作区</div>
       </div>
       <footer class="border-t p-2">
-        <button class="settings-entry flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs font-medium" @click="dialog = 'settings'">
+        <button class="settings-entry flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs font-medium" @click="openManagedDialog('settings')">
           <Settings class="h-4 w-4 shrink-0" />
           <span>设置</span>
         </button>
@@ -935,10 +1102,18 @@ onBeforeUnmount(() => {
         <div v-if="loadingOlderHistory" class="panel pointer-events-none absolute left-1/2 top-3 z-10 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-sm border shadow-sm" role="status" aria-label="正在加载更早记录">
           <LoaderCircle class="theme-muted-text h-3.5 w-3.5 animate-spin" />
         </div>
-        <button v-if="hasNewTimelineItems" class="new-message-button tool-button absolute bottom-3 left-1/2 z-10 h-9 -translate-x-1/2 gap-1.5 px-3 text-xs shadow-sm" @click="jumpToLatest"><ArrowDown class="h-3.5 w-3.5" />有新消息</button>
+        <button
+          v-if="!followingTimeline && timelineHasContent"
+          class="timeline-jump-button tool-button round-icon-button absolute bottom-3 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center p-0 shadow-sm"
+          :title="hasNewTimelineItems ? '有新消息，回到底部' : '回到底部'"
+          :aria-label="hasNewTimelineItems ? '有新消息，回到底部' : '回到底部'"
+          @click="jumpToLatest"
+        >
+          <ArrowDown class="h-3.5 w-3.5" />
+        </button>
       </div>
 
-      <footer v-if="activeAgent" class="composer-wrap shrink-0 border-t p-3 sm:p-4">
+      <footer v-if="activeAgent" class="composer-wrap shrink-0 p-3 sm:p-4">
         <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
         <AgentComposer
           :key="activeAgentId"
@@ -973,35 +1148,43 @@ onBeforeUnmount(() => {
 
     <DialogShell
       :open="dialog === 'conversation'"
-      panel-class="max-w-md"
-      header-class="px-4 py-3"
-      body-class="flex flex-col"
+      panel-class="new-conversation-panel h-[100dvh] max-w-none border-0 sm:h-[min(32rem,calc(100dvh-3rem))] sm:max-w-md sm:border"
+      header-class="h-14 px-4 sm:px-5"
+      body-class="flex min-h-0 flex-1 flex-col"
       @close="closeDialog"
     >
       <template #title><h2 class="text-sm font-semibold">新对话</h2></template>
-      <form class="px-4 pb-4" @submit.prevent="createConversation">
+      <form class="flex min-h-0 flex-1 flex-col px-4 pb-4" @submit.prevent="createConversation">
+        <div class="shrink-0">
+          <label class="theme-muted-text mt-4 block text-xs" for="conversation-provider">Provider</label>
+          <select id="conversation-provider" v-model="agentProvider" class="tool-input mt-1" :disabled="creating">
+            <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+          </select>
+        </div>
         <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
-        <div class="relative mt-1">
-          <Search class="theme-muted-text pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2" />
-          <input
-            id="workspace-path"
-            ref="workspacePathInput"
-            v-model="workspacePath"
-            class="tool-input w-full pl-9 pr-9 font-mono"
-            placeholder="搜索目录名称或输入绝对路径"
-            autocomplete="off"
-            role="combobox"
-            aria-controls="directory-suggestions"
-            :aria-expanded="directorySuggestionsOpen"
-            :aria-activedescendant="selectedDirectoryIndex >= 0 ? `directory-suggestion-${selectedDirectoryIndex}` : undefined"
-            @input="scheduleDirectorySearch"
-            @keydown="handleDirectoryKeydown"
-          />
-          <LoaderCircle v-if="directorySearchLoading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" />
+        <div class="mt-1 flex min-h-0 flex-1 flex-col">
+          <div class="relative shrink-0">
+            <Search class="theme-muted-text pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2" />
+            <input
+              id="workspace-path"
+              ref="workspacePathInput"
+              v-model="workspacePath"
+              class="tool-input w-full pl-9 pr-9 font-mono"
+              placeholder="搜索目录名称或输入绝对路径"
+              autocomplete="off"
+              role="combobox"
+              aria-controls="directory-suggestions"
+              :aria-expanded="directorySuggestionsOpen"
+              :aria-activedescendant="selectedDirectoryIndex >= 0 ? `directory-suggestion-${selectedDirectoryIndex}` : undefined"
+              @input="scheduleDirectorySearch"
+              @keydown="handleDirectoryKeydown"
+            />
+            <LoaderCircle v-if="directorySearchLoading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" />
+          </div>
           <div
             v-if="directorySuggestionsOpen"
             id="directory-suggestions"
-            class="directory-suggestions theme-popover absolute left-0 right-0 top-[calc(100%+0.375rem)] z-20 max-h-64 overflow-y-auto rounded-sm border shadow-lg"
+            class="directory-suggestions theme-popover mt-1.5 min-h-0 flex-1 overflow-y-auto rounded-sm border shadow-sm"
             role="listbox"
           >
             <button
@@ -1026,13 +1209,58 @@ onBeforeUnmount(() => {
             <div v-if="directorySearchError" class="error-row m-2 rounded-sm border px-3 py-2 text-xs">{{ directorySearchError }}</div>
             <div v-else-if="!directorySearchLoading && !directorySuggestions.length" class="theme-muted-text px-3 py-5 text-center text-xs">没有找到匹配目录</div>
           </div>
+          <div v-else class="min-h-0 flex-1" />
         </div>
-        <label class="theme-muted-text mt-4 block text-xs" for="conversation-provider">Provider</label>
-        <select id="conversation-provider" v-model="agentProvider" class="tool-input mt-1" :disabled="creating">
-          <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
-        </select>
-        <div class="mt-4 flex justify-end"><button class="tool-button tool-button-primary h-9 gap-2 px-4 text-xs" :disabled="!workspacePath.trim() || !agentProvider || creating"><LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />创建对话</button></div>
+        <div class="mt-4 flex shrink-0 justify-end"><button class="tool-button tool-button-primary h-9 gap-2 px-4 text-xs" :disabled="!workspacePath.trim() || !agentProvider || creating"><LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />创建对话</button></div>
       </form>
+    </DialogShell>
+
+    <DialogShell
+      :open="dialog === 'import'"
+      panel-class="import-dialog-panel h-[100dvh] max-w-none border-0 sm:h-[min(40rem,calc(100dvh-3rem))] sm:max-w-2xl sm:border"
+      header-class="h-14 px-4 sm:px-5"
+      body-class="flex min-h-0 flex-1 flex-col"
+      @close="closeDialog"
+    >
+      <template #title><h2 class="text-sm font-semibold">导入会话</h2></template>
+      <div class="flex min-h-0 flex-1 flex-col px-4 pb-4">
+        <div class="import-layout flex min-h-0 flex-1 gap-3 pt-1">
+          <aside class="import-provider-list flex w-28 shrink-0 flex-col gap-1 border-r pr-3">
+            <button class="import-provider-filter flex h-8 items-center rounded-sm px-2 text-left text-xs" :class="!importProviderFilter ? 'is-active' : ''" @click="selectImportProvider('')">全部 Provider</button>
+            <button v-for="provider in providers" :key="provider.id" class="import-provider-filter flex h-8 items-center rounded-sm px-2 text-left text-xs" :class="importProviderFilter === provider.id ? 'is-active' : ''" @click="selectImportProvider(provider.id)">{{ provider.label }}</button>
+          </aside>
+          <section class="flex min-w-0 min-h-0 flex-1 flex-col">
+            <div class="relative shrink-0">
+              <input v-model="importQuery" class="tool-input h-9 w-full pr-9 text-xs" placeholder="搜索标题、目录、Session ID 或首条消息" @input="scheduleImportSearch" />
+              <button v-if="importQuery" type="button" class="import-query-clear round-icon-button theme-muted-text absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center" title="清空搜索" aria-label="清空搜索" @click="clearImportQuery"><X class="h-3.5 w-3.5" /></button>
+              <LoaderCircle v-else-if="importLoading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin" />
+            </div>
+            <div v-if="importError" class="error-row mt-3 rounded-sm border px-3 py-2 text-xs">{{ importError }}</div>
+            <div class="relative mt-2 min-h-0 flex-1">
+              <Transition name="import-state" mode="out-in">
+                <div v-if="importLoading && !importSessions.length" key="loading" class="theme-muted-text flex h-full min-h-0 items-center justify-center text-xs"><LoaderCircle class="mr-2 h-4 w-4 animate-spin" />正在扫描本机 Provider 会话</div>
+                <div v-else-if="!importSessions.length" key="empty" class="theme-muted-text flex h-full min-h-0 items-center justify-center text-xs">没有可导入的会话</div>
+                <div v-else key="results" class="h-full min-h-0">
+                  <TransitionGroup name="import-session" tag="div" class="h-full min-h-0 space-y-1 overflow-y-auto pr-1">
+                    <button v-for="session in importSessions" :key="`${session.providerId}:${session.providerHandleId}`" class="import-session-row flex w-full min-w-0 items-center gap-3 rounded-sm border px-3 py-2 text-left" :disabled="Boolean(importingId)" @click="importSession(session)">
+                      <span class="import-provider-mark flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-[10px] font-semibold">{{ providerLabel(session.providerId).slice(0, 1) }}</span>
+                      <span class="min-w-0 flex-1">
+                        <span class="flex items-center gap-2"><span class="truncate text-xs font-medium">{{ session.title }}</span><span class="theme-muted-text shrink-0 text-[10px]">{{ providerLabel(session.providerId) }}</span><span class="theme-muted-text ml-auto shrink-0 text-[10px]">{{ formatImportActivity(session.lastActivityAt) }}</span></span>
+                        <span class="theme-muted-text mt-0.5 block truncate font-mono text-[10px]" :title="session.cwd || '未记录工作目录，将使用当前项目目录'">{{ session.cwd || '未记录工作目录，将使用当前项目目录' }}</span>
+                        <span class="theme-muted-text mt-0.5 block truncate font-mono text-[10px]" :title="session.providerHandleId">Session ID: {{ session.providerHandleId }}</span>
+                        <span class="theme-muted-text mt-0.5 block truncate text-[11px]">{{ session.lastPromptPreview || session.firstPromptPreview }}</span>
+                      </span>
+                      <LoaderCircle v-if="importingId === session.providerHandleId" class="theme-muted-text h-4 w-4 shrink-0 animate-spin" />
+                      <span v-else class="theme-muted-text shrink-0 text-[10px]">导入</span>
+                    </button>
+                  </TransitionGroup>
+                  <div v-if="importLoading" class="import-list-loading theme-muted-text pointer-events-none absolute inset-x-0 top-0 flex h-9 items-center justify-center text-[10px]"><LoaderCircle class="mr-1.5 h-3 w-3 animate-spin" />正在更新</div>
+                </div>
+              </Transition>
+            </div>
+          </section>
+        </div>
+      </div>
     </DialogShell>
 
     <ConfirmDialog
@@ -1059,10 +1287,20 @@ onBeforeUnmount(() => {
 .brand-mark { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
 .sidebar-primary-action { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
 .sidebar-primary-action:hover { filter: brightness(0.96); }
+.sidebar-secondary-action { color: var(--theme-textMuted); }
+.sidebar-secondary-action:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 .workspace-heading:hover, .agent-row:hover { background: var(--theme-appPanelHover); }
 .workspace-active { color: var(--theme-text); }
-.workspace-mark { background: var(--theme-appPanelInset); color: var(--theme-textMuted); }
 .workspace-toggle, .workspace-action, .agent-delete { color: var(--theme-textMuted); }
+.workspace-agents-enter-active, .workspace-agents-leave-active {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms ease;
+}
+.workspace-agents-enter-from, .workspace-agents-leave-to { grid-template-rows: 0fr; opacity: 0; }
+.workspace-agents-wrapper { min-height: 0; }
+.workspace-agents-wrapper > .agent-list { min-height: 0; overflow: hidden; }
 .settings-entry { color: var(--theme-textMuted); }
 .settings-entry:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 .workspace-toggle:hover, .workspace-action:hover, .agent-delete:hover { color: var(--theme-text); }
@@ -1074,18 +1312,31 @@ onBeforeUnmount(() => {
 .agent-row:focus-within .agent-delete { opacity: 1; }
 .agent-dot-finished { background: var(--theme-success); }
 .agent-dot-failed { background: var(--theme-danger); }
-.row-active { background: var(--theme-appPanelInset); }
+.row-active { background: var(--theme-appPanelActive); }
 .status-chip { color: var(--theme-textMuted); }
 .status-dot { background: var(--theme-success); }
 .status-dot-running { background: var(--theme-warning); }
 .timeline { background: var(--theme-appPanel); }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
-.composer-wrap { background: var(--theme-appPanelMuted); }
 .directory-suggestions { background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
 .directory-suggestion:hover { background: var(--theme-appPanelHover); }
-.sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .settings-entry {
+.sidebar-primary-action, .sidebar-secondary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .settings-entry, .import-session-row, .import-provider-filter, .import-query-clear {
   transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease, transform 140ms ease;
 }
+.import-session-row { border-color: var(--theme-borderDefault); }
+.import-session-row:hover { background: var(--theme-appPanelHover); }
+.import-provider-mark { background: var(--theme-appPanelInset); color: var(--theme-textMuted); }
+.import-provider-list { border-color: var(--theme-borderDefault); }
+.import-provider-filter { color: var(--theme-textMuted); }
+.import-provider-filter:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
+.import-provider-filter.is-active { background: var(--theme-appPanelActive); color: var(--theme-textPrimary); }
+.import-query-clear:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
+.import-list-loading { background: color-mix(in srgb, var(--theme-appPanel) 88%, transparent); }
+.import-state-enter-active, .import-state-leave-active { transition: opacity 150ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1); }
+.import-state-enter-from, .import-state-leave-to { opacity: 0; transform: translateY(4px); }
+.import-session-enter-active, .import-session-leave-active { transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1); }
+.import-session-enter-from, .import-session-leave-to { opacity: 0; transform: translateY(5px); }
+.import-session-move { transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1); }
 .workspace-toggle:active, .workspace-action:active, .agent-delete:active { transform: scale(0.9); }
 .mobile-workspace-path { display: none; }
 .drawer-trigger.is-active { background: var(--theme-accentSoft); color: var(--theme-accentText); }
@@ -1094,7 +1345,11 @@ onBeforeUnmount(() => {
 .workspace-drawer-enter-from, .workspace-drawer-leave-to { transform: translateX(100%); opacity: 0.35; }
 @media (prefers-reduced-motion: reduce) {
   .sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .drawer-trigger,
-  .workspace-sidebar, .timeline-pane, .workspace-drawer-enter-active, .workspace-drawer-leave-active { transition: none; }
+  .workspace-sidebar, .timeline-pane, .workspace-drawer-enter-active, .workspace-drawer-leave-active,
+  .workspace-agents-enter-active, .workspace-agents-leave-active,
+  .import-session-row, .import-provider-filter, .import-query-clear,
+  .import-state-enter-active, .import-state-leave-active,
+  .import-session-enter-active, .import-session-leave-active, .import-session-move { transition: none; }
 }
 @media (max-width: 900px) {
   .v2-shell { grid-template-columns: 200px minmax(0, 1fr); }

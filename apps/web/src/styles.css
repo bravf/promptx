@@ -15,6 +15,7 @@
   --theme-appPanelStrong: #ffffff;
   --theme-appPanelHover: #efe8de;
   --theme-appPanelInset: #e8e0d4;
+  --theme-appPanelActive: #e8e0d4;
   --theme-appOverlay: rgba(255, 252, 246, 0.82);
   --theme-borderDefault: #d1c7ba;
   --theme-borderMuted: #e4dbcf;
@@ -148,8 +149,12 @@ body {
     --tw-ring-color: var(--theme-focusRing);
   }
 
+  .round-icon-button {
+    border-radius: 9999px !important;
+  }
+
   .quiet-icon-button {
-    @apply inline-flex items-center justify-center rounded-sm disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50;
     border: 0;
     background: transparent;
     color: var(--theme-textMuted);
@@ -305,6 +310,7 @@ body {
   .codex-markdown {
     font-size: 0.875rem;
     line-height: 1.8;
+    overflow-wrap: anywhere;
     word-break: break-word;
   }
 
@@ -472,6 +478,7 @@ body {
     font-size: 0.85rem;
     line-height: 1.72;
     padding: 0;
+    overflow-wrap: normal;
     white-space: pre;
     word-break: normal;
   }
@@ -966,7 +973,7 @@ body {
   }
 
   .theme-icon-button {
-    @apply inline-flex items-center justify-center rounded-sm transition disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-60;
     color: var(--theme-textMuted);
   }
 
@@ -1081,7 +1088,7 @@ body {
 
   .theme-filter-active {
     border-color: var(--theme-borderStrong);
-    background: var(--theme-appPanelInset);
+    background: var(--theme-appPanelActive);
     color: var(--theme-textPrimary);
   }
 

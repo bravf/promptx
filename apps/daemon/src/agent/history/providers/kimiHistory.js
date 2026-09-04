@@ -1,15 +1,107 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { readStableHistoryFile, textContent, toIsoTimestamp } from '../historySnapshot.js'
 
 function resolveWirePath(sessionId) {
-  const root = path.join(process.env.KIMI_HOME || path.join(os.homedir(), '.kimi'), 'sessions')
-  if (!fs.existsSync(root)) return null
-  for (const directory of fs.readdirSync(root, { withFileTypes: true })) {
-    if (!directory.isDirectory()) continue
-    const file = path.join(root, directory.name, sessionId, 'wire.jsonl')
-    if (fs.existsSync(file)) return file
+  for (const base of kimiRoots()) {
+    const root = path.join(base, 'sessions')
+    if (!fs.existsSync(root)) continue
+    for (const directory of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!directory.isDirectory()) continue
+      const file = path.join(root, directory.name, sessionId, 'wire.jsonl')
+      if (fs.existsSync(file)) return file
+      const sessionDir = path.join(root, directory.name, sessionId, 'agents')
+      if (!fs.existsSync(sessionDir)) continue
+      for (const agent of fs.readdirSync(sessionDir, { withFileTypes: true })) {
+        const agentWire = path.join(sessionDir, agent.name, 'wire.jsonl')
+        if (agent.isDirectory() && fs.existsSync(agentWire)) return agentWire
+      }
+    }
+  }
+  return null
+}
+
+function kimiRoots() {
+  const configured = process.env.KIMI_HOME ? [path.resolve(process.env.KIMI_HOME)] : []
+  return [...new Set([...configured, path.join(os.homedir(), '.kimi-code'), path.join(os.homedir(), '.kimi')])]
+}
+
+function projectHash(cwd) {
+  return crypto.createHash('md5').update(cwd).digest('hex')
+}
+
+export function listKimiHistorySessions(workspaces = []) {
+  const sessions = []
+  const seen = new Set()
+  const cwdByHash = new Map(workspaces.map((workspace) => [projectHash(workspace.cwd), workspace.cwd]))
+  for (const base of kimiRoots()) {
+    const indexPath = path.join(base, 'session_index.jsonl')
+    if (fs.existsSync(indexPath)) {
+      const entries = parseLines(fs.readFileSync(indexPath, 'utf8'))
+      for (const entry of entries) {
+        const id = entry.sessionId
+        const sessionDir = entry.sessionDir
+        if (!id || !sessionDir || seen.has(id) || !fs.existsSync(sessionDir)) continue
+        const fullPath = findSessionWire(sessionDir)
+        if (!fullPath) continue
+        const state = readJson(path.join(sessionDir, 'state.json'))
+        const records = parseLines(readStableHistoryFile(fullPath).content || '')
+        const first = records.find((record) => record.type === 'turn.prompt' || record.message?.type === 'TurnBegin')
+        const text = kimiUserText(first?.input || first?.message?.payload?.user_input).trim()
+        const stat = fs.statSync(fullPath)
+        seen.add(id)
+        sessions.push({
+          providerId: 'kimi', providerHandleId: id,
+          cwd: entry.workDir || state.cwd || '',
+          title: String(state.title || text || 'Kimi 会话').slice(0, 80),
+          firstPromptPreview: text.slice(0, 160), lastPromptPreview: String(state.lastPrompt || text).slice(0, 160),
+          lastActivityAt: state.updatedAt ? new Date(state.updatedAt).toISOString() : stat.mtime.toISOString(),
+        })
+      }
+    }
+
+    const root = path.join(base, 'sessions')
+    if (!fs.existsSync(root)) continue
+    for (const project of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!project.isDirectory()) continue
+      const cwd = cwdByHash.get(project.name) || ''
+      const projectDir = path.join(root, project.name)
+      for (const session of fs.readdirSync(projectDir, { withFileTypes: true })) {
+        if (!session.isDirectory() || seen.has(session.name)) continue
+        const fullPath = findSessionWire(path.join(projectDir, session.name))
+        if (!fullPath) continue
+        let stat
+        try { stat = fs.statSync(fullPath) } catch { continue }
+        const content = readStableHistoryFile(fullPath).content || ''
+        const records = parseLines(content)
+        const first = records.find((record) => record.message?.type === 'TurnBegin')
+        const text = kimiUserText(first?.message?.payload?.user_input).trim()
+        seen.add(session.name)
+        sessions.push({
+          providerId: 'kimi', providerHandleId: session.name, cwd,
+          title: text.slice(0, 80) || 'Kimi 会话', firstPromptPreview: text.slice(0, 160), lastPromptPreview: text.slice(0, 160),
+          lastActivityAt: stat.mtime.toISOString(),
+        })
+      }
+    }
+  }
+  return sessions.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
+}
+
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return {} }
+}
+
+function findSessionWire(sessionDir) {
+  const legacy = path.join(sessionDir, 'wire.jsonl')
+  if (fs.existsSync(legacy)) return legacy
+  const agentsDir = path.join(sessionDir, 'agents')
+  if (!fs.existsSync(agentsDir)) return null
+  for (const agent of fs.readdirSync(agentsDir, { withFileTypes: true })) {
+    const file = path.join(agentsDir, agent.name, 'wire.jsonl')
+    if (agent.isDirectory() && fs.existsSync(file)) return file
   }
   return null
 }
@@ -29,6 +121,8 @@ function kimiUserText(input) {
 }
 
 export function mapKimiHistorySnapshot(sessionId, content, revision = '') {
+  const records = parseLines(content)
+  if (records.some((record) => record.type === 'turn.prompt')) return mapKimiCodeHistorySnapshot(sessionId, records, revision)
   const turns = []
   let turn = null
   let itemOrdinal = 0
@@ -109,6 +203,47 @@ export function mapKimiHistorySnapshot(sessionId, content, revision = '') {
     }
   }
   if (turn) turns.push(turn)
+  return { sourceId: sessionId, revision, turns }
+}
+
+function mapKimiCodeHistorySnapshot(sessionId, records, revision) {
+  const turns = []
+  const byTurnId = new Map()
+  let current = null
+  for (const record of records) {
+    const timestamp = toIsoTimestamp(record.time || record.finishedAt || record.timestamp)
+    if (record.type === 'turn.prompt') {
+      const sourceTurnId = record.promptId || `kimi-turn:${record.time}`
+      const text = kimiUserText(record.input).trim()
+      current = { sourceTurnId, status: 'running', startedAt: timestamp, finishedAt: timestamp, items: text ? [{
+        providerMessageId: record.promptId || `${sourceTurnId}:user`, timestamp,
+        item: { type: 'user_message', clientMessageId: record.promptId || `${sourceTurnId}:user`, content: [{ type: 'text', text }] },
+      }] : [] }
+      turns.push(current)
+      byTurnId.set(String(record.promptId || record.turnId || sourceTurnId), current)
+      continue
+    }
+    if (record.type !== 'context.append_loop_event') continue
+    const event = record.event || {}
+    const turn = byTurnId.get(String(event.turnId || record.turnId || '')) || current
+    if (!turn) continue
+    if (event.type === 'content.part') {
+      const part = event.part || {}
+      const text = part.type === 'think' ? part.think : part.type === 'text' ? part.text : ''
+      if (text) {
+        const id = part.uuid || `${turn.sourceTurnId}:content:${turn.items.length}`
+        turn.items.push({ providerMessageId: id, timestamp, item: part.type === 'think'
+          ? { type: 'reasoning', messageId: id, text }
+          : { type: 'assistant_message', messageId: id, phase: 'final_answer', text } })
+      }
+    }
+    turn.finishedAt = timestamp || turn.finishedAt
+  }
+  for (const record of records) {
+    if (!['turn.ended', 'prompt.completed'].includes(record.type)) continue
+    const turn = byTurnId.get(String(record.turnId || record.promptId || '')) || turns.at(-1)
+    if (turn) { turn.status = 'completed'; turn.finishedAt = toIsoTimestamp(record.finishedAt || record.time) || turn.finishedAt }
+  }
   return { sourceId: sessionId, revision, turns }
 }
 
