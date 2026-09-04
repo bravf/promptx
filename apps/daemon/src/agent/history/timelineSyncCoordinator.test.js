@@ -85,3 +85,35 @@ test('同步读取期间 Timeline 变化时丢弃旧计划并重新读取', asyn
   assert.equal(reads, 2)
   assert.deepEqual(expectedSeqs, [1, 2])
 })
+
+test('历史没有变化时仍广播同步成功以清理前端旧错误', async () => {
+  const events = []
+  const turns = [{ id: 'turn-1', status: 'completed' }]
+  const coordinator = new TimelineSyncCoordinator({
+    repository: {
+      getTimelineState: () => ({ epoch: 'epoch-1', nextSeq: 2 }),
+      getTimelineSyncState: () => ({ syncedAt: '2026-09-04T12:00:00.000Z', manifest: { revision: 'revision-1' } }),
+      listTurns: () => turns,
+    },
+    timelineStore: { fetch: () => ({ epoch: 'epoch-1', rows: [] }) },
+    eventHub: { publish: (agentId, event) => events.push({ agentId, event }) },
+    getRuntime: () => ({
+      threadId: 'thread-1',
+      readHistorySnapshot: async () => ({ status: 'unchanged' }),
+    }),
+    getActiveTurnId: () => '',
+  })
+
+  const result = await coordinator.sync({ id: 'agent-1', providerId: 'codex', nativeHandle: { threadId: 'thread-1' } })
+
+  assert.deepEqual(result, {
+    status: 'synced',
+    changed: false,
+    syncedAt: '2026-09-04T12:00:00.000Z',
+    turns,
+  })
+  assert.deepEqual(events, [{
+    agentId: 'agent-1',
+    event: { type: 'timeline-synced', sync: result },
+  }])
+})

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, ArrowLeft, Bot, FileDiff, Files, Folder, FolderOpen, LoaderCircle, Plus, Search, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, Bot, CircleAlert, FileDiff, Files, Folder, FolderOpen, LoaderCircle, Plus, Search, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
 import { v2Api, agentEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
 import { createEventSource } from '../lib/eventSource.js'
 import { createMobileDialogHistoryState, getMobileDialogHistoryState } from '../lib/mobileDialogHistory.js'
@@ -87,6 +87,8 @@ let importSearchController = null
 let dialogUsesHistory = false
 let dialogHistoryClosePromise = null
 let resolveDialogHistoryClose = null
+
+const TIMELINE_SYNC_RETRY_DELAY = 500
 
 const activeWorkspace = computed(() => workspaces.value.find((item) => item.id === activeWorkspaceId.value))
 const activeWorkspaceDirectoryName = computed(() => {
@@ -484,8 +486,20 @@ async function syncVisibleTimeline() {
   timelineSyncing.value = true
   timelineSyncError.value = ''
   try {
-    const { sync } = await v2Api.syncTimeline(agentId)
+    let result
+    try {
+      result = await v2Api.syncTimeline(agentId)
+    } catch (cause) {
+      const statusCode = Number(cause?.statusCode || 0)
+      const retryable = !statusCode || statusCode === 408 || statusCode === 429 || statusCode >= 500
+      if (!retryable) throw cause
+      await new Promise((resolve) => setTimeout(resolve, TIMELINE_SYNC_RETRY_DELAY))
+      if (requestVersion !== timelineRequestVersion || activeAgentId.value !== agentId || document.visibilityState !== 'visible') return
+      result = await v2Api.syncTimeline(agentId)
+    }
     if (requestVersion !== timelineRequestVersion || activeAgentId.value !== agentId) return
+    timelineSyncError.value = ''
+    const { sync } = result
     if (sync?.turns) {
       turns.value = sync.turns
       cacheTimeline(agentId)
@@ -525,6 +539,7 @@ function openEvents(agentId, epoch, seq) {
   eventSource.addEventListener('timeline-synced', (event) => {
     if (activeAgentId.value !== agentId) return
     const { sync } = JSON.parse(event.data)
+    timelineSyncError.value = ''
     if (!sync?.turns) return
     turns.value = sync.turns
     cacheTimeline(agentId)
@@ -1157,7 +1172,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-          <div v-if="timelineSyncError && timelineHasContent" class="timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sm border px-3 py-2 text-xs shadow-sm"><span class="theme-muted-text">同步失败</span><button class="font-medium" @click="selectAgent(activeAgentId)">重试</button></div>
+          <div v-if="timelineSyncError && timelineHasContent" class="timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-2 text-xs shadow-sm" role="alert"><CircleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>同步失败</span><button class="font-medium" @click="selectAgent(activeAgentId)">重试</button></div>
         </div>
         <div v-if="timelineLoading && !loading" class="timeline-loading-overlay absolute inset-0 z-10 flex items-start justify-center pt-16" role="status" aria-label="加载中">
           <div class="timeline-loading-indicator panel flex items-center gap-2 rounded-sm border px-3 py-2 text-xs shadow-sm">

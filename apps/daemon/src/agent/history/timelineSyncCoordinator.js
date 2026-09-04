@@ -38,6 +38,17 @@ export class TimelineSyncCoordinator {
     return result
   }
 
+  publishSynced(agentId, result = {}) {
+    const sync = {
+      status: 'synced',
+      changed: false,
+      ...result,
+      turns: this.repository.listTurns(agentId, 1000),
+    }
+    this.eventHub.publish(agentId, { type: 'timeline-synced', sync })
+    return sync
+  }
+
   async runOnce(agent) {
     const beforeState = this.repository.getTimelineState(agent.id)
     const syncState = this.repository.getTimelineSyncState(agent.id)
@@ -48,7 +59,9 @@ export class TimelineSyncCoordinator {
     const snapshot = await runtime.readHistorySnapshot({ knownRevision: syncState?.manifest?.revision || '' })
     if (!snapshot || snapshot.status === 'unsupported') return { status: 'unsupported', changed: false }
     if (snapshot.status === 'unavailable') return { status: 'unavailable', changed: false }
-    if (snapshot.status === 'unchanged') return { status: 'synced', changed: false }
+    if (snapshot.status === 'unchanged') {
+      return this.publishSynced(agent.id, { syncedAt: syncState?.syncedAt })
+    }
     const expectedSourceIds = new Set([
       ...Object.values(agent.nativeHandle || {}).filter((value) => typeof value === 'string'),
       runtime.threadId,
@@ -65,7 +78,9 @@ export class TimelineSyncCoordinator {
       syncState,
       activeTurnId: this.getActiveTurnId(agent.id),
     })
-    if (plan.mode === 'noop') return { status: 'synced', changed: false }
+    if (plan.mode === 'noop') {
+      return this.publishSynced(agent.id, { syncedAt: syncState?.syncedAt })
+    }
 
     const applied = this.repository.applyTimelineSync(agent.id, {
       ...plan,
@@ -83,9 +98,10 @@ export class TimelineSyncCoordinator {
         this.eventHub.publish(agent.id, { type: 'timeline', epoch: applied.epoch, row })
       }
     }
-    const turns = this.repository.listTurns(agent.id, 1000)
-    const result = { status: 'synced', changed: plan.changed, mode: applied.mode, syncedAt: applied.syncedAt, turns }
-    this.eventHub.publish(agent.id, { type: 'timeline-synced', sync: result })
-    return result
+    return this.publishSynced(agent.id, {
+      changed: plan.changed,
+      mode: applied.mode,
+      syncedAt: applied.syncedAt,
+    })
   }
 }
