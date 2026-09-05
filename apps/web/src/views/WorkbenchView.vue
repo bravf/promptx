@@ -1263,6 +1263,8 @@ onBeforeUnmount(() => {
         :mode="drawerMode || 'files'"
         @close="drawerMode = null"
       />
+    </Transition>
+    <Transition name="task-details-drawer">
       <TaskDetailsDrawer
         v-if="activeAgent?.taskId && drawerMode === 'task-details'"
         :task-id="activeAgent.taskId"
