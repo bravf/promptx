@@ -970,7 +970,7 @@ async function removeWorkspace(workspace) {
     confirmText: '移除',
     danger: true,
   })) return
-  await v2Api.deleteWorkspace(workspace.id)
+  await v2Api.deleteProject(workspace.id)
   agentsForWorkspace(workspace.id).forEach((agent) => {
     clearTimelineCache(agent.id)
     draftsByAgent.delete(agent.id)

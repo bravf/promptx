@@ -86,7 +86,14 @@ export function registerRoutes(app, context) {
   })
   app.delete('/api/v2/projects/:projectId', async (request, reply) => {
     if (!repository.getProject(request.params.projectId)) return reply.code(404).send({ error: 'project_not_found' })
-    if (repository.listTasks(request.params.projectId).some((task) => task.lifecycle === 'active')) return reply.code(409).send({ error: 'project_has_active_tasks' })
+    for (const task of repository.listTasks(request.params.projectId)) {
+      for (const agent of repository.listAgentsByTask(task.id, true)) {
+        await agentManager.cancel(agent.id).catch(() => {})
+        agentManager.close(agent.id)
+        repository.deleteAgent(agent.id)
+      }
+      repository.deleteTask(task.id)
+    }
     repository.deleteProject(request.params.projectId)
     return { deleted: true }
   })
