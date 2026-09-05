@@ -45,7 +45,7 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
     );
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, provider_id TEXT NOT NULL,
-      lifecycle TEXT NOT NULL, environment_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      lifecycle TEXT NOT NULL, environment_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL, archived_at TEXT, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
       FOREIGN KEY (environment_id) REFERENCES execution_environments(id)
     );
@@ -153,6 +153,26 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
       FOREIGN KEY (agent_session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
     );
   `)
+  // Older databases enforced one task per environment. Imported history sessions
+  // may legitimately share an existing local environment, so rebuild that table
+  // once without the obsolete UNIQUE constraint.
+  const taskSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'").get()?.sql || ''
+  if (/environment_id\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(taskSchema)) {
+    db.pragma('foreign_keys = OFF')
+    db.exec(`
+      ALTER TABLE tasks RENAME TO tasks_legacy;
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, provider_id TEXT NOT NULL,
+        lifecycle TEXT NOT NULL, environment_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        last_active_at TEXT NOT NULL, archived_at TEXT, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (environment_id) REFERENCES execution_environments(id)
+      );
+      INSERT INTO tasks SELECT id, project_id, title, provider_id, lifecycle, environment_id, created_at, updated_at, last_active_at, archived_at FROM tasks_legacy;
+      DROP TABLE tasks_legacy;
+      CREATE INDEX IF NOT EXISTS idx_tasks_project_activity ON tasks(project_id, archived_at, last_active_at DESC);
+    `)
+    db.pragma('foreign_keys = ON')
+  }
   // Keep the v2 database usable after adding attention state to existing local data.
   ensureColumn(db, 'agent_sessions', 'requires_attention', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'agent_sessions', 'attention_reason', 'TEXT')
