@@ -17,6 +17,8 @@ import {
 } from '../workspaces/workspaceInspection.js'
 import { publicAsset, removeStoredAssets, storeAsset } from '../assets/assetStorage.js'
 import { DEFAULT_AGENT_TITLE } from '../agent/sessionTitle.js'
+import { repositoryRoot, defaultBranch, addWorktree, addExistingBranch, removeWorktree, listCommits, runGit } from '../environments/worktreeService.js'
+import { reconcileEnvironment } from '../environments/environmentReconcile.js'
 
 function parseCursor(value) {
   if (!value) return null
@@ -63,6 +65,230 @@ export function registerRoutes(app, context) {
     query: request.query.q,
     limit: request.query.limit,
   }))
+
+  // Task/Environment API. Legacy workspace endpoints remain available during migration.
+  app.get('/api/v2/projects', async () => ({ projects: repository.listProjects() }))
+  app.post('/api/v2/projects', async (request, reply) => {
+    const root = await repositoryRoot(request.body?.repositoryRoot)
+    const project = repository.createProject({ repositoryRoot: root, displayName: request.body?.displayName, defaultBranch: request.body?.defaultBranch || await defaultBranch(root) })
+    reply.code(201)
+    return { project }
+  })
+  app.get('/api/v2/projects/:projectId', async (request, reply) => {
+    const project = repository.getProject(request.params.projectId)
+    if (!project) return reply.code(404).send({ error: 'project_not_found' })
+    return { project }
+  })
+  app.patch('/api/v2/projects/:projectId', async (request, reply) => {
+    const project = repository.updateProject(request.params.projectId, request.body || {})
+    if (!project) return reply.code(404).send({ error: 'project_not_found' })
+    return { project }
+  })
+  app.delete('/api/v2/projects/:projectId', async (request, reply) => {
+    if (!repository.getProject(request.params.projectId)) return reply.code(404).send({ error: 'project_not_found' })
+    if (repository.listTasks(request.params.projectId).some((task) => task.lifecycle === 'active')) return reply.code(409).send({ error: 'project_has_active_tasks' })
+    repository.deleteProject(request.params.projectId)
+    return { deleted: true }
+  })
+  app.get('/api/v2/projects/:projectId/tasks', async (request) => ({ tasks: repository.listTasks(request.params.projectId).map((task) => ({ ...task, agent: task.agentId ? repository.getAgent(task.agentId) : null })) }))
+  app.get('/api/v2/tasks/:taskId', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    if (!task) return reply.code(404).send({ error: 'task_not_found' })
+    return { task, environment: repository.getEnvironment(task.environmentId) }
+  })
+  app.get('/api/v2/tasks/:taskId/environment', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    if (!task) return reply.code(404).send({ error: 'task_not_found' })
+    return { environment: repository.getEnvironment(task.environmentId) }
+  })
+  app.get('/api/v2/tasks/:taskId/agent', async (request, reply) => {
+    const agents = repository.listAgentsByTask(request.params.taskId, false)
+    if (!agents.length) return reply.code(404).send({ error: 'agent_not_found' })
+    return { agent: agents[0] }
+  })
+  app.post('/api/v2/tasks/:taskId/turns', async (request, reply) => {
+    const agents = repository.listAgentsByTask(request.params.taskId, false)
+    if (!agents.length) return reply.code(404).send({ error: 'agent_not_found' })
+    const turn = await agentManager.startTurn(agents[0].id, request.body || {})
+    return { turn }
+  })
+  app.get('/api/v2/tasks/:taskId/files', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!environment) return reply.code(404).send({ error: 'task_not_found' })
+    return { directory: await listWorkspaceDirectory(environment.cwd, request.query.path || '') }
+  })
+  app.get('/api/v2/tasks/:taskId/file', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!environment) return reply.code(404).send({ error: 'task_not_found' })
+    return { file: await readWorkspaceFile(environment.cwd, request.query.path || '') }
+  })
+  app.get('/api/v2/tasks/:taskId/file/content', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!environment) return reply.code(404).send({ error: 'task_not_found' })
+    const file = openWorkspaceFileStream(environment.cwd, request.query.path || '')
+    reply.header('Content-Type', file.mimeType)
+    reply.header('Content-Length', String(file.size))
+    reply.header('X-Content-Type-Options', 'nosniff')
+    reply.header('Content-Security-Policy', "default-src 'none'; sandbox")
+    return reply.send(file.stream)
+  })
+  app.get('/api/v2/tasks/:taskId/git/status', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!environment) return reply.code(404).send({ error: 'task_not_found' })
+    return { git: await getWorkspaceGitStatus(environment.cwd) }
+  })
+  app.get('/api/v2/tasks/:taskId/git/diff', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!environment) return reply.code(404).send({ error: 'task_not_found' })
+    return { diff: await getWorkspaceGitDiff(environment.cwd, request.query.path || '') }
+  })
+  app.get('/api/v2/tasks/:taskId/git/commits', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!environment) return reply.code(404).send({ error: 'task_not_found' })
+    return { commits: await listCommits(environment.cwd, request.query.limit) }
+  })
+  app.post('/api/v2/tasks/:taskId/git/commit', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!environment) return reply.code(404).send({ error: 'task_not_found' })
+    const message = String(request.body?.message || '').trim()
+    if (!message || message.length > 200) return reply.code(400).send({ error: 'invalid_commit_message' })
+    const status = await getWorkspaceGitStatus(environment.cwd)
+    if (!status.files?.length) return reply.code(409).send({ error: 'worktree_clean' })
+    await runGit(environment.cwd, ['add', '--all'])
+    await runGit(environment.cwd, ['commit', '-m', message])
+    return { commits: await listCommits(environment.cwd, 1) }
+  })
+  app.post('/api/v2/tasks/:taskId/git/push', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!environment) return reply.code(404).send({ error: 'task_not_found' })
+    if (!environment.branchName) return reply.code(409).send({ error: 'branch_required' })
+    await runGit(environment.cwd, ['push', '-u', 'origin', environment.branchName])
+    return { pushed: true, branchName: environment.branchName }
+  })
+  app.post('/api/v2/tasks/:taskId/git/merge', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    const project = task && repository.getProject(task.projectId)
+    if (!task || !environment || !project) return reply.code(404).send({ error: 'task_not_found' })
+    if (environment.kind !== 'worktree' || !environment.branchName) return reply.code(409).send({ error: 'worktree_required' })
+    const target = String(request.body?.targetBranch || project.defaultBranch || '').trim()
+    if (!target) return reply.code(400).send({ error: 'target_branch_required' })
+    const rootStatus = await getWorkspaceGitStatus(project.repositoryRoot)
+    if (rootStatus.files?.length) return reply.code(409).send({ error: 'project_dirty', git: rootStatus })
+    await runGit(project.repositoryRoot, ['checkout', target])
+    await runGit(project.repositoryRoot, ['merge', '--no-ff', environment.branchName, '-m', request.body?.message || `Merge ${environment.branchName}`])
+    if (request.body?.archive !== false) repository.archiveTask(task.id)
+    return { merged: true, targetBranch: target, task: repository.getTask(task.id) }
+  })
+  app.post('/api/v2/tasks/:taskId/assets', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!task || !environment) return reply.code(404).send({ error: 'task_not_found' })
+    const workspace = repository.createWorkspace({ cwd: environment.cwd, title: task.title })
+    const part = await request.file()
+    if (!part) return reply.code(400).send({ error: 'file_required' })
+    const asset = await storeAsset({ part, workspaceId: workspace.id, assetsDir, repository })
+    return { asset }
+  })
+  app.post('/api/v2/tasks/:taskId/archive', async (request, reply) => {
+    for (const agent of repository.listAgentsByTask(request.params.taskId, false)) {
+      await agentManager.cancel(agent.id).catch(() => {})
+      agentManager.close(agent.id)
+    }
+    const task = repository.archiveTask(request.params.taskId)
+    if (!task) return reply.code(404).send({ error: 'task_not_found' })
+    return { task }
+  })
+  app.post('/api/v2/tasks/:taskId/environment/reconcile', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!environment) return reply.code(404).send({ error: 'task_not_found' })
+    const updated = await reconcileEnvironment(environment)
+    repository.updateEnvironment(environment.id, { status: updated.status })
+    return { environment: repository.getEnvironment(environment.id) }
+  })
+  app.post('/api/v2/tasks/:taskId/environment/archive', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    if (!task) return reply.code(404).send({ error: 'task_not_found' })
+    const environment = repository.updateEnvironment(task.environmentId, { status: 'archived', archivedAt: new Date().toISOString() })
+    return { environment }
+  })
+  app.post('/api/v2/tasks/:taskId/environment/rebind', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    const environment = task && repository.getEnvironment(task.environmentId)
+    if (!environment) return reply.code(404).send({ error: 'task_not_found' })
+    const cwd = fs.realpathSync(String(request.body?.cwd || '').trim())
+    const rebound = repository.rebindEnvironment(environment.id, { cwd, repositoryRoot: request.body?.repositoryRoot || environment.repositoryRoot, kind: 'local', ownership: 'external' })
+    return { environment: rebound }
+  })
+  app.post('/api/v2/tasks/:taskId/copy', async (request, reply) => {
+    const source = repository.getTask(request.params.taskId)
+    if (!source) return reply.code(404).send({ error: 'task_not_found' })
+    const sourceEnvironment = repository.getEnvironment(source.environmentId)
+    const project = repository.getProject(source.projectId)
+    if (!project || !sourceEnvironment) return reply.code(404).send({ error: 'task_environment_not_found' })
+    const body = request.body || {}
+    const slug = body.slug || `${source.title.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 40)}-${Date.now().toString(36)}`
+    const created = await addWorktree({ repositoryRoot: project.repositoryRoot, baseRef: body.baseRef || sourceEnvironment.baseRef || project.defaultBranch || 'HEAD', branchName: body.branchName || `codex/${slug}`, slug })
+    const environment = repository.createEnvironment({ kind: 'worktree', cwd: created.path, repositoryRoot: project.repositoryRoot, branchName: created.branchName, baseRef: created.baseRef, worktreePath: created.path, ownership: 'promptx' })
+    const task = repository.createTask({ projectId: project.id, environmentId: environment.id, providerId: source.providerId, title: body.title || source.title })
+    const workspace = repository.createWorkspace({ cwd: environment.cwd, title: project.displayName })
+    const agent = repository.createAgent(workspace.id, { taskId: task.id, providerId: task.providerId, title: task.title })
+    return { task, environment, workspace, agent }
+  })
+  app.delete('/api/v2/tasks/:taskId', async (request, reply) => {
+    const task = repository.getTask(request.params.taskId)
+    if (!task) return reply.code(404).send({ error: 'task_not_found' })
+    const environment = repository.getEnvironment(task.environmentId)
+    if (environment?.status === 'running') return reply.code(409).send({ error: 'task_running' })
+    for (const agent of repository.listAgentsByTask(task.id, true)) {
+      await agentManager.cancel(agent.id).catch(() => {})
+      agentManager.close(agent.id)
+      repository.deleteAgent(agent.id)
+    }
+    if (request.body?.deleteWorktree) {
+      if (environment.kind !== 'worktree' || environment.ownership !== 'promptx') return reply.code(409).send({ error: 'worktree_not_owned' })
+      const git = await getWorkspaceGitStatus(environment.cwd)
+      if ((git.files?.length || git.ahead || 0) && !request.body.force) return reply.code(409).send({ error: 'worktree_dirty', git })
+      await removeWorktree(environment.repositoryRoot, environment.worktreePath || environment.cwd, Boolean(request.body.force))
+    }
+    repository.deleteTask(task.id)
+    return { deleted: true }
+  })
+  app.post('/api/v2/projects/:projectId/tasks', async (request, reply) => {
+    const project = repository.getProject(request.params.projectId)
+    if (!project) return reply.code(404).send({ error: 'project_not_found' })
+    const body = request.body || {}
+    let environment
+    let createdWorktree = null
+    try {
+      if ((body.executionKind || 'local') === 'worktree') {
+        createdWorktree = await addWorktree({ repositoryRoot: project.repositoryRoot, baseRef: body.baseRef || project.defaultBranch || 'HEAD', branchName: body.branchName || `codex/${body.slug || 'task'}`, slug: body.slug || 'task' })
+        environment = repository.createEnvironment({ kind: 'worktree', cwd: createdWorktree.path, repositoryRoot: project.repositoryRoot, branchName: createdWorktree.branchName, baseRef: createdWorktree.baseRef, worktreePath: createdWorktree.path, ownership: 'promptx' })
+      } else if (body.executionKind === 'existing') {
+        const cwd = fs.realpathSync(String(body.cwd || project.repositoryRoot))
+        environment = repository.createEnvironment({ kind: 'local', cwd, repositoryRoot: project.repositoryRoot, ownership: 'external' })
+      } else {
+        environment = repository.createEnvironment({ kind: 'local', cwd: project.repositoryRoot, repositoryRoot: project.repositoryRoot })
+      }
+      const task = repository.createTask({ projectId: project.id, environmentId: environment.id, providerId: body.providerId || 'codex', title: body.title })
+      const workspace = repository.createWorkspace({ cwd: environment.cwd, title: project.displayName })
+      const agent = repository.createAgent(workspace.id, { taskId: task.id, providerId: task.providerId, title: task.title })
+      reply.code(201)
+      return { task, environment, workspace, agent }
+    } catch (error) {
+      if (createdWorktree) await removeWorktree(project.repositoryRoot, createdWorktree.path, true).catch(() => {})
+      throw error
+    }
+  })
 
   app.get('/api/v2/workspaces', async () => ({ workspaces: repository.listWorkspaces() }))
   app.get('/api/v2/workspaces/:workspaceId/files', async (request, reply) => {

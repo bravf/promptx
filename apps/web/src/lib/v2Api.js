@@ -2,6 +2,32 @@ import { getApiBase, request } from './request.js'
 import { transportObjectUrl } from './transport.js'
 
 export const v2Api = {
+  listProjects: () => request('/api/v2/projects', { cache: 'no-store' }),
+  createProject: (input) => request('/api/v2/projects', { method: 'POST', body: JSON.stringify(input) }),
+  getProject: (projectId) => request(`/api/v2/projects/${encodeURIComponent(projectId)}`, { cache: 'no-store' }),
+  updateProject: (projectId, input) => request(`/api/v2/projects/${encodeURIComponent(projectId)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  deleteProject: (projectId) => request(`/api/v2/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' }),
+  listProjectTasks: (projectId) => request(`/api/v2/projects/${encodeURIComponent(projectId)}/tasks`, { cache: 'no-store' }),
+  createTask: (projectId, input) => request(`/api/v2/projects/${encodeURIComponent(projectId)}/tasks`, { method: 'POST', body: JSON.stringify(input) }),
+  getTask: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}`, { cache: 'no-store' }),
+  getTaskEnvironment: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/environment`, { cache: 'no-store' }),
+  getTaskAgent: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/agent`, { cache: 'no-store' }),
+  startTaskTurn: (taskId, content, clientMessageId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/turns`, { method: 'POST', body: JSON.stringify({ clientMessageId, input: { content } }) }),
+  listTaskFiles: (taskId, filePath = '') => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/files?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
+  readTaskFile: (taskId, filePath) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/file?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
+  taskFileObjectUrl: (taskId, filePath, options = {}) => transportObjectUrl(`${getApiBase()}/api/v2/tasks/${encodeURIComponent(taskId)}/file/content?${new URLSearchParams({ path: filePath })}`, options),
+  getTaskGitStatus: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/git/status`, { cache: 'no-store' }),
+  getTaskGitDiff: (taskId, filePath = '') => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/git/diff?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
+  getTaskCommits: (taskId, limit = 50) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/git/commits?limit=${encodeURIComponent(limit)}`, { cache: 'no-store' }),
+  commitTask: (taskId, message) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/git/commit`, { method: 'POST', body: JSON.stringify({ message }) }),
+  pushTask: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/git/push`, { method: 'POST' }),
+  mergeTask: (taskId, input = {}) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/git/merge`, { method: 'POST', body: JSON.stringify(input) }),
+  uploadTaskAsset: (taskId, file, options = {}) => { const body = new FormData(); body.append('file', file); return request(`/api/v2/tasks/${encodeURIComponent(taskId)}/assets`, { method: 'POST', body, signal: options.signal }) },
+  archiveTask: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/archive`, { method: 'POST' }),
+  reconcileTaskEnvironment: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/environment/reconcile`, { method: 'POST' }),
+  rebindTaskEnvironment: (taskId, input) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/environment/rebind`, { method: 'POST', body: JSON.stringify(input) }),
+  copyTask: (taskId, input = {}) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/copy`, { method: 'POST', body: JSON.stringify(input) }),
+  deleteTask: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' }),
   listProviders: () => request('/api/v2/providers'),
   listImportableSessions: (options = {}) => {
     const query = new URLSearchParams()

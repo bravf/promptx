@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, ArrowLeft, Bot, CircleAlert, FileDiff, Files, Folder, FolderOpen, LoaderCircle, Plus, Search, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, Bot, CircleAlert, FileDiff, Files, Folder, FolderOpen, Info, LoaderCircle, Plus, Search, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
 import { v2Api, agentEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
 import { createEventSource } from '../lib/eventSource.js'
 import { createMobileDialogHistoryState, getMobileDialogHistoryState } from '../lib/mobileDialogHistory.js'
@@ -16,6 +16,7 @@ import SessionTitleMarquee from '../components/SessionTitleMarquee.vue'
 import TimelineTurn from '../components/TimelineTurn.vue'
 import V2SettingsDialog from '../components/V2SettingsDialog.vue'
 import WorkspaceInspector from '../components/WorkspaceInspector.vue'
+import TaskDetailsDrawer from '../components/TaskDetailsDrawer.vue'
 
 const { isDark } = useTheme()
 const workspaces = ref([])
@@ -57,6 +58,11 @@ const directorySearchError = ref('')
 const directorySuggestionsOpen = ref(false)
 const selectedDirectoryIndex = ref(-1)
 const agentProvider = ref('codex')
+const taskTitle = ref('')
+const executionKind = ref('worktree')
+const taskBaseRef = ref('HEAD')
+const taskBranchName = ref('')
+const taskSlug = ref('task')
 const creating = ref(false)
 const confirmation = ref({ open: false, title: '', description: '', confirmText: '', danger: false, resolve: null })
 const timelineElement = ref(null)
@@ -283,13 +289,11 @@ async function reconcileTerminalAgentTurns(agent) {
 async function loadInitial() {
   loading.value = true
   try {
-    const [workspaceResult, providerResult] = await Promise.all([v2Api.listWorkspaces(), v2Api.listProviders()])
-    workspaces.value = workspaceResult.workspaces
+    const [projectResult, providerResult] = await Promise.all([v2Api.listProjects(), v2Api.listProviders()])
+    const projectTasks = await Promise.all((projectResult.projects || []).map(async (project) => ({ project, ...(await v2Api.listProjectTasks(project.id)) })))
+    workspaces.value = projectTasks.map(({ project }) => ({ id: project.id, cwd: project.repositoryRoot, title: project.displayName, sortOrder: 0, createdAt: project.createdAt, updatedAt: project.updatedAt, lastOpenedAt: project.lastOpenedAt }))
     providers.value = providerResult.providers
-    const agentResults = await Promise.all(workspaces.value.map(async (workspace) => [
-      workspace.id,
-      (await v2Api.listAgents(workspace.id)).agents,
-    ]))
+    const agentResults = projectTasks.map(({ project, tasks }) => [project.id, tasks.flatMap((task) => task.agent ? [{ ...task.agent, workspaceId: project.id, taskId: task.id }] : [])])
     agentsByWorkspace.value = Object.fromEntries(agentResults)
     expandedWorkspaceIds.value = new Set(workspaces.value.map((workspace) => workspace.id))
     if (workspaces.value.length) await selectWorkspace(workspaces.value[0].id)
@@ -300,12 +304,20 @@ async function loadInitial() {
   }
 }
 
+async function refreshWorkspaces() {
+  const result = await v2Api.listProjects()
+  const projectTasks = await Promise.all((result.projects || []).map(async (project) => ({ project, ...(await v2Api.listProjectTasks(project.id)) })))
+  workspaces.value = projectTasks.map(({ project }) => ({ id: project.id, cwd: project.repositoryRoot, title: project.displayName, sortOrder: 0, createdAt: project.createdAt, updatedAt: project.updatedAt, lastOpenedAt: project.lastOpenedAt }))
+  const agentResults = projectTasks.map(({ project, tasks }) => [project.id, tasks.flatMap((task) => task.agent ? [{ ...task.agent, workspaceId: project.id, taskId: task.id }] : [])])
+  agentsByWorkspace.value = Object.fromEntries(agentResults)
+}
+
 async function selectWorkspace(id, { navigate = false } = {}) {
   activeWorkspaceId.value = id
   setWorkspaceExpanded(id)
   if (!(id in agentsByWorkspace.value)) {
-    const result = await v2Api.listAgents(id)
-    setWorkspaceAgents(id, result.agents)
+    const result = await v2Api.listProjectTasks(id)
+    setWorkspaceAgents(id, result.tasks.flatMap((task) => task.agent ? [{ ...task.agent, workspaceId: id, taskId: task.id }] : []))
   }
   const workspaceAgents = agentsForWorkspace(id)
   if (workspaceAgents.length) await selectAgent(workspaceAgents[0].id, { navigate })
@@ -684,6 +696,11 @@ function scheduleDirectorySearch() {
 
 async function openConversationDialog(workspace = null) {
   workspacePath.value = workspace?.cwd || ''
+  taskTitle.value = ''
+  executionKind.value = 'worktree'
+  taskBaseRef.value = 'HEAD'
+  taskSlug.value = 'task'
+  taskBranchName.value = ''
   agentProvider.value = providers.value.some((provider) => provider.id === 'codex')
     ? 'codex'
     : providers.value[0]?.id || ''
@@ -772,7 +789,8 @@ async function importSession(session) {
       title: session.title,
     })
     const agent = result.agent
-    const workspace = result.workspace || workspaces.value.find((item) => item.id === agent.workspaceId)
+    const workspace = workspaces.value.find((item) => item.cwd === result.workspace?.cwd) || result.workspace || workspaces.value.find((item) => item.id === agent.workspaceId)
+    if (workspace && result.workspace && workspace.id !== result.workspace.id) agent.workspaceId = workspace.id
     if (workspace && !workspaces.value.some((item) => item.id === workspace.id)) workspaces.value.push(workspace)
     upsertAgent(agent)
     await closeDialog()
@@ -876,12 +894,18 @@ async function createConversation() {
   creating.value = true
   error.value = ''
   try {
-    const { workspace, agent } = await v2Api.createConversation({ cwd: workspacePath.value, providerId: agentProvider.value })
-    if (!workspaces.value.some((item) => item.id === workspace.id)) workspaces.value.push(workspace)
+    const projects = (await v2Api.listProjects()).projects || []
+    let project = projects.find((item) => item.repositoryRoot.toLowerCase() === workspacePath.value.trim().toLowerCase())
+    if (!project) project = (await v2Api.createProject({ repositoryRoot: workspacePath.value })).project
+    const slug = taskSlug.value || taskTitle.value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'task'
+    const result = await v2Api.createTask(project.id, { title: taskTitle.value, providerId: agentProvider.value, executionKind: executionKind.value, baseRef: taskBaseRef.value, branchName: taskBranchName.value || `codex/${slug}`, slug })
+    const { workspace, agent: rawAgent } = result
+    const agent = { ...rawAgent, workspaceId: project.id, taskId: result.task.id }
+    if (!workspaces.value.some((item) => item.id === project.id)) workspaces.value.push({ id: project.id, cwd: project.repositoryRoot, title: project.displayName, sortOrder: 0, createdAt: project.createdAt, updatedAt: project.updatedAt, lastOpenedAt: project.lastOpenedAt })
     upsertAgent(agent)
     workspacePath.value = ''
     await closeDialog()
-    setWorkspaceExpanded(workspace.id)
+    setWorkspaceExpanded(project.id)
     await selectAgent(agent.id, { navigate: true })
   } catch (cause) {
     error.value = cause.message
@@ -962,7 +986,9 @@ async function submitPrompt(content) {
   sending.value = true
   error.value = ''
   try {
-    const result = await v2Api.startTurn(activeAgentId.value, content, crypto.randomUUID())
+    const result = activeAgent.value?.taskId
+      ? await v2Api.startTaskTurn(activeAgent.value.taskId, content, crypto.randomUUID())
+      : await v2Api.startTurn(activeAgentId.value, content, crypto.randomUUID())
     sendBlockedReason.value = ''
     upsertTurn(result.turn)
   } catch (cause) {
@@ -1144,7 +1170,8 @@ onBeforeUnmount(() => {
           <div v-if="timelineSyncing" class="timeline-sync-status theme-muted-text flex h-8 w-8 items-center justify-center" title="正在同步 Timeline" aria-label="正在同步 Timeline"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
           <div v-if="activeAgent" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
           <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :title="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></button>
-          <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :title="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></button>
+           <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :title="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></button>
+           <button v-if="activeAgent?.taskId" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'task-details' ? 'is-active' : ''" title="任务详情" :aria-pressed="drawerMode === 'task-details'" @click="toggleDrawer('task-details')"><Info class="h-4 w-4" /></button>
         </div>
       </header>
 
@@ -1203,6 +1230,7 @@ onBeforeUnmount(() => {
         <AgentComposer
           :key="activeAgentId"
           :workspace-id="activeWorkspaceId"
+          :task-id="activeAgent?.taskId || ''"
           :running="isRunning"
           :sending="sending"
           :blocked-reason="sendBlockedReason"
@@ -1219,14 +1247,21 @@ onBeforeUnmount(() => {
 
     <Transition name="workspace-drawer">
       <WorkspaceInspector
-        v-if="activeWorkspace"
+        v-if="activeWorkspace && (drawerMode === 'files' || drawerMode === 'diff')"
         v-show="drawerMode"
         ref="workspaceInspector"
         :workspace-id="activeWorkspace.id"
+        :task-id="activeAgent?.taskId || ''"
         :workspace-cwd="activeWorkspace.cwd"
         :is-dark="isDark"
         :mode="drawerMode || 'files'"
         @close="drawerMode = null"
+      />
+      <TaskDetailsDrawer
+        v-if="activeAgent?.taskId && drawerMode === 'task-details'"
+        :task-id="activeAgent.taskId"
+        @close="drawerMode = null"
+        @changed="refreshWorkspaces"
       />
     </Transition>
 
@@ -1246,6 +1281,16 @@ onBeforeUnmount(() => {
           <select id="conversation-provider" v-model="agentProvider" class="tool-input mt-1" :disabled="creating">
             <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
           </select>
+          <label class="theme-muted-text mt-4 block text-xs" for="task-title">任务标题</label>
+          <input id="task-title" v-model="taskTitle" class="tool-input mt-1" placeholder="任务标题" :disabled="creating" />
+          <label class="theme-muted-text mt-4 block text-xs" for="execution-kind">执行位置</label>
+          <select id="execution-kind" v-model="executionKind" class="tool-input mt-1" :disabled="creating">
+            <option value="worktree">新建 Worktree</option><option value="local">当前目录</option>
+          </select>
+          <div v-if="executionKind === 'worktree'" class="grid grid-cols-2 gap-2">
+            <input v-model="taskBaseRef" class="tool-input mt-2" placeholder="基线，例如 HEAD" :disabled="creating" />
+            <input v-model="taskSlug" class="tool-input mt-2" placeholder="Worktree 名称" :disabled="creating" />
+          </div>
         </div>
         <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
         <div class="mt-1 flex min-h-0 flex-1 flex-col">

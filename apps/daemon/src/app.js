@@ -15,6 +15,7 @@ import { registerRoutes } from './api/routes.js'
 import { registerRelayRoutes, RelayService } from './relay/relayService.js'
 import { SessionImportService } from './agent/sessionImport.js'
 import { createCorsPolicy } from './security/corsPolicy.js'
+import { reconcileEnvironment } from './environments/environmentReconcile.js'
 
 export async function createApp(options = {}) {
   const app = Fastify({ logger: options.logger ?? true })
@@ -39,6 +40,9 @@ export async function createApp(options = {}) {
   const assetsDir = path.resolve(options.assetsDir || resolveDaemonPaths().assetsDir)
   fs.mkdirSync(assetsDir, { recursive: true })
   const repository = createRepository(db)
+  for (const environment of repository.listEnvironments()) {
+    void reconcileEnvironment(environment).then((next) => repository.updateEnvironment(environment.id, { status: next.status })).catch(() => {})
+  }
   const timelineStore = new TimelineStore(repository)
   const eventHub = new EventHub()
   const providerRegistry = options.providerRegistry || new ProviderRegistry()

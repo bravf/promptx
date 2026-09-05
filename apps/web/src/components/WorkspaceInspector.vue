@@ -21,6 +21,7 @@ import { inferPreviewLanguageFromPath, renderSourceCodePreview } from '../lib/so
 
 const props = defineProps({
   workspaceId: { type: String, required: true },
+  taskId: { type: String, default: '' },
   workspaceCwd: { type: String, default: '' },
   isDark: { type: Boolean, default: false },
   mode: { type: String, default: 'files', validator: (value) => ['files', 'diff'].includes(value) },
@@ -91,12 +92,12 @@ function statusLabel(status) {
 }
 
 async function loadDirectory(directoryPath = '', force = false) {
-  if (!props.workspaceId || directoryLoading.value.has(directoryPath)) return
+  if ((!props.workspaceId && !props.taskId) || directoryLoading.value.has(directoryPath)) return
   if (!force && directoryCache.value[directoryPath]) return
   const version = workspaceVersion
   directoryLoading.value = new Set(directoryLoading.value).add(directoryPath)
   try {
-    const result = await v2Api.listWorkspaceFiles(props.workspaceId, directoryPath)
+    const result = props.taskId ? await v2Api.listTaskFiles(props.taskId, directoryPath) : await v2Api.listWorkspaceFiles(props.workspaceId, directoryPath)
     if (version !== workspaceVersion) return
     directoryCache.value = { ...directoryCache.value, [directoryPath]: result.directory.entries }
   } catch (cause) {
@@ -153,12 +154,12 @@ async function selectFile(filePath, line = null) {
   error.value = ''
   const version = workspaceVersion
   try {
-    const result = await v2Api.readWorkspaceFile(props.workspaceId, filePath)
+    const result = props.taskId ? await v2Api.readTaskFile(props.taskId, filePath) : await v2Api.readWorkspaceFile(props.workspaceId, filePath)
     if (version !== workspaceVersion || selectedPath.value !== filePath) return
     const nextFile = result.file
     let nextObjectUrl = ''
     if (nextFile.kind === 'image') {
-      const objectUrl = await v2Api.workspaceFileObjectUrl(props.workspaceId, nextFile.path)
+      const objectUrl = props.taskId ? await v2Api.taskFileObjectUrl(props.taskId, nextFile.path) : await v2Api.workspaceFileObjectUrl(props.workspaceId, nextFile.path)
       if (version !== workspaceVersion || selectedPath.value !== filePath) URL.revokeObjectURL(objectUrl)
       else nextObjectUrl = objectUrl
     }
@@ -186,7 +187,7 @@ async function loadGitStatus(options = {}) {
   if (!options.quiet) error.value = ''
   const version = workspaceVersion
   try {
-    const result = await v2Api.getWorkspaceGitStatus(props.workspaceId)
+    const result = props.taskId ? await v2Api.getTaskGitStatus(props.taskId) : await v2Api.getWorkspaceGitStatus(props.workspaceId)
     if (version !== workspaceVersion) return
     gitStatus.value = result.git
     if (selectedDiffPath.value && !result.git.files.some((file) => file.path === selectedDiffPath.value)) {
@@ -207,7 +208,7 @@ async function selectDiff(filePath) {
   error.value = ''
   const version = workspaceVersion
   try {
-    const result = await v2Api.getWorkspaceGitDiff(props.workspaceId, filePath)
+    const result = props.taskId ? await v2Api.getTaskGitDiff(props.taskId, filePath) : await v2Api.getWorkspaceGitDiff(props.workspaceId, filePath)
     if (version === workspaceVersion && selectedDiffPath.value === filePath) {
       diff.value = result.diff
       displayedDiffPath.value = filePath
@@ -246,7 +247,7 @@ async function refreshGit(options = {}) {
   if (selectedDiffPath.value && !options.preserveDiff) await selectDiff(selectedDiffPath.value)
 }
 
-watch(() => props.workspaceId, async () => {
+watch(() => [props.workspaceId, props.taskId], async () => {
   workspaceVersion += 1
   clearFilePreviewObjectUrl()
   directoryCache.value = {}

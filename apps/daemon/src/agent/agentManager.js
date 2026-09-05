@@ -30,7 +30,9 @@ export class AgentManager {
   getRuntime(agent) {
     let runtime = this.runtimes.get(agent.id)
     if (runtime) return runtime
-    const workspace = this.repository.getWorkspace(agent.workspaceId)
+    const task = agent.taskId ? this.repository.getTask(agent.taskId) : null
+    const environment = task ? this.repository.getEnvironment(task.environmentId) : null
+    const workspace = environment ? { cwd: environment.cwd } : this.repository.getWorkspace(agent.workspaceId)
     runtime = this.providerRegistry.get(agent.providerId).createRuntime({
       cwd: workspace.cwd,
       nativeHandle: agent.nativeHandle,

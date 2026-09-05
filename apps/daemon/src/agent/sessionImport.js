@@ -1,6 +1,8 @@
 import { JsonRpcProcess } from './jsonRpcProcess.js'
+import fs from 'node:fs'
 import { listClaudeHistorySessions } from './history/providers/claudeHistory.js'
 import { listKimiHistorySessions } from './history/providers/kimiHistory.js'
+import { repositoryRoot, defaultBranch } from '../environments/worktreeService.js'
 import { CODEX_BIN } from './providers/codexCli.js'
 
 function unixSecondsToIso(value) {
@@ -108,17 +110,29 @@ export class SessionImportService {
     const requestedCwd = String(cwd || session.cwd || '').trim()
     if (!requestedCwd) throw new Error('无法确定该会话的工作目录，请先在 PromptX 中创建对应项目。')
     const existingWorkspaceIds = new Set(this.repository.listWorkspaces().map((item) => item.id))
-    const workspace = this.repository.createWorkspace({ cwd: requestedCwd })
+    const workspace = fs.existsSync(requestedCwd)
+      ? this.repository.createWorkspace({ cwd: requestedCwd })
+      : this.repository.createWorkspaceRecord({ cwd: requestedCwd, title: String(title || session?.title || `${provider.label} 会话`).slice(0, 120) })
     const workspaceCreated = !existingWorkspaceIds.has(workspace.id)
+    let project = null
+    try {
+      const root = await repositoryRoot(requestedCwd)
+      project = this.repository.getProjectByRoot(root) || this.repository.createProject({ repositoryRoot: root, displayName: root.split(/[\\/]/).pop(), defaultBranch: await defaultBranch(root) })
+    } catch {
+      project = this.repository.createProject({ repositoryRoot: requestedCwd, displayName: requestedCwd.split(/[\\/]/).pop() })
+    }
+    const environment = this.repository.getEnvironmentByCwd(requestedCwd) || this.repository.createEnvironment({ kind: 'local', cwd: requestedCwd, repositoryRoot: project.repositoryRoot, ownership: 'external', status: fs.existsSync(requestedCwd) ? 'ready' : 'unavailable' })
+    const task = this.repository.createTask({ projectId: project.id, environmentId: environment.id, providerId: provider.id, title: String(title || session?.title || `${provider.label} 会话`).slice(0, 120) })
     const nativeHandle = provider.id === 'codex' ? { threadId: providerHandleId } : { sessionId: providerHandleId }
     let agent = this.repository.createAgent(workspace.id, {
       providerId: provider.id,
+      taskId: task.id,
       title: String(title || session?.title || `${provider.label} 会话`).slice(0, 120),
       nativeHandle,
     }, provider.capabilities)
     try {
       agent = this.repository.updateAgent(agent.id, { lifecycle: 'ready' })
-      await this.agentManager.syncTimeline(agent.id)
+      if (environment.status !== 'unavailable') await this.agentManager.syncTimeline(agent.id)
       return { agent: this.repository.getAgent(agent.id), imported: true, workspace: this.repository.getWorkspace(workspace.id) }
     } catch (error) {
       this.agentManager.close(agent.id)

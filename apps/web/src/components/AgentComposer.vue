@@ -9,6 +9,7 @@ const IMAGE_MIME_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image
 
 const props = defineProps({
   workspaceId: { type: String, required: true },
+  taskId: { type: String, default: '' },
   running: { type: Boolean, default: false },
   sending: { type: Boolean, default: false },
   blockedReason: { type: String, default: '' },
@@ -128,7 +129,9 @@ async function uploadAttachment(item) {
   item.status = 'uploading'
   item.error = ''
   try {
-    const result = await v2Api.uploadAsset(props.workspaceId, item.file, { signal: controller.signal })
+    const result = props.taskId
+      ? await v2Api.uploadTaskAsset(props.taskId, item.file, { signal: controller.signal })
+      : await v2Api.uploadAsset(props.workspaceId, item.file, { signal: controller.signal })
     if (item.controller !== controller) return
     item.asset = result.asset
     item.status = 'ready'

@@ -33,6 +33,7 @@ function mapAgent(row) {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
+    taskId: row.task_id,
     providerId: row.provider_id,
     title: row.title,
     lifecycle: row.lifecycle,
@@ -107,14 +108,14 @@ export function normalizeWorkspacePath(input) {
 
 export function createRepository(db) {
   const insertTimeline = db.transaction((agentId, turnId, item, options = {}) => {
-    const agent = db.prepare('SELECT timeline_next_seq FROM agent_sessions WHERE id = ?').get(agentId)
+    const agent = db.prepare('SELECT timeline_next_seq, task_id FROM agent_sessions WHERE id = ?').get(agentId)
     if (!agent) throw new Error('Agent 不存在。')
     const seq = Number(agent.timeline_next_seq)
     const timestamp = options.timestamp || nowIso()
     db.prepare(`INSERT INTO agent_timeline_rows
-      (agent_session_id, seq, timestamp, turn_id, provider_message_id, item_type, item_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(agentId, seq, timestamp, turnId || null, options.providerMessageId || null, item.type, JSON.stringify(item))
+      (agent_session_id, task_id, seq, timestamp, turn_id, provider_message_id, item_type, item_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(agentId, agent.task_id || null, seq, timestamp, turnId || null, options.providerMessageId || null, item.type, JSON.stringify(item))
     db.prepare('UPDATE agent_sessions SET timeline_next_seq = ?, updated_at = ?, last_active_at = ? WHERE id = ?')
       .run(seq + 1, timestamp, timestamp, agentId)
     return { seq, timestamp, ...(turnId ? { turnId } : {}), ...(options.providerMessageId ? { providerMessageId: options.providerMessageId } : {}), item }
@@ -241,6 +242,23 @@ export function createRepository(db) {
   })
 
   return {
+    listProjects() { return db.prepare('SELECT * FROM projects ORDER BY last_opened_at DESC').all().map((row) => ({ id: row.id, repositoryRoot: row.repository_root, displayName: row.display_name, defaultBranch: row.default_branch, createdAt: row.created_at, updatedAt: row.updated_at, lastOpenedAt: row.last_opened_at })) },
+    getProject(id) { return this.listProjects().find((item) => item.id === id) || null },
+    getProjectByRoot(root) { const row = db.prepare('SELECT * FROM projects WHERE repository_root = ?').get(root); return row ? { id: row.id, repositoryRoot: row.repository_root, displayName: row.display_name, defaultBranch: row.default_branch, createdAt: row.created_at, updatedAt: row.updated_at, lastOpenedAt: row.last_opened_at } : null },
+    updateProject(id, input = {}) { const current = this.getProject(id); if (!current) return null; const now = nowIso(); db.prepare('UPDATE projects SET display_name = ?, default_branch = ?, updated_at = ?, last_opened_at = ? WHERE id = ?').run(input.displayName ?? current.displayName, input.defaultBranch ?? current.defaultBranch, now, now, id); return this.getProject(id) },
+    deleteProject(id) { return db.prepare('DELETE FROM projects WHERE id = ?').run(id).changes > 0 },
+    createProject(input) { const id = randomUUID(); const now = nowIso(); db.prepare('INSERT INTO projects (id, repository_root, display_name, default_branch, created_at, updated_at, last_opened_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(repository_root) DO UPDATE SET last_opened_at=excluded.last_opened_at').run(id, input.repositoryRoot, input.displayName || path.basename(input.repositoryRoot), input.defaultBranch || '', now, now, now); const row = db.prepare('SELECT * FROM projects WHERE repository_root = ?').get(input.repositoryRoot); return { id: row.id, repositoryRoot: row.repository_root, displayName: row.display_name, defaultBranch: row.default_branch, createdAt: row.created_at, updatedAt: row.updated_at, lastOpenedAt: row.last_opened_at } },
+    createEnvironment(input) { const id = randomUUID(); const now = nowIso(); db.prepare('INSERT INTO execution_environments (id, kind, cwd, repository_root, branch_name, base_ref, worktree_path, ownership, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, input.kind || 'local', input.cwd, input.repositoryRoot, input.branchName || '', input.baseRef || '', input.worktreePath || null, input.ownership || 'external', input.status || 'ready', now, now); return this.getEnvironment(id) },
+    getEnvironment(id) { const row = db.prepare('SELECT * FROM execution_environments WHERE id = ?').get(id); return row ? { id: row.id, kind: row.kind, cwd: row.cwd, repositoryRoot: row.repository_root, branchName: row.branch_name, baseRef: row.base_ref, worktreePath: row.worktree_path, ownership: row.ownership, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, archivedAt: row.archived_at } : null },
+    getEnvironmentByCwd(cwd) { const row = db.prepare('SELECT id FROM execution_environments WHERE cwd = ?').get(cwd); return row ? this.getEnvironment(row.id) : null },
+    listEnvironments() { return db.prepare('SELECT id FROM execution_environments').all().map(({ id }) => this.getEnvironment(id)) },
+    updateEnvironment(id, patch = {}) { const current = this.getEnvironment(id); if (!current) return null; const next = { ...current, ...patch, updatedAt: nowIso() }; db.prepare('UPDATE execution_environments SET status = ?, updated_at = ?, archived_at = ? WHERE id = ?').run(next.status, next.updatedAt, next.archivedAt || null, id); return this.getEnvironment(id) },
+    rebindEnvironment(id, input) { const current = this.getEnvironment(id); if (!current) return null; const now = nowIso(); db.prepare('UPDATE execution_environments SET cwd = ?, repository_root = ?, kind = ?, worktree_path = ?, branch_name = ?, base_ref = ?, ownership = ?, status = ?, updated_at = ? WHERE id = ?').run(input.cwd, input.repositoryRoot || current.repositoryRoot, input.kind || current.kind, input.worktreePath || null, input.branchName || '', input.baseRef || '', input.ownership || 'external', input.status || 'ready', now, id); return this.getEnvironment(id) },
+    createTask(input) { const id = randomUUID(); const now = nowIso(); db.prepare('INSERT INTO tasks (id, project_id, title, provider_id, lifecycle, environment_id, created_at, updated_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, input.projectId, input.title || DEFAULT_AGENT_TITLE, input.providerId, 'active', input.environmentId, now, now, now); return this.getTask(id) },
+    getTask(id) { const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id); return row ? { id: row.id, projectId: row.project_id, title: row.title, providerId: row.provider_id, lifecycle: row.lifecycle, environmentId: row.environment_id, createdAt: row.created_at, updatedAt: row.updated_at, lastActiveAt: row.last_active_at, archivedAt: row.archived_at } : null },
+    listTasks(projectId) { return db.prepare(`SELECT t.id, a.id AS agent_id FROM tasks t LEFT JOIN agent_sessions a ON a.task_id = t.id AND a.archived_at IS NULL WHERE t.project_id = ? ORDER BY t.last_active_at DESC`).all(projectId).map((row) => ({ ...this.getTask(row.id), agentId: row.agent_id || null })) },
+    archiveTask(id) { const now = nowIso(); db.prepare('UPDATE tasks SET lifecycle = \'archived\', archived_at = ?, updated_at = ? WHERE id = ?').run(now, now, id); const task = this.getTask(id); if (task) db.prepare('UPDATE execution_environments SET status = \'orphaned\', updated_at = ? WHERE id = ?').run(now, task.environmentId); return task },
+    deleteTask(id) { return db.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0 },
     listWorkspaces() {
       return db.prepare('SELECT * FROM workspaces ORDER BY sort_order ASC, last_opened_at DESC').all().map(mapWorkspace)
     },
@@ -258,6 +276,15 @@ export function createRepository(db) {
         (id, cwd, path_key, title, sort_order, created_at, updated_at, last_opened_at)
         VALUES (?, ?, ?, ?, 0, ?, ?, ?)`)
         .run(id, cwd, pathKey, title, now, now, now)
+      return this.getWorkspace(id)
+    },
+    createWorkspaceRecord(input) {
+      const cwd = path.resolve(String(input.cwd || '').trim())
+      const pathKey = process.platform === 'win32' ? cwd.toLowerCase() : cwd
+      const existing = mapWorkspace(db.prepare('SELECT * FROM workspaces WHERE path_key = ?').get(pathKey))
+      if (existing) return existing
+      const id = randomUUID(); const now = nowIso(); const title = String(input.title || path.basename(cwd) || cwd).trim()
+      db.prepare('INSERT INTO workspaces (id, cwd, path_key, title, sort_order, created_at, updated_at, last_opened_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?)').run(id, cwd, pathKey, title, now, now, now)
       return this.getWorkspace(id)
     },
     updateWorkspace(id, input) {
@@ -300,15 +327,21 @@ export function createRepository(db) {
     getAgent(id) {
       return mapAgent(db.prepare('SELECT * FROM agent_sessions WHERE id = ?').get(id))
     },
+    listAgentsByTask(taskId, includeArchived = true) {
+      const sql = includeArchived
+        ? 'SELECT * FROM agent_sessions WHERE task_id = ? ORDER BY last_active_at DESC'
+        : 'SELECT * FROM agent_sessions WHERE task_id = ? AND archived_at IS NULL ORDER BY last_active_at DESC'
+      return db.prepare(sql).all(taskId).map(mapAgent)
+    },
     createAgent(workspaceId, input, capabilities = {}) {
       const id = randomUUID()
       const now = nowIso()
       db.prepare(`INSERT INTO agent_sessions
-        (id, workspace_id, provider_id, title, lifecycle, model_id, mode_id, config_json,
+        (id, workspace_id, task_id, provider_id, title, lifecycle, model_id, mode_id, config_json,
          capabilities_json, native_handle_json, timeline_epoch, timeline_next_seq, last_error,
          requires_attention, attention_reason, attention_at, created_at, updated_at, last_active_at)
-        VALUES (?, ?, ?, ?, 'initializing', ?, ?, ?, ?, ?, ?, 1, '', 0, NULL, NULL, ?, ?, ?)`)
-        .run(id, workspaceId, input.providerId, input.title || DEFAULT_AGENT_TITLE, input.modelId || '', input.modeId || '',
+        VALUES (?, ?, ?, ?, ?, 'initializing', ?, ?, ?, ?, ?, ?, 1, '', 0, NULL, NULL, ?, ?, ?)`)
+        .run(id, workspaceId, input.taskId || null, input.providerId, input.title || DEFAULT_AGENT_TITLE, input.modelId || '', input.modeId || '',
           JSON.stringify(input.providerConfig || {}), JSON.stringify(capabilities), JSON.stringify(input.nativeHandle || {}), randomUUID(), now, now, now)
       return this.getAgent(id)
     },
@@ -362,9 +395,9 @@ export function createRepository(db) {
       const id = randomUUID()
       const now = nowIso()
       db.prepare(`INSERT INTO agent_turns
-        (id, agent_session_id, client_message_id, status, created_at)
-        VALUES (?, ?, ?, 'queued', ?)`)
-        .run(id, agentId, clientMessageId, now)
+        (id, agent_session_id, task_id, client_message_id, status, created_at)
+        VALUES (?, ?, (SELECT task_id FROM agent_sessions WHERE id = ?), ?, 'queued', ?)`)
+        .run(id, agentId, agentId, clientMessageId, now)
       return this.getTurn(id)
     },
     updateTurn(id, patch = {}) {
