@@ -1284,38 +1284,15 @@ onBeforeUnmount(() => {
     >
       <template #title><h2 class="text-sm font-semibold">新对话</h2></template>
       <form class="flex min-h-0 flex-1 flex-col px-4 pb-4" @submit.prevent="createConversation">
-        <div class="shrink-0">
-          <label class="theme-muted-text mt-4 block text-xs" for="conversation-provider">Provider</label>
-          <select id="conversation-provider" v-model="agentProvider" class="tool-input mt-1" :disabled="creating">
-            <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
-          </select>
-          <label class="theme-muted-text mt-4 block text-xs" for="task-title">任务标题</label>
-          <input id="task-title" v-model="taskTitle" class="tool-input mt-1" placeholder="任务标题" :disabled="creating" />
-          <label class="theme-muted-text mt-4 block text-xs" for="execution-kind">执行位置</label>
-          <select id="execution-kind" v-model="executionKind" class="tool-input mt-1" :disabled="creating">
-            <option value="worktree">新建 Worktree</option><option value="local">当前目录</option>
-          </select>
-          <div v-if="executionKind === 'worktree'" class="grid grid-cols-1 gap-2">
-            <label class="sr-only" for="task-base-ref">基线</label>
-            <select id="task-base-ref" v-model="taskBaseRef" class="tool-input mt-2" :disabled="creating">
-              <option value="HEAD">HEAD（当前提交）</option>
-              <option value="origin/main">origin/main</option>
-              <option value="origin/master">origin/master</option>
-              <option value="main">main</option>
-              <option value="master">master</option>
-            </select>
-            <input v-model="taskSlug" class="tool-input mt-2" placeholder="Worktree 名称，例如 fix-login" :disabled="creating" />
-          </div>
-        </div>
         <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
-        <div class="relative mt-1 flex min-h-0 flex-1 flex-col">
+        <div class="relative mt-1 shrink-0">
           <div class="relative shrink-0">
             <Search class="theme-muted-text pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2" />
             <input
               id="workspace-path"
               ref="workspacePathInput"
               v-model="workspacePath"
-              class="tool-input w-full pl-9 pr-9 font-mono"
+              class="tool-input h-11 w-full pl-9 pr-9 font-mono shadow-sm"
               placeholder="搜索目录名称或输入绝对路径"
               autocomplete="off"
               role="combobox"
@@ -1355,7 +1332,29 @@ onBeforeUnmount(() => {
             <div v-if="directorySearchError" class="error-row m-2 rounded-sm border px-3 py-2 text-xs">{{ directorySearchError }}</div>
             <div v-else-if="!directorySearchLoading && !directorySuggestions.length" class="theme-muted-text px-3 py-5 text-center text-xs">没有找到匹配目录</div>
           </div>
-          <div v-else class="min-h-0 flex-1" />
+        </div>
+        <div class="shrink-0">
+          <label class="theme-muted-text mt-4 block text-xs" for="conversation-provider">Provider</label>
+          <select id="conversation-provider" v-model="agentProvider" class="tool-input mt-1" :disabled="creating">
+            <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+          </select>
+          <label class="theme-muted-text mt-4 block text-xs" for="task-title">任务标题</label>
+          <input id="task-title" v-model="taskTitle" class="tool-input mt-1" placeholder="任务标题" :disabled="creating" />
+          <label class="theme-muted-text mt-4 block text-xs" for="execution-kind">执行位置</label>
+          <select id="execution-kind" v-model="executionKind" class="tool-input mt-1" :disabled="creating">
+            <option value="worktree">新建 Worktree</option><option value="local">当前目录</option>
+          </select>
+          <div v-if="executionKind === 'worktree'" class="grid grid-cols-1 gap-2">
+            <label class="sr-only" for="task-base-ref">基线</label>
+            <select id="task-base-ref" v-model="taskBaseRef" class="tool-input mt-2" :disabled="creating">
+              <option value="HEAD">HEAD（当前提交）</option>
+              <option value="origin/main">origin/main</option>
+              <option value="origin/master">origin/master</option>
+              <option value="main">main</option>
+              <option value="master">master</option>
+            </select>
+            <input v-model="taskSlug" class="tool-input mt-2" placeholder="Worktree 名称，例如 fix-login" :disabled="creating" />
+          </div>
         </div>
         <div class="mt-4 flex shrink-0 justify-end"><button class="tool-button tool-button-primary h-9 gap-2 px-4 text-xs" :disabled="!workspacePath.trim() || !agentProvider || creating"><LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />创建对话</button></div>
       </form>
