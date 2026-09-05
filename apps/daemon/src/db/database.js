@@ -39,7 +39,7 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
       default_branch TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_opened_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS execution_environments (
-      id TEXT PRIMARY KEY, kind TEXT NOT NULL, cwd TEXT NOT NULL UNIQUE, repository_root TEXT NOT NULL,
+      id TEXT PRIMARY KEY, kind TEXT NOT NULL, cwd TEXT NOT NULL, repository_root TEXT NOT NULL,
       branch_name TEXT NOT NULL DEFAULT '', base_ref TEXT NOT NULL DEFAULT '', worktree_path TEXT,
       ownership TEXT NOT NULL DEFAULT 'external', status TEXT NOT NULL DEFAULT 'ready', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT
     );
@@ -153,9 +153,34 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
       FOREIGN KEY (agent_session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
     );
   `)
-  // Older databases enforced one task per environment. Imported history sessions
+  // Older databases enforced unique cwd and one task per environment. Imported history sessions
   // may legitimately share an existing local environment, so rebuild that table
-  // once without the obsolete UNIQUE constraint.
+  // once without the obsolete UNIQUE constraints.
+  const environmentSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'execution_environments'").get()?.sql || ''
+  if (/cwd\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(environmentSchema)) {
+    db.pragma('foreign_keys = OFF')
+    db.exec(`
+      ALTER TABLE execution_environments RENAME TO execution_environments_legacy;
+      CREATE TABLE execution_environments (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL, cwd TEXT NOT NULL, repository_root TEXT NOT NULL,
+        branch_name TEXT NOT NULL DEFAULT '', base_ref TEXT NOT NULL DEFAULT '', worktree_path TEXT,
+        ownership TEXT NOT NULL DEFAULT 'external', status TEXT NOT NULL DEFAULT 'ready', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT
+      );
+      INSERT INTO execution_environments SELECT id, kind, cwd, repository_root, branch_name, base_ref, worktree_path, ownership, status, created_at, updated_at, archived_at FROM execution_environments_legacy;
+      DROP TABLE execution_environments_legacy;
+      CREATE TABLE IF NOT EXISTS tasks_new (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, provider_id TEXT NOT NULL,
+        lifecycle TEXT NOT NULL, environment_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        last_active_at TEXT NOT NULL, archived_at TEXT, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (environment_id) REFERENCES execution_environments(id)
+      );
+      INSERT INTO tasks_new SELECT id, project_id, title, provider_id, lifecycle, environment_id, created_at, updated_at, last_active_at, archived_at FROM tasks;
+      DROP TABLE tasks;
+      ALTER TABLE tasks_new RENAME TO tasks;
+      CREATE INDEX IF NOT EXISTS idx_tasks_project_activity ON tasks(project_id, archived_at, last_active_at DESC);
+    `)
+    db.pragma('foreign_keys = ON')
+  }
   const taskSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'").get()?.sql || ''
   if (/environment_id\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(taskSchema)) {
     db.pragma('foreign_keys = OFF')
