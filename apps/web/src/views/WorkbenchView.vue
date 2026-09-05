@@ -62,7 +62,7 @@ const taskTitle = ref('')
 const executionKind = ref('worktree')
 const taskBaseRef = ref('HEAD')
 const taskBranchName = ref('')
-const taskSlug = ref('task')
+const taskSlug = ref('')
 const creating = ref(false)
 const confirmation = ref({ open: false, title: '', description: '', confirmText: '', danger: false, resolve: null })
 const timelineElement = ref(null)
@@ -705,7 +705,7 @@ async function openConversationDialog(workspace = null) {
   taskTitle.value = ''
   executionKind.value = 'worktree'
   taskBaseRef.value = 'HEAD'
-  taskSlug.value = 'task'
+  taskSlug.value = ''
   taskBranchName.value = ''
   agentProvider.value = providers.value.some((provider) => provider.id === 'codex')
     ? 'codex'
@@ -1296,8 +1296,15 @@ onBeforeUnmount(() => {
             <option value="worktree">新建 Worktree</option><option value="local">当前目录</option>
           </select>
           <div v-if="executionKind === 'worktree'" class="grid grid-cols-2 gap-2">
-            <input v-model="taskBaseRef" class="tool-input mt-2" placeholder="基线，例如 HEAD" :disabled="creating" />
-            <input v-model="taskSlug" class="tool-input mt-2" placeholder="Worktree 名称" :disabled="creating" />
+            <label class="sr-only" for="task-base-ref">基线</label>
+            <select id="task-base-ref" v-model="taskBaseRef" class="tool-input mt-2" :disabled="creating">
+              <option value="HEAD">HEAD（当前提交）</option>
+              <option value="origin/main">origin/main</option>
+              <option value="origin/master">origin/master</option>
+              <option value="main">main</option>
+              <option value="master">master</option>
+            </select>
+            <input v-model="taskSlug" class="tool-input mt-2" placeholder="Worktree 名称，例如 fix-login" :disabled="creating" />
           </div>
         </div>
         <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
