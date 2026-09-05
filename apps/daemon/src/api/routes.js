@@ -341,13 +341,17 @@ export function registerRoutes(app, context) {
     const input = CreateConversationInputSchema.parse(request.body)
     const provider = providerRegistry.get(input.providerId)
     const workspace = repository.createWorkspace(input)
+    const project = repository.getProjectByRoot(workspace.cwd) || repository.createProject({ repositoryRoot: workspace.cwd, displayName: workspace.title, defaultBranch: await defaultBranch(workspace.cwd).catch(() => '') })
+    const environment = repository.getEnvironmentByCwd(workspace.cwd) || repository.createEnvironment({ kind: 'local', cwd: workspace.cwd, repositoryRoot: project.repositoryRoot, ownership: 'external', status: 'ready' })
+    const task = repository.createTask({ projectId: project.id, environmentId: environment.id, providerId: provider.id, title: input.title || DEFAULT_AGENT_TITLE })
     let agent = repository.createAgent(workspace.id, {
       providerId: provider.id,
+      taskId: task.id,
       title: DEFAULT_AGENT_TITLE,
     }, provider.capabilities)
     agent = repository.updateAgent(agent.id, { lifecycle: 'ready' })
     reply.code(201)
-    return { workspace, agent }
+    return { workspace, project, task, environment, agent }
   })
   app.patch('/api/v2/workspaces/:workspaceId', async (request) => ({
     workspace: repository.updateWorkspace(request.params.workspaceId, UpdateWorkspaceInputSchema.parse(request.body)),
