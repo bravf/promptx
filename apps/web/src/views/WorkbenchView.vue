@@ -360,7 +360,8 @@ async function selectAgent(id, { navigate = false } = {}) {
   closeEvents()
   if (cachedTimeline) openEvents(id, cachedTimeline.epoch, cachedTimeline.maxSeq)
   try {
-    const [result, turnResult] = await Promise.all([v2Api.getTimeline(id), v2Api.listTurns(id, 1000)])
+    const timelineRequest = agent.taskId ? v2Api.getTaskTimeline(agent.taskId) : v2Api.getTimeline(id)
+    const [result, turnResult] = await Promise.all([timelineRequest, v2Api.listTurns(id, 1000)])
     if (requestVersion !== timelineRequestVersion || activeAgentId.value !== id) return
     rows.value = result.timeline.rows
     turns.value = turnResult.turns
@@ -407,6 +408,7 @@ async function loadAgentControl(agentId, requestVersion = timelineRequestVersion
 
 async function loadOlderHistory() {
   const agentId = activeAgentId.value
+  const agent = Object.values(agentsByWorkspace.value).flat().find((item) => item.id === agentId)
   const epoch = timelineEpoch.value
   const beforeSeq = rows.value[0]?.seq
   if (!agentId || !epoch || !beforeSeq || !hasOlderHistory.value || loadingOlderHistory.value) return
@@ -415,7 +417,11 @@ async function loadOlderHistory() {
   let shouldContinueFilling = false
   loadingOlderHistory.value = true
   try {
-    const result = await v2Api.getTimeline(agentId, {
+    const result = agent?.taskId ? await v2Api.getTaskTimeline(agent.taskId, {
+      direction: 'before',
+      cursor: `${epoch}:${beforeSeq}`,
+      limit: 300,
+    }) : await v2Api.getTimeline(agentId, {
       direction: 'before',
       cursor: `${epoch}:${beforeSeq}`,
       limit: 300,

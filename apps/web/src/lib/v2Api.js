@@ -13,6 +13,7 @@ export const v2Api = {
   getTaskEnvironment: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/environment`, { cache: 'no-store' }),
   getTaskAgent: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/agent`, { cache: 'no-store' }),
   startTaskTurn: (taskId, content, clientMessageId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/turns`, { method: 'POST', body: JSON.stringify({ clientMessageId, input: { content } }) }),
+  getTaskTimeline: (taskId, options = {}) => { const query = new URLSearchParams({ direction: options.direction || 'tail', limit: String(options.limit || 300) }); if (options.cursor) query.set('cursor', options.cursor); return request(`/api/v2/tasks/${encodeURIComponent(taskId)}/timeline?${query}`) },
   listTaskFiles: (taskId, filePath = '') => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/files?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
   readTaskFile: (taskId, filePath) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/file?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
   taskFileObjectUrl: (taskId, filePath, options = {}) => transportObjectUrl(`${getApiBase()}/api/v2/tasks/${encodeURIComponent(taskId)}/file/content?${new URLSearchParams({ path: filePath })}`, options),

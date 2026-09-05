@@ -112,6 +112,13 @@ export function registerRoutes(app, context) {
     const turn = await agentManager.startTurn(agents[0].id, request.body || {})
     return { turn }
   })
+  app.get('/api/v2/tasks/:taskId/timeline', async (request, reply) => {
+    const agents = repository.listAgentsByTask(request.params.taskId, false)
+    if (!agents.length) return reply.code(404).send({ error: 'agent_not_found' })
+    const agent = agents[0]
+    if (request.query.direction !== 'before') void agentManager.syncTimeline(agent.id).catch(() => {})
+    return { timeline: timelineStore.fetch(agent.id, { direction: request.query.direction, limit: request.query.limit, mode: request.query.mode, cursor: parseCursor(request.query.cursor) }) }
+  })
   app.get('/api/v2/tasks/:taskId/files', async (request, reply) => {
     const task = repository.getTask(request.params.taskId)
     const environment = task && repository.getEnvironment(task.environmentId)

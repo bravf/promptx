@@ -213,21 +213,23 @@ test('Workspace inspection API 提供文件、Git 状态并拒绝路径逃逸', 
   }
 })
 
-test('同一路径的新对话复用 Workspace，并创建独立 Agent', async () => {
+test('同一 Project 可以创建独立 Worktree Task', async () => {
   const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
 
   const firstResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'codex' } })
-  const secondResponse = await app.inject({ method: 'POST', url: '/api/v2/conversations', payload: { cwd: process.cwd(), providerId: 'claude' } })
   const first = firstResponse.json()
+  const secondResponse = await app.inject({ method: 'POST', url: `/api/v2/projects/${first.project.id}/tasks`, payload: { executionKind: 'worktree', providerId: 'claude', slug: `test-${Date.now()}` } })
+  assert.equal(secondResponse.statusCode, 201)
   const second = secondResponse.json()
-  assert.equal(second.workspace.id, first.workspace.id)
+  assert.equal(second.task.projectId, first.project.id)
+  assert.notEqual(second.task.id, first.task.id)
   assert.notEqual(second.agent.id, first.agent.id)
   assert.equal(second.agent.providerId, 'claude')
 
   const deleteResponse = await app.inject({ method: 'DELETE', url: `/api/v2/agents/${first.agent.id}` })
   assert.equal(deleteResponse.statusCode, 204)
-  const agentsResponse = await app.inject({ method: 'GET', url: `/api/v2/workspaces/${first.workspace.id}/agents` })
-  assert.deepEqual(agentsResponse.json().agents.map((agent) => agent.id), [second.agent.id])
+  const tasksResponse = await app.inject({ method: 'GET', url: `/api/v2/projects/${first.project.id}/tasks` })
+  assert.equal(tasksResponse.json().tasks.some((task) => task.id === second.task.id), true)
 
   await app.close()
 })
