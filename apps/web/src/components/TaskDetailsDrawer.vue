@@ -29,7 +29,7 @@ onMounted(load)
 </script>
 
 <template>
-  <aside class="drawer-panel flex h-full w-full max-w-md flex-col border-l">
+  <aside class="task-details-drawer drawer-panel flex h-full w-full max-w-md flex-col border-l">
     <header class="flex items-center justify-between border-b px-4 py-3">
       <div class="flex items-center gap-2 font-medium"><Info class="h-4 w-4" />任务详情</div>
       <button class="quiet-icon-button h-8 w-8" title="关闭" @click="emit('close')">×</button>

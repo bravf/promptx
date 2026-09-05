@@ -1422,6 +1422,7 @@ onBeforeUnmount(() => {
 @keyframes skeleton-pulse { 0%, 100% { opacity: 0.48; } 50% { opacity: 0.88; } }
 .timeline-loading-overlay { background: color-mix(in srgb, var(--theme-appPanel) 84%, transparent); }
 .v2-shell :deep(.workspace-inspector) { bottom: 0; left: 240px; position: absolute; right: 0; top: 3.5rem; z-index: 20; }
+.v2-shell :deep(.task-details-drawer) { bottom: 0; position: absolute; right: 0; top: 3.5rem; width: min(100%, 28rem); z-index: 21; }
 .workspace-sidebar, header, footer, .composer-wrap { border-color: var(--theme-borderDefault); }
 .brand-mark { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
 .sidebar-primary-action { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
@@ -1490,6 +1491,9 @@ onBeforeUnmount(() => {
 .workspace-drawer-enter-active { transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease; }
 .workspace-drawer-leave-active { transition: transform 180ms ease-in, opacity 150ms ease; }
 .workspace-drawer-enter-from, .workspace-drawer-leave-to { transform: translateX(100%); opacity: 0.35; }
+.task-details-drawer-enter-active { transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease; }
+.task-details-drawer-leave-active { transition: transform 180ms ease-in, opacity 150ms ease; }
+.task-details-drawer-enter-from, .task-details-drawer-leave-to { transform: translateX(100%); opacity: 0.35; }
 @media (prefers-reduced-motion: reduce) {
   .sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .drawer-trigger,
   .workspace-sidebar, .timeline-pane, .workspace-drawer-enter-active, .workspace-drawer-leave-active,
@@ -1524,6 +1528,7 @@ onBeforeUnmount(() => {
   .mobile-back-button { display: inline-flex; }
   .mobile-workspace-path { display: block; }
   .v2-shell :deep(.workspace-inspector) { left: 0; }
+  .v2-shell :deep(.task-details-drawer) { left: 0; width: 100%; }
   .workspace-action, .agent-delete { opacity: 1; }
   .workspace-delete { display: none; }
   .status-text { display: none; }
