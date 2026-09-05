@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { renderCodexMarkdown, renderPlainCodexMarkdown } from '../lib/codexMarkdown.js'
 import { workspaceLinkForHref } from '../lib/timelineWorkspaceLinks.js'
+import { writeClipboardText } from '../lib/clipboard.js'
 
 const props = defineProps({
   text: {
@@ -47,24 +48,6 @@ function scheduleRender() {
       // 同步 Markdown 已经作为安全回退结果展示。
     }
   }, props.streaming ? 180 : 0)
-}
-
-async function writeClipboardText(text) {
-  if (navigator.clipboard?.writeText && window.isSecureContext) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  const copied = document.execCommand('copy')
-  textarea.remove()
-  if (!copied) throw new Error('copy_failed')
 }
 
 async function copyCode(event) {

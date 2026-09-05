@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { Check, Copy } from 'lucide-vue-next'
 import { formatMessageDateTime, formatMessageTime } from '../lib/timelinePresentation.js'
+import { writeClipboardText } from '../lib/clipboard.js'
 
 const props = defineProps({
   text: { type: String, default: '' },
@@ -13,23 +14,6 @@ const copied = ref(false)
 let copiedTimer = null
 const shortTime = computed(() => formatMessageTime(props.timestamp))
 const fullTime = computed(() => formatMessageDateTime(props.timestamp))
-
-async function writeClipboardText(text) {
-  if (navigator.clipboard?.writeText && window.isSecureContext) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  const success = document.execCommand('copy')
-  textarea.remove()
-  if (!success) throw new Error('copy_failed')
-}
 
 async function copyMessage() {
   if (!props.text) return

@@ -6,6 +6,7 @@ import DialogShell from './DialogShell.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import { v2Api } from '../lib/v2Api.js'
+import { writeClipboardText } from '../lib/clipboard.js'
 
 const props = defineProps({
   open: {
@@ -72,9 +73,15 @@ async function saveRelay() {
 async function copyPairingUrl() {
   const url = relayData.value?.pairing?.url
   if (!url) return
-  await navigator.clipboard.writeText(url)
-  copied.value = true
-  setTimeout(() => { copied.value = false }, 1500)
+  relayError.value = ''
+  try {
+    await writeClipboardText(url)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 1500)
+  } catch {
+    copied.value = false
+    relayError.value = '复制链接失败，请长按链接手动复制。'
+  }
 }
 
 async function reconnectRelay() {
