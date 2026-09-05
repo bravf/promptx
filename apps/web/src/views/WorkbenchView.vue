@@ -1308,7 +1308,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
-        <div class="mt-1 flex min-h-0 flex-1 flex-col">
+        <div class="relative mt-1 flex min-h-0 flex-1 flex-col">
           <div class="relative shrink-0">
             <Search class="theme-muted-text pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2" />
             <input
@@ -1330,7 +1330,7 @@ onBeforeUnmount(() => {
           <div
             v-if="directorySuggestionsOpen"
             id="directory-suggestions"
-            class="directory-suggestions theme-popover mt-1.5 min-h-0 flex-1 overflow-y-auto rounded-sm border shadow-sm"
+            class="directory-suggestions theme-popover overflow-y-auto rounded-sm border shadow-sm"
             role="listbox"
           >
             <button
@@ -1473,7 +1473,7 @@ onBeforeUnmount(() => {
 @keyframes timeline-generating-pulse { 0%, 55%, 100% { opacity: 0.28; } 25% { opacity: 1; } }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .writer-blocked-row { border-color: var(--theme-warning); background: var(--theme-warningSoft); color: var(--theme-warningText); }
-.directory-suggestions { background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
+.directory-suggestions { position: absolute; z-index: 30; top: calc(100% + 0.375rem); left: 0; right: 0; max-height: min(18rem, calc(100dvh - 16rem)); background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
 .directory-suggestion:hover { background: var(--theme-appPanelHover); }
 .sidebar-primary-action, .sidebar-secondary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .settings-entry, .import-session-row, .import-provider-filter, .import-query-clear {
   transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease, transform 140ms ease;
