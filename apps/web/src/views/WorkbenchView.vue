@@ -1295,7 +1295,7 @@ onBeforeUnmount(() => {
           <select id="execution-kind" v-model="executionKind" class="tool-input mt-1" :disabled="creating">
             <option value="worktree">新建 Worktree</option><option value="local">当前目录</option>
           </select>
-          <div v-if="executionKind === 'worktree'" class="grid grid-cols-2 gap-2">
+          <div v-if="executionKind === 'worktree'" class="grid grid-cols-1 gap-2">
             <label class="sr-only" for="task-base-ref">基线</label>
             <select id="task-base-ref" v-model="taskBaseRef" class="tool-input mt-2" :disabled="creating">
               <option value="HEAD">HEAD（当前提交）</option>
