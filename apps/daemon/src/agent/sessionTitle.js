@@ -1,4 +1,4 @@
-export const DEFAULT_AGENT_TITLE = '新对话'
+export const DEFAULT_AGENT_TITLE = '新会话'
 
 const MAX_INITIAL_AGENT_TITLE_CHARS = 60
 

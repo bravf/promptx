@@ -19,8 +19,8 @@ export const AgentLifecycleSchema = z.enum([
 
 export const AgentSessionSchema = z.object({
   id: z.string().min(1),
-  workspaceId: z.string().min(1),
-  taskId: z.string().min(1).nullable().optional(),
+  taskId: z.string().min(1),
+  projectId: z.string().min(1),
   providerId: z.string().min(1),
   title: z.string(),
   lifecycle: AgentLifecycleSchema,

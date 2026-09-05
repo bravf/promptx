@@ -8,17 +8,17 @@ export class TimelineStore {
     this.repository = repository
   }
 
-  append(agentId, turnId, item, options = {}) {
-    return this.repository.appendTimeline(agentId, turnId, TimelineItemSchema.parse(item), options)
+  append(taskId, turnId, item, options = {}) {
+    return this.repository.appendTimeline(taskId, turnId, TimelineItemSchema.parse(item), options)
   }
 
-  fetch(agentId, options = {}) {
-    const state = this.repository.getTimelineState(agentId)
-    if (!state) throw new Error('Agent 不存在。')
+  fetch(taskId, options = {}) {
+    const state = this.repository.getTimelineState(taskId)
+    if (!state) throw new Error('会话不存在。')
     const direction = ['tail', 'before', 'after'].includes(options.direction) ? options.direction : 'tail'
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number(options.limit) || DEFAULT_LIMIT))
     const cursor = options.cursor || null
-    const bounds = this.repository.getTimelineBounds(agentId)
+    const bounds = this.repository.getTimelineBounds(taskId)
     const minSeq = bounds.minSeq
     const maxSeq = bounds.maxSeq
     const window = { minSeq, maxSeq, nextSeq: state.nextSeq }
@@ -29,7 +29,7 @@ export class TimelineStore {
     const seq = effectiveDirection === 'before'
       ? (Number(cursor?.seq) || state.nextSeq)
       : Math.max(0, Number(cursor?.seq) || 0)
-    const rows = this.repository.listTimelineWindow(agentId, { direction: effectiveDirection, seq, limit })
+    const rows = this.repository.listTimelineWindow(taskId, { direction: effectiveDirection, seq, limit })
 
     const result = {
       epoch: state.epoch,

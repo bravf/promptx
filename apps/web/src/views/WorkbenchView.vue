@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
 import { ArrowDown, ArrowLeft, Bot, CircleAlert, FileDiff, Files, Folder, FolderOpen, Info, LoaderCircle, Plus, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
-import { v2Api, agentEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
+import { v2Api, taskEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
 import { createEventSource } from '../lib/eventSource.js'
 import { createMobileDialogHistoryState, getMobileDialogHistoryState } from '../lib/mobileDialogHistory.js'
 import { createMobileTimelineHistoryState, hasMobileTimelineHistoryState } from '../lib/mobileTimelineHistory.js'
@@ -20,16 +20,16 @@ import WorkspaceInspector from '../components/WorkspaceInspector.vue'
 import TaskDetailsDrawer from '../components/TaskDetailsDrawer.vue'
 
 const { isDark } = useTheme()
-const workspaces = ref([])
+const projects = ref([])
 const providers = ref([])
-const agentsByWorkspace = ref({})
-const expandedWorkspaceIds = ref(new Set())
+const tasksByProject = ref({})
+const expandedProjectIds = ref(new Set())
 const rows = ref([])
 const turns = ref([])
 const draftContent = ref([])
-const activeWorkspaceId = ref('')
-const activeAgentId = ref('')
-const displayedAgentId = ref('')
+const activeProjectId = ref('')
+const activeTaskId = ref('')
+const displayedTaskId = ref('')
 const loading = ref(true)
 const timelineLoading = ref(false)
 const timelineSyncing = ref(false)
@@ -51,16 +51,16 @@ const hasOlderHistory = ref(false)
 const loadingOlderHistory = ref(false)
 const followingTimeline = ref(true)
 const hasNewTimelineItems = ref(false)
-const workspacePath = ref('')
-const workspacePathInput = ref(null)
+const projectPath = ref('')
+const projectPathInput = ref(null)
 const directorySuggestions = ref([])
 const directorySearchLoading = ref(false)
 const directorySearchError = ref('')
 const directorySuggestionsOpen = ref(false)
 const selectedDirectoryIndex = ref(-1)
-const agentProvider = ref('codex')
+const taskProvider = ref('codex')
 const taskTitle = ref('')
-const executionKind = ref('worktree')
+const executionKind = ref('local')
 const taskBaseRef = ref('HEAD')
 const taskBranchName = ref('')
 const taskSlug = ref('')
@@ -79,7 +79,7 @@ const turnReconcilePending = new Set()
 let timelineRequestVersion = 0
 let positioningTimeline = false
 const timelineCache = new Map()
-const draftsByAgent = new Map()
+const draftsByTask = new Map()
 const MAX_TIMELINE_CACHE_SIZE = 10
 let directorySearchTimer = null
 let directorySearchController = null
@@ -97,50 +97,66 @@ let resolveDialogHistoryClose = null
 
 const TIMELINE_SYNC_RETRY_DELAY = 500
 
-const activeWorkspace = computed(() => workspaces.value.find((item) => item.id === activeWorkspaceId.value))
-const activeWorkspaceDirectoryName = computed(() => {
-  const cwd = String(activeWorkspace.value?.cwd || '').replace(/[\\/]+$/, '')
-  return cwd.split(/[\\/]/).pop() || activeWorkspace.value?.title || ''
+const activeProject = computed(() => projects.value.find((item) => item.id === activeProjectId.value))
+const activeProjectDirectoryName = computed(() => {
+  const cwd = String(activeProject.value?.repositoryRoot || '').replace(/[\\/]+$/, '')
+  return cwd.split(/[\\/]/).pop() || activeProject.value?.displayName || ''
 })
-const agents = computed(() => agentsForWorkspace(activeWorkspaceId.value))
-const activeAgent = computed(() => agents.value.find((item) => item.id === activeAgentId.value))
-const isRunning = computed(() => activeAgent.value?.lifecycle === 'running')
+const tasks = computed(() => tasksForProject(activeProjectId.value))
+const activeTask = computed(() => tasks.value.find((item) => item.id === activeTaskId.value))
+const isRunning = computed(() => activeTask.value?.lifecycle === 'running')
 const entries = computed(() => groupTimelineTurns(projectTimelineRows(rows.value)))
 const turnTimings = computed(() => createTurnTimingMap(rows.value, turns.value))
 const latestTurnId = computed(() => rows.value.findLast((row) => row.turnId)?.turnId || '')
-const timelineHasContent = computed(() => displayedAgentId.value === activeAgentId.value && Boolean(timelineEpoch.value || rows.value.length || turns.value.length))
+const timelineHasContent = computed(() => displayedTaskId.value === activeTaskId.value && Boolean(timelineEpoch.value || rows.value.length || turns.value.length))
 
-function agentsForWorkspace(workspaceId) {
-  return agentsByWorkspace.value[workspaceId] || []
+function taskView(task, projectId = task?.projectId) {
+  if (!task?.agent) return null
+  return {
+    ...task.agent,
+    id: task.id,
+    taskId: task.id,
+    agentSessionId: task.agent.id,
+    projectId,
+    taskLifecycle: task.lifecycle,
+    environment: task.environment,
+  }
 }
 
-function setWorkspaceAgents(workspaceId, nextAgents) {
-  agentsByWorkspace.value = { ...agentsByWorkspace.value, [workspaceId]: nextAgents }
+function tasksForProject(projectId) {
+  return tasksByProject.value[projectId] || []
 }
 
-function upsertAgent(agent) {
-  if (!agent?.workspaceId) return
-  const workspaceAgents = agentsForWorkspace(agent.workspaceId)
-  const index = workspaceAgents.findIndex((item) => item.id === agent.id)
-  const nextAgents = [...workspaceAgents]
-  if (index >= 0) nextAgents[index] = agent
-  else nextAgents.unshift(agent)
-  setWorkspaceAgents(agent.workspaceId, nextAgents)
+function setProjectTasks(projectId, nextTasks) {
+  tasksByProject.value = { ...tasksByProject.value, [projectId]: nextTasks }
 }
 
-function setWorkspaceExpanded(workspaceId, expanded = true) {
-  const next = new Set(expandedWorkspaceIds.value)
-  if (expanded) next.add(workspaceId)
-  else next.delete(workspaceId)
-  expandedWorkspaceIds.value = next
+function upsertTaskAgent(agent) {
+  if (!agent?.taskId || !agent.projectId) return null
+  const projectTasks = tasksForProject(agent.projectId)
+  const index = projectTasks.findIndex((item) => item.id === agent.taskId)
+  const current = index >= 0 ? projectTasks[index] : null
+  const nextTask = { ...current, ...agent, id: agent.taskId, taskId: agent.taskId, agentSessionId: agent.id, projectId: agent.projectId }
+  const nextTasks = [...projectTasks]
+  if (index >= 0) nextTasks[index] = nextTask
+  else nextTasks.unshift(nextTask)
+  setProjectTasks(agent.projectId, nextTasks)
+  return nextTask
 }
 
-function toggleWorkspace(workspaceId) {
-  setWorkspaceExpanded(workspaceId, !expandedWorkspaceIds.value.has(workspaceId))
+function setProjectExpanded(projectId, expanded = true) {
+  const next = new Set(expandedProjectIds.value)
+  if (expanded) next.add(projectId)
+  else next.delete(projectId)
+  expandedProjectIds.value = next
 }
 
-function handleWorkspaceRowClick(workspace) {
-  toggleWorkspace(workspace.id)
+function toggleProject(projectId) {
+  setProjectExpanded(projectId, !expandedProjectIds.value.has(projectId))
+}
+
+function handleProjectRowClick(project) {
+  toggleProject(project.id)
 }
 
 function providerLabel(providerId) {
@@ -154,38 +170,38 @@ function formatImportActivity(value) {
 }
 
 function agentStatusClass(agent) {
-  if (agent.id === activeAgentId.value || !agent.requiresAttention) return ''
+  if (agent.id === activeTaskId.value || !agent.requiresAttention) return ''
   if (agent.attentionReason === 'error') return 'agent-dot-failed'
   if (agent.attentionReason === 'finished') return 'agent-dot-finished'
   return ''
 }
 
-function clearViewedAgentAttention(agent) {
-  if (!agent || agent.id !== activeAgentId.value || !agent.requiresAttention || attentionClearPending.has(agent.id)) return
-  attentionClearPending.add(agent.id)
-  v2Api.clearAgentAttention(agent.id)
-    .then(({ agent: updated }) => upsertAgent(updated))
+function clearViewedTaskAttention(task) {
+  if (!task || task.id !== activeTaskId.value || !task.requiresAttention || attentionClearPending.has(task.id)) return
+  attentionClearPending.add(task.id)
+  v2Api.clearTaskAttention(task.id)
+    .then(({ agent }) => upsertTaskAgent(agent))
     .catch((cause) => { error.value = cause.message })
-    .finally(() => attentionClearPending.delete(agent.id))
+    .finally(() => attentionClearPending.delete(task.id))
 }
 
-function applyAgentEvent(agent) {
-  const isActiveAgent = agent?.id === activeAgentId.value
-  const wasRunning = isActiveAgent && (isRunning.value || sending.value)
+function applyTaskAgentEvent(agent) {
+  const isActiveTask = agent?.taskId === activeTaskId.value
+  const wasRunning = isActiveTask && (isRunning.value || sending.value)
   const shouldPinAfterCompletion = wasRunning && agent.lifecycle !== 'running' && followingTimeline.value
-  upsertAgent(agent)
-  if (!isActiveAgent) return
-  clearViewedAgentAttention(agent)
+  const task = upsertTaskAgent(agent)
+  if (!isActiveTask) return
+  clearViewedTaskAttention(task)
   sending.value = agent.lifecycle === 'running'
-  reconcileTerminalAgentTurns(agent)
+  reconcileTerminalTaskTurns(task)
   if (shouldPinAfterCompletion) {
     pinTimelineToBottom(timelineRequestVersion)
     scrollToBottom({ force: true })
   }
 }
 
-function cacheTimeline(agentId = displayedAgentId.value || activeAgentId.value) {
-  if (!agentId || displayedAgentId.value !== agentId || !timelineEpoch.value) return
+function cacheTimeline(agentId = displayedTaskId.value || activeTaskId.value) {
+  if (!agentId || displayedTaskId.value !== agentId || !timelineEpoch.value) return
   const snapshot = {
     agentId,
     rows: [...rows.value],
@@ -209,7 +225,7 @@ function restoreTimelineCache(agentId) {
   turns.value = [...snapshot.turns]
   timelineEpoch.value = snapshot.epoch
   hasOlderHistory.value = snapshot.hasOlderHistory
-  displayedAgentId.value = agentId
+  displayedTaskId.value = agentId
   return true
 }
 
@@ -222,8 +238,8 @@ function resetTimelineSelection() {
   timelineRequestVersion += 1
   releaseTimelineBottomPin()
   positioningTimeline = true
-  activeAgentId.value = ''
-  displayedAgentId.value = ''
+  activeTaskId.value = ''
+  displayedTaskId.value = ''
   agentControl.value = null
   settingsLoading.value = false
   rows.value = []
@@ -241,11 +257,11 @@ function resetTimelineSelection() {
   closeEvents()
 }
 
-function saveAgentDraft(content) {
-  const agentId = activeAgentId.value
+function saveTaskDraft(content) {
+  const agentId = activeTaskId.value
   if (!agentId) return
   const snapshot = Array.isArray(content) ? content.map((item) => ({ ...item })) : []
-  draftsByAgent.set(agentId, snapshot)
+  draftsByTask.set(agentId, snapshot)
   draftContent.value = snapshot
 }
 
@@ -267,23 +283,23 @@ function processIsRunning(entry) {
   })
 }
 
-async function reconcileTerminalAgentTurns(agent) {
-  if (!agent || agent.id !== activeAgentId.value || agent.lifecycle === 'running') return
+async function reconcileTerminalTaskTurns(task) {
+  if (!task || task.id !== activeTaskId.value || task.lifecycle === 'running') return
   if (!turns.value.some((turn) => ['queued', 'running'].includes(turn.status))) return
-  if (turnReconcilePending.has(agent.id)) return
+  if (turnReconcilePending.has(task.id)) return
 
   const requestVersion = timelineRequestVersion
-  turnReconcilePending.add(agent.id)
+  turnReconcilePending.add(task.id)
   try {
-    const result = await v2Api.listTurns(agent.id, 1000)
-    if (requestVersion === timelineRequestVersion && activeAgentId.value === agent.id) {
+    const result = await v2Api.listTaskTurns(task.id, 1000)
+    if (requestVersion === timelineRequestVersion && activeTaskId.value === task.id) {
       turns.value = result.turns
-      cacheTimeline(agent.id)
+      cacheTimeline(task.id)
     }
   } catch (cause) {
-    if (requestVersion === timelineRequestVersion && activeAgentId.value === agent.id) error.value = cause.message
+    if (requestVersion === timelineRequestVersion && activeTaskId.value === task.id) error.value = cause.message
   } finally {
-    turnReconcilePending.delete(agent.id)
+    turnReconcilePending.delete(task.id)
   }
 }
 
@@ -292,12 +308,11 @@ async function loadInitial() {
   try {
     const [projectResult, providerResult] = await Promise.all([v2Api.listProjects(), v2Api.listProviders()])
     const projectTasks = await Promise.all((projectResult.projects || []).map(async (project) => ({ project, ...(await v2Api.listProjectTasks(project.id)) })))
-    workspaces.value = projectTasks.map(({ project }) => ({ id: project.id, cwd: project.repositoryRoot, title: project.displayName, sortOrder: 0, createdAt: project.createdAt, updatedAt: project.updatedAt, lastOpenedAt: project.lastOpenedAt }))
+    projects.value = projectTasks.map(({ project }) => project)
     providers.value = providerResult.providers
-    const agentResults = projectTasks.map(({ project, tasks }) => [project.id, tasks.flatMap((task) => task.agent ? [{ ...task.agent, workspaceId: project.id, taskId: task.id }] : [])])
-    agentsByWorkspace.value = Object.fromEntries(agentResults)
-    expandedWorkspaceIds.value = new Set(workspaces.value.map((workspace) => workspace.id))
-    if (workspaces.value.length) await selectWorkspace(workspaces.value[0].id)
+    tasksByProject.value = Object.fromEntries(projectTasks.map(({ project, tasks }) => [project.id, tasks.map((task) => taskView(task, project.id)).filter(Boolean)]))
+    expandedProjectIds.value = new Set(projects.value.map((project) => project.id))
+    if (projects.value.length) await selectProject(projects.value[0].id)
   } catch (cause) {
     error.value = cause.message
   } finally {
@@ -305,44 +320,63 @@ async function loadInitial() {
   }
 }
 
-async function refreshWorkspaces() {
+async function refreshProjects() {
+  const previousProjectId = activeProjectId.value
+  const previousTaskId = activeTaskId.value
   const result = await v2Api.listProjects()
   const projectTasks = await Promise.all((result.projects || []).map(async (project) => ({ project, ...(await v2Api.listProjectTasks(project.id)) })))
-  workspaces.value = projectTasks.map(({ project }) => ({ id: project.id, cwd: project.repositoryRoot, title: project.displayName, sortOrder: 0, createdAt: project.createdAt, updatedAt: project.updatedAt, lastOpenedAt: project.lastOpenedAt }))
-  const agentResults = projectTasks.map(({ project, tasks }) => [project.id, tasks.flatMap((task) => task.agent ? [{ ...task.agent, workspaceId: project.id, taskId: task.id }] : [])])
-  agentsByWorkspace.value = Object.fromEntries(agentResults)
+  projects.value = projectTasks.map(({ project }) => project)
+  tasksByProject.value = Object.fromEntries(projectTasks.map(({ project, tasks }) => [project.id, tasks.map((task) => taskView(task, project.id)).filter(Boolean)]))
+
+  if (!projects.value.some((project) => project.id === previousProjectId)) {
+    resetTimelineSelection()
+    activeProjectId.value = ''
+    if (projects.value.length) await selectProject(projects.value[0].id)
+    else positioningTimeline = false
+    return
+  }
+
+  activeProjectId.value = previousProjectId
+  if (!previousTaskId || tasksForProject(previousProjectId).some((task) => task.id === previousTaskId)) return
+  clearTimelineCache(previousTaskId)
+  draftsByTask.delete(previousTaskId)
+  resetTimelineSelection()
+  activeProjectId.value = previousProjectId
+  const fallback = tasksForProject(previousProjectId)[0]
+  if (fallback) await selectTask(fallback.id)
+  else positioningTimeline = false
 }
 
-async function selectWorkspace(id, { navigate = false } = {}) {
-  activeWorkspaceId.value = id
-  setWorkspaceExpanded(id)
-  if (!(id in agentsByWorkspace.value)) {
+async function selectProject(id, { navigate = false } = {}) {
+  activeProjectId.value = id
+  setProjectExpanded(id)
+  if (!(id in tasksByProject.value)) {
     const result = await v2Api.listProjectTasks(id)
-    setWorkspaceAgents(id, result.tasks.flatMap((task) => task.agent ? [{ ...task.agent, workspaceId: id, taskId: task.id }] : []))
+    setProjectTasks(id, result.tasks.map((task) => taskView(task, id)).filter(Boolean))
   }
-  const workspaceAgents = agentsForWorkspace(id)
-  if (workspaceAgents.length) await selectAgent(workspaceAgents[0].id, { navigate })
+  const projectTasks = tasksForProject(id)
+  if (projectTasks.length) await selectTask(projectTasks[0].id, { navigate })
   else {
     resetTimelineSelection()
     positioningTimeline = false
   }
 }
 
-async function selectAgent(id, { navigate = false } = {}) {
-  const agent = Object.values(agentsByWorkspace.value).flat().find((item) => item.id === id)
-  if (!agent) return
+async function selectTask(id, { navigate = false } = {}) {
+  const task = Object.values(tasksByProject.value).flat().find((item) => item.id === id)
+  if (!task) return
   if (navigate) enterMobileTimeline()
-  activeWorkspaceId.value = agent.workspaceId
-  setWorkspaceExpanded(agent.workspaceId)
+  activeProjectId.value = task.projectId
+  setProjectExpanded(task.projectId)
   const requestVersion = ++timelineRequestVersion
   releaseTimelineBottomPin()
   positioningTimeline = true
-  activeAgentId.value = id
-  draftContent.value = draftsByAgent.get(id)?.map((item) => ({ ...item })) || []
+  activeTaskId.value = id
+  draftContent.value = draftsByTask.get(id)?.map((item) => ({ ...item })) || []
   const hasCachedTimeline = restoreTimelineCache(id)
   const cachedTimeline = timelineCache.get(id)
   if (!hasCachedTimeline) {
-    displayedAgentId.value = ''
+    displayedTaskId.value = ''
     rows.value = []
     turns.value = []
     timelineEpoch.value = ''
@@ -361,28 +395,27 @@ async function selectAgent(id, { navigate = false } = {}) {
   closeEvents()
   if (cachedTimeline) openEvents(id, cachedTimeline.epoch, cachedTimeline.maxSeq)
   try {
-    const timelineRequest = agent.taskId ? v2Api.getTaskTimeline(agent.taskId) : v2Api.getTimeline(id)
-    const [result, turnResult] = await Promise.all([timelineRequest, v2Api.listTurns(id, 1000)])
-    if (requestVersion !== timelineRequestVersion || activeAgentId.value !== id) return
+    const [result, turnResult] = await Promise.all([v2Api.getTaskTimeline(id), v2Api.listTaskTurns(id, 1000)])
+    if (requestVersion !== timelineRequestVersion || activeTaskId.value !== id) return
     rows.value = result.timeline.rows
     turns.value = turnResult.turns
     timelineEpoch.value = result.timeline.epoch
     hasOlderHistory.value = result.timeline.hasOlder
-    displayedAgentId.value = id
+    displayedTaskId.value = id
     cacheTimeline(id)
     pinTimelineToBottom(requestVersion)
     await scrollToBottom({ force: true })
-    if (requestVersion !== timelineRequestVersion || activeAgentId.value !== id) return
+    if (requestVersion !== timelineRequestVersion || activeTaskId.value !== id) return
     positioningTimeline = false
     closeEvents()
     openEvents(id, result.timeline.epoch, result.timeline.window.maxSeq)
-    loadAgentControl(id, requestVersion)
+    loadTaskControl(id, requestVersion)
     fillTimelineViewport()
   } catch (cause) {
     if (requestVersion === timelineRequestVersion) {
       timelineSyncError.value = cause.message
       if (!hasCachedTimeline) {
-        displayedAgentId.value = ''
+        displayedTaskId.value = ''
         rows.value = []
         turns.value = []
         timelineEpoch.value = ''
@@ -398,18 +431,17 @@ async function selectAgent(id, { navigate = false } = {}) {
   }
 }
 
-async function loadAgentControl(agentId, requestVersion = timelineRequestVersion) {
+async function loadTaskControl(agentId, requestVersion = timelineRequestVersion) {
   try {
-    const result = await v2Api.getAgentControl(agentId)
-    if (requestVersion === timelineRequestVersion && activeAgentId.value === agentId) agentControl.value = result.control
+    const result = await v2Api.getTaskControl(agentId)
+    if (requestVersion === timelineRequestVersion && activeTaskId.value === agentId) agentControl.value = result.control
   } catch (cause) {
-    if (requestVersion === timelineRequestVersion && activeAgentId.value === agentId) error.value = cause.message
+    if (requestVersion === timelineRequestVersion && activeTaskId.value === agentId) error.value = cause.message
   }
 }
 
 async function loadOlderHistory() {
-  const agentId = activeAgentId.value
-  const agent = Object.values(agentsByWorkspace.value).flat().find((item) => item.id === agentId)
+  const agentId = activeTaskId.value
   const epoch = timelineEpoch.value
   const beforeSeq = rows.value[0]?.seq
   if (!agentId || !epoch || !beforeSeq || !hasOlderHistory.value || loadingOlderHistory.value) return
@@ -418,18 +450,14 @@ async function loadOlderHistory() {
   let shouldContinueFilling = false
   loadingOlderHistory.value = true
   try {
-    const result = agent?.taskId ? await v2Api.getTaskTimeline(agent.taskId, {
-      direction: 'before',
-      cursor: `${epoch}:${beforeSeq}`,
-      limit: 300,
-    }) : await v2Api.getTimeline(agentId, {
+    const result = await v2Api.getTaskTimeline(agentId, {
       direction: 'before',
       cursor: `${epoch}:${beforeSeq}`,
       limit: 300,
     })
-    if (requestVersion !== timelineRequestVersion || activeAgentId.value !== agentId) return
+    if (requestVersion !== timelineRequestVersion || activeTaskId.value !== agentId) return
     if (result.timeline.reset || result.timeline.epoch !== epoch) {
-      await selectAgent(agentId)
+      await selectTask(agentId)
       return
     }
     const existingSeqs = new Set(rows.value.map((row) => row.seq))
@@ -496,27 +524,27 @@ function handleTimelineScroll(event) {
 }
 
 async function syncVisibleTimeline() {
-  if (document.visibilityState !== 'visible' || !activeAgentId.value) return
+  if (document.visibilityState !== 'visible' || !activeTaskId.value) return
   const now = Date.now()
   if (now - timelineWakeSyncAt < 2_000) return
   timelineWakeSyncAt = now
-  const agentId = activeAgentId.value
+  const agentId = activeTaskId.value
   const requestVersion = timelineRequestVersion
   timelineSyncing.value = true
   timelineSyncError.value = ''
   try {
     let result
     try {
-      result = await v2Api.syncTimeline(agentId)
+      result = await v2Api.syncTaskTimeline(agentId)
     } catch (cause) {
       const statusCode = Number(cause?.statusCode || 0)
       const retryable = !statusCode || statusCode === 408 || statusCode === 429 || statusCode >= 500
       if (!retryable) throw cause
       await new Promise((resolve) => setTimeout(resolve, TIMELINE_SYNC_RETRY_DELAY))
-      if (requestVersion !== timelineRequestVersion || activeAgentId.value !== agentId || document.visibilityState !== 'visible') return
-      result = await v2Api.syncTimeline(agentId)
+      if (requestVersion !== timelineRequestVersion || activeTaskId.value !== agentId || document.visibilityState !== 'visible') return
+      result = await v2Api.syncTaskTimeline(agentId)
     }
-    if (requestVersion !== timelineRequestVersion || activeAgentId.value !== agentId) return
+    if (requestVersion !== timelineRequestVersion || activeTaskId.value !== agentId) return
     timelineSyncError.value = ''
     const { sync } = result
     if (sync?.turns) {
@@ -524,16 +552,16 @@ async function syncVisibleTimeline() {
       cacheTimeline(agentId)
     }
   } catch (cause) {
-    if (requestVersion === timelineRequestVersion && activeAgentId.value === agentId) timelineSyncError.value = cause.message
+    if (requestVersion === timelineRequestVersion && activeTaskId.value === agentId) timelineSyncError.value = cause.message
   } finally {
-    if (requestVersion === timelineRequestVersion && activeAgentId.value === agentId) timelineSyncing.value = false
+    if (requestVersion === timelineRequestVersion && activeTaskId.value === agentId) timelineSyncing.value = false
   }
 }
 
 function openEvents(agentId, epoch, seq) {
-  eventSource = createEventSource(agentEventsUrl(agentId, seq ? `${epoch}:${seq}` : ''))
+  eventSource = createEventSource(taskEventsUrl(agentId, seq ? `${epoch}:${seq}` : ''))
   eventSource.addEventListener('timeline', (event) => {
-    if (activeAgentId.value !== agentId) return
+    if (activeTaskId.value !== agentId) return
     const { row } = JSON.parse(event.data)
     if (rows.value.some((item) => item.seq === row.seq)) return
     const shouldFollow = isTimelineAtBottom(timelineElement.value)
@@ -545,18 +573,18 @@ function openEvents(agentId, epoch, seq) {
     else hasNewTimelineItems.value = true
   })
   eventSource.addEventListener('agent', (event) => {
-    if (activeAgentId.value !== agentId) return
+    if (activeTaskId.value !== agentId) return
     const { agent } = JSON.parse(event.data)
-    applyAgentEvent(agent)
+    applyTaskAgentEvent(agent)
   })
   eventSource.addEventListener('turn', (event) => {
-    if (activeAgentId.value !== agentId) return
+    if (activeTaskId.value !== agentId) return
     const turn = JSON.parse(event.data).turn
     upsertTurn(turn)
     if (['completed', 'failed', 'canceled'].includes(turn.status)) scheduleInspectorRefresh()
   })
   eventSource.addEventListener('timeline-synced', (event) => {
-    if (activeAgentId.value !== agentId) return
+    if (activeTaskId.value !== agentId) return
     const { sync } = JSON.parse(event.data)
     timelineSyncError.value = ''
     if (!sync?.turns) return
@@ -564,16 +592,16 @@ function openEvents(agentId, epoch, seq) {
     cacheTimeline(agentId)
   })
   eventSource.addEventListener('control', (event) => {
-    if (activeAgentId.value !== agentId) return
+    if (activeTaskId.value !== agentId) return
     agentControl.value = JSON.parse(event.data).control
   })
   eventSource.addEventListener('reset', (event) => {
-    if (activeAgentId.value !== agentId) return
+    if (activeTaskId.value !== agentId) return
     const { timeline } = JSON.parse(event.data)
     rows.value = timeline.rows
     timelineEpoch.value = timeline.epoch
     hasOlderHistory.value = timeline.hasOlder
-    displayedAgentId.value = agentId
+    displayedTaskId.value = agentId
     cacheTimeline(agentId)
     if (followingTimeline.value) scrollToBottom()
     else hasNewTimelineItems.value = true
@@ -589,7 +617,7 @@ function scheduleInspectorRefresh() {
   }, 250)
 }
 
-async function openWorkspacePath(target) {
+async function openProjectPath(target) {
   drawerMode.value = target.intent === 'diff' ? 'diff' : 'files'
   await nextTick()
   workspaceInspector.value?.openPath(target)
@@ -624,7 +652,7 @@ function handleMobileHistoryPop(event) {
 
   if (!isMobile.value) return
   drawerMode.value = null
-  mobileView.value = hasMobileTimelineHistoryState(event.state) && activeAgentId.value
+  mobileView.value = hasMobileTimelineHistoryState(event.state) && activeTaskId.value
     ? 'timeline'
     : 'sidebar'
 }
@@ -636,9 +664,9 @@ function handleGlobalKeydown(event) {
 function openGlobalEvents() {
   globalEventSource?.close()
   globalEventSource = createEventSource(globalEventsUrl())
-  globalEventSource.addEventListener('agent', (event) => {
+  globalEventSource.addEventListener('task', (event) => {
     const { agent } = JSON.parse(event.data)
-    applyAgentEvent(agent)
+    applyTaskAgentEvent(agent)
   })
 }
 
@@ -659,7 +687,7 @@ function cancelDirectorySearch() {
   directorySearchController = null
 }
 
-async function searchDirectorySuggestions(query = workspacePath.value) {
+async function searchDirectorySuggestions(query = projectPath.value) {
   directorySearchController?.abort()
   const controller = new AbortController()
   directorySearchController = controller
@@ -686,7 +714,7 @@ async function searchDirectorySuggestions(query = workspacePath.value) {
 
 function scheduleDirectorySearch() {
   cancelDirectorySearch()
-  if (!workspacePath.value.trim()) {
+  if (!projectPath.value.trim()) {
     directorySuggestions.value = []
     directorySearchError.value = ''
     directorySuggestionsOpen.value = false
@@ -701,14 +729,14 @@ function scheduleDirectorySearch() {
   }, 250)
 }
 
-async function openConversationDialog(workspace = null) {
-  workspacePath.value = workspace?.cwd || ''
+async function openConversationDialog(project = null) {
+  projectPath.value = project?.repositoryRoot || ''
   taskTitle.value = ''
-  executionKind.value = 'worktree'
+  executionKind.value = 'local'
   taskBaseRef.value = 'HEAD'
   taskSlug.value = ''
   taskBranchName.value = ''
-  agentProvider.value = providers.value.some((provider) => provider.id === 'codex')
+  taskProvider.value = providers.value.some((provider) => provider.id === 'codex')
     ? 'codex'
     : providers.value[0]?.id || ''
   directorySuggestions.value = []
@@ -717,7 +745,7 @@ async function openConversationDialog(workspace = null) {
   selectedDirectoryIndex.value = -1
   openManagedDialog('conversation')
   await nextTick()
-  workspacePathInput.value?.focus()
+  projectPathInput.value?.focus()
 }
 
 async function openImportDialog() {
@@ -792,17 +820,16 @@ async function importSession(session) {
     const result = await v2Api.importSession({
       providerId: session.providerId,
       providerHandleId: session.providerHandleId,
-      cwd: session.cwd || activeWorkspace.value?.cwd || '',
+      cwd: session.cwd || activeProject.value?.repositoryRoot || '',
       title: session.title,
     })
-    const agent = result.agent
-    const workspace = workspaces.value.find((item) => item.cwd === result.workspace?.cwd) || result.workspace || workspaces.value.find((item) => item.id === agent.workspaceId)
-    if (workspace && result.workspace && workspace.id !== result.workspace.id) agent.workspaceId = workspace.id
-    if (workspace && !workspaces.value.some((item) => item.id === workspace.id)) workspaces.value.push(workspace)
-    upsertAgent(agent)
+    const project = result.project
+    if (project && !projects.value.some((item) => item.id === project.id)) projects.value.push(project)
+    const task = taskView({ ...result.task, environment: result.environment, agent: result.agent }, project.id)
+    setProjectTasks(project.id, [task, ...tasksForProject(project.id).filter((item) => item.id !== task.id)])
     await closeDialog()
-    setWorkspaceExpanded(agent.workspaceId)
-    await selectAgent(agent.id, { navigate: true })
+    setProjectExpanded(project.id)
+    await selectTask(task.id, { navigate: true })
   } catch (cause) {
     importError.value = cause.message
   } finally {
@@ -853,10 +880,10 @@ function closeDialog() {
 }
 
 function selectDirectory(directory) {
-  workspacePath.value = directory.path
+  projectPath.value = directory.path
   selectedDirectoryIndex.value = -1
   directorySuggestionsOpen.value = false
-  workspacePathInput.value?.focus()
+  projectPathInput.value?.focus()
 }
 
 async function revealSelectedDirectory() {
@@ -901,19 +928,18 @@ async function createConversation() {
   creating.value = true
   error.value = ''
   try {
-    const projects = (await v2Api.listProjects()).projects || []
-    let project = projects.find((item) => item.repositoryRoot.toLowerCase() === workspacePath.value.trim().toLowerCase())
-    if (!project) project = (await v2Api.createProject({ repositoryRoot: workspacePath.value })).project
+    const availableProjects = (await v2Api.listProjects()).projects || []
+    let project = availableProjects.find((item) => item.repositoryRoot.toLowerCase() === projectPath.value.trim().toLowerCase())
+    if (!project) project = (await v2Api.createProject({ repositoryRoot: projectPath.value })).project
     const slug = taskSlug.value || taskTitle.value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'task'
-    const result = await v2Api.createTask(project.id, { title: taskTitle.value, providerId: agentProvider.value, executionKind: executionKind.value, baseRef: taskBaseRef.value, branchName: taskBranchName.value || `codex/${slug}`, slug })
-    const { workspace, agent: rawAgent } = result
-    const agent = { ...rawAgent, workspaceId: project.id, taskId: result.task.id }
-    if (!workspaces.value.some((item) => item.id === project.id)) workspaces.value.push({ id: project.id, cwd: project.repositoryRoot, title: project.displayName, sortOrder: 0, createdAt: project.createdAt, updatedAt: project.updatedAt, lastOpenedAt: project.lastOpenedAt })
-    upsertAgent(agent)
-    workspacePath.value = ''
+    const result = await v2Api.createTask(project.id, { title: taskTitle.value, providerId: taskProvider.value, executionKind: executionKind.value, baseRef: taskBaseRef.value, branchName: taskBranchName.value || `codex/${slug}`, slug })
+    const task = taskView({ ...result.task, environment: result.environment, agent: result.agent }, project.id)
+    if (!projects.value.some((item) => item.id === project.id)) projects.value.push(project)
+    setProjectTasks(project.id, [task, ...tasksForProject(project.id).filter((item) => item.id !== task.id)])
+    projectPath.value = ''
     await closeDialog()
-    setWorkspaceExpanded(project.id)
-    await selectAgent(agent.id, { navigate: true })
+    setProjectExpanded(project.id)
+    await selectTask(task.id, { navigate: true })
   } catch (cause) {
     error.value = cause.message
   } finally {
@@ -939,63 +965,61 @@ function acceptConfirmation() {
   resolve?.(true)
 }
 
-async function removeAgent(agent) {
+async function removeTask(task) {
   if (!await requestConfirmation({
-    title: `删除 Agent“${agent.title}”？`,
+    title: `删除会话“${task.title}”？`,
     description: '它的 Timeline 数据也会一并删除。',
     confirmText: '删除',
     danger: true,
   })) return
-  const workspaceAgents = agentsForWorkspace(agent.workspaceId)
-  const removedIndex = workspaceAgents.findIndex((item) => item.id === agent.id)
+  const projectTasks = tasksForProject(task.projectId)
+  const removedIndex = projectTasks.findIndex((item) => item.id === task.id)
   try {
-    await v2Api.deleteAgent(agent.id)
-    clearTimelineCache(agent.id)
-    draftsByAgent.delete(agent.id)
-    const remainingAgents = workspaceAgents.filter((item) => item.id !== agent.id)
-    setWorkspaceAgents(agent.workspaceId, remainingAgents)
-    if (activeAgentId.value !== agent.id) return
+    await v2Api.deleteTask(task.id)
+    clearTimelineCache(task.id)
+    draftsByTask.delete(task.id)
+    const remainingTasks = projectTasks.filter((item) => item.id !== task.id)
+    setProjectTasks(task.projectId, remainingTasks)
+    if (activeTaskId.value !== task.id) return
     resetTimelineSelection()
-    const fallback = remainingAgents[Math.min(removedIndex, remainingAgents.length - 1)]
-    if (fallback) await selectAgent(fallback.id)
+    const fallback = remainingTasks[Math.min(removedIndex, remainingTasks.length - 1)]
+    if (fallback) await selectTask(fallback.id)
     else positioningTimeline = false
   } catch (cause) {
     error.value = cause.message
   }
 }
 
-async function removeWorkspace(workspace) {
+async function removeProject(project) {
   if (!await requestConfirmation({
-    title: `移除工作区“${workspace.title}”？`,
-    description: 'Agent 和 Timeline 数据会一并删除。',
+    title: `移除工作区“${project.displayName}”？`,
+    description: '会话和 Timeline 数据会一并删除，磁盘中的 Worktree 会保留。',
     confirmText: '移除',
     danger: true,
   })) return
-  await v2Api.deleteProject(workspace.id)
-  agentsForWorkspace(workspace.id).forEach((agent) => {
-    clearTimelineCache(agent.id)
-    draftsByAgent.delete(agent.id)
+  await v2Api.deleteProject(project.id)
+  tasksForProject(project.id).forEach((task) => {
+    clearTimelineCache(task.id)
+    draftsByTask.delete(task.id)
   })
-  workspaces.value = workspaces.value.filter((item) => item.id !== workspace.id)
-  const nextAgentsByWorkspace = { ...agentsByWorkspace.value }
-  delete nextAgentsByWorkspace[workspace.id]
-  agentsByWorkspace.value = nextAgentsByWorkspace
-  setWorkspaceExpanded(workspace.id, false)
-  if (activeWorkspaceId.value !== workspace.id) return
+  projects.value = projects.value.filter((item) => item.id !== project.id)
+  const nextTasksByProject = { ...tasksByProject.value }
+  delete nextTasksByProject[project.id]
+  tasksByProject.value = nextTasksByProject
+  setProjectExpanded(project.id, false)
+  if (activeProjectId.value !== project.id) return
   resetTimelineSelection()
-  activeWorkspaceId.value = ''
-  if (workspaces.value.length) await selectWorkspace(workspaces.value[0].id)
+  activeProjectId.value = ''
+  if (projects.value.length) await selectProject(projects.value[0].id)
   else positioningTimeline = false
 }
 
 async function submitPrompt(content) {
-  if (!content.length || !activeAgentId.value || isRunning.value) return
+  if (!content.length || !activeTaskId.value || isRunning.value) return
   sending.value = true
   error.value = ''
   try {
-    const result = activeAgent.value?.taskId
-      ? await v2Api.startTaskTurn(activeAgent.value.taskId, content, crypto.randomUUID())
-      : await v2Api.startTurn(activeAgentId.value, content, crypto.randomUUID())
+    const result = await v2Api.startTaskTurn(activeTaskId.value, content, crypto.randomUUID())
     sendBlockedReason.value = ''
     upsertTurn(result.turn)
   } catch (cause) {
@@ -1011,12 +1035,12 @@ async function submitPrompt(content) {
 }
 
 async function updateAgentSettings(input) {
-  if (!activeAgentId.value || settingsLoading.value || isRunning.value) return
+  if (!activeTaskId.value || settingsLoading.value || isRunning.value) return
   settingsLoading.value = true
   error.value = ''
   try {
-    const result = await v2Api.updateAgentSettings(activeAgentId.value, input)
-    upsertAgent(result.agent)
+    const result = await v2Api.updateTaskSettings(activeTaskId.value, input)
+    upsertTaskAgent(result.agent)
     agentControl.value = result.control
   } catch (cause) {
     error.value = cause.message
@@ -1107,7 +1131,7 @@ onBeforeUnmount(() => {
       <div class="shrink-0 px-2 pb-2 pt-2">
         <button class="sidebar-primary-action flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs font-medium" @click="openConversationDialog()">
           <Plus class="h-4 w-4 shrink-0" />
-          <span>新对话</span>
+          <span>新会话</span>
         </button>
         <button class="sidebar-secondary-action mt-1 flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs" @click="openImportDialog">
           <FolderOpen class="h-3.5 w-3.5 shrink-0" />
@@ -1116,41 +1140,41 @@ onBeforeUnmount(() => {
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <div class="theme-muted-text flex h-8 items-center px-2 text-[10px] font-medium uppercase tracking-wide">工作区</div>
-        <div v-for="workspace in workspaces" :key="workspace.id" class="workspace-group mb-2">
-          <div class="workspace-heading group flex h-9 min-w-0 cursor-pointer items-center rounded-sm" :class="workspace.id === activeWorkspaceId ? 'workspace-active' : ''" @click="handleWorkspaceRowClick(workspace)">
+        <div v-for="project in projects" :key="project.id" class="workspace-group mb-2">
+          <div class="workspace-heading group flex h-9 min-w-0 cursor-pointer items-center rounded-sm" :class="project.id === activeProjectId ? 'workspace-active' : ''" @click="handleProjectRowClick(project)">
             <button
               class="workspace-toggle round-icon-button flex h-7 w-7 shrink-0 items-center justify-center"
-              :title="expandedWorkspaceIds.has(workspace.id) ? '收起工作区' : '展开工作区'"
-              :aria-label="expandedWorkspaceIds.has(workspace.id) ? '收起工作区' : '展开工作区'"
-              :aria-expanded="expandedWorkspaceIds.has(workspace.id)"
-              @click.stop="toggleWorkspace(workspace.id)"
+              :title="expandedProjectIds.has(project.id) ? '收起工作区' : '展开工作区'"
+              :aria-label="expandedProjectIds.has(project.id) ? '收起工作区' : '展开工作区'"
+              :aria-expanded="expandedProjectIds.has(project.id)"
+              @click.stop="toggleProject(project.id)"
             >
-              <FolderOpen v-if="expandedWorkspaceIds.has(workspace.id)" class="h-4 w-4" />
+              <FolderOpen v-if="expandedProjectIds.has(project.id)" class="h-4 w-4" />
               <Folder v-else class="h-4 w-4" />
             </button>
-            <button class="flex min-w-0 flex-1 items-center gap-2 py-1 text-left" :title="workspace.cwd" @click.stop="handleWorkspaceRowClick(workspace)">
-              <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ workspace.title }}</span>
+            <button class="flex min-w-0 flex-1 items-center gap-2 py-1 text-left" :title="project.repositoryRoot" @click.stop="handleProjectRowClick(project)">
+              <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ project.displayName }}</span>
             </button>
-            <button class="workspace-action round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`在 ${workspace.title} 中新建对话`" @click.stop="openConversationDialog(workspace)"><Plus class="h-3.5 w-3.5" /></button>
-            <button class="workspace-action workspace-delete round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`移除 ${workspace.title}`" @click.stop="removeWorkspace(workspace)"><Trash2 class="h-3.5 w-3.5" /></button>
+            <button class="workspace-action round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`在 ${project.displayName} 中新建会话`" @click.stop="openConversationDialog(project)"><Plus class="h-3.5 w-3.5" /></button>
+            <button class="workspace-action workspace-delete round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`移除 ${project.displayName}`" @click.stop="removeProject(project)"><Trash2 class="h-3.5 w-3.5" /></button>
           </div>
           <Transition name="workspace-agents">
-            <div v-if="expandedWorkspaceIds.has(workspace.id)" class="workspace-agents-wrapper">
+            <div v-if="expandedProjectIds.has(project.id)" class="workspace-agents-wrapper">
               <div class="agent-list ml-6">
-                <div v-for="agent in agentsForWorkspace(workspace.id)" :key="agent.id" class="agent-row group flex min-w-0 items-center rounded-sm" :class="agent.id === activeAgentId ? 'row-active' : ''">
-                  <button class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${agent.title} · ${providerLabel(agent.providerId)}`" @click="selectAgent(agent.id, { navigate: true })">
-                    <span v-if="agentStatusClass(agent)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(agent)" />
-                    <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="agent.title" />
-                    <LoaderCircle v-if="agent.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
+                <div v-for="task in tasksForProject(project.id)" :key="task.id" class="agent-row group flex min-w-0 items-center rounded-sm" :class="task.id === activeTaskId ? 'row-active' : ''">
+                  <button class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })">
+                    <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
+                    <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="task.title" />
+                    <LoaderCircle v-if="task.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
                   </button>
-                  <button class="agent-delete round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`删除 ${agent.title}`" @click="removeAgent(agent)"><X class="h-3 w-3" /></button>
+                  <button class="agent-delete round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`删除 ${task.title}`" @click="removeTask(task)"><X class="h-3 w-3" /></button>
                 </div>
-                <button v-if="!agentsForWorkspace(workspace.id).length" class="theme-muted-text flex h-8 w-full items-center gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(workspace)"><Plus class="h-3 w-3" />新对话</button>
+                <button v-if="!tasksForProject(project.id).length" class="theme-muted-text flex h-8 w-full items-center gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</button>
               </div>
             </div>
           </Transition>
         </div>
-        <div v-if="!workspaces.length && !loading" class="theme-muted-text px-3 py-8 text-center text-xs">还没有工作区</div>
+        <div v-if="!projects.length && !loading" class="theme-muted-text px-3 py-8 text-center text-xs">还没有工作区</div>
       </div>
       <footer class="border-t p-2">
         <button class="settings-entry flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs font-medium" @click="openManagedDialog('settings')">
@@ -1170,25 +1194,25 @@ onBeforeUnmount(() => {
         <button class="mobile-back-button quiet-icon-button h-8 w-8" title="返回项目列表" aria-label="返回项目列表" @click="showMobileSidebar">
           <ArrowLeft class="h-4 w-4" />
         </button>
-        <div v-if="activeWorkspace" class="mobile-workspace-path min-w-0 flex-1" :title="activeWorkspace.cwd">
-          <span class="block truncate text-sm font-medium">{{ activeWorkspaceDirectoryName }}</span>
+        <div v-if="activeProject" class="mobile-workspace-path min-w-0 flex-1" :title="activeProject.repositoryRoot">
+          <span class="block truncate text-sm font-medium">{{ activeProjectDirectoryName }}</span>
         </div>
         <div class="ml-auto flex shrink-0 items-center gap-2">
           <div v-if="timelineSyncing" class="timeline-sync-status theme-muted-text flex h-8 w-8 items-center justify-center" title="正在同步 Timeline" aria-label="正在同步 Timeline"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
-          <div v-if="activeAgent" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
-          <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :title="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></button>
-           <button v-if="activeWorkspace" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :title="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></button>
-           <button v-if="activeAgent?.taskId" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'task-details' ? 'is-active' : ''" title="任务详情" :aria-pressed="drawerMode === 'task-details'" @click="toggleDrawer('task-details')"><Info class="h-4 w-4" /></button>
+          <div v-if="activeTask" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
+          <button v-if="activeTask" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :title="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></button>
+           <button v-if="activeTask" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :title="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></button>
+           <button v-if="activeTask" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'task-details' ? 'is-active' : ''" title="任务详情" :aria-pressed="drawerMode === 'task-details'" @click="toggleDrawer('task-details')"><Info class="h-4 w-4" /></button>
         </div>
       </header>
 
       <div class="relative min-h-0 flex-1">
         <div ref="timelineElement" class="timeline h-full overflow-y-auto" @scroll.passive="handleTimelineScroll">
-          <div v-if="timelineSyncError && !timelineHasContent" class="flex h-full items-center justify-center p-8 text-center"><div class="max-w-sm"><p class="error-row rounded-sm border px-3 py-2 text-left text-xs">Timeline 同步失败：{{ timelineSyncError }}</p><button class="tool-button mt-3 h-8 px-3 text-xs" @click="selectAgent(activeAgentId)">重试</button></div></div>
-          <div v-else-if="!activeAgent || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeAgent ? '开始一段新的协作' : '新建一条对话' }}</p><p v-if="activeAgent" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
+          <div v-if="timelineSyncError && !timelineHasContent" class="flex h-full items-center justify-center p-8 text-center"><div class="max-w-sm"><p class="error-row rounded-sm border px-3 py-2 text-left text-xs">Timeline 同步失败：{{ timelineSyncError }}</p><button class="tool-button mt-3 h-8 px-3 text-xs" @click="selectTask(activeTaskId)">重试</button></div></div>
+          <div v-else-if="!activeTask || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeTask ? '开始一段新的协作' : '新建一条会话' }}</p><p v-if="activeTask" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
-              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" :workspace-cwd="activeWorkspace?.cwd" @rendered="handleMarkdownRendered" @open-workspace-path="openWorkspacePath" />
+              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" :workspace-cwd="activeTask?.environment?.cwd" @rendered="handleMarkdownRendered" @open-workspace-path="openProjectPath" />
               <article v-else-if="entry.item?.type === 'error'" class="error-row mb-5 ml-7 rounded-sm border px-3 py-2 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.message }}</article>
               <article v-else-if="entry.item?.type === 'system_notice'" class="theme-muted-text mb-5 ml-7 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.text }}</article>
             </template>
@@ -1206,7 +1230,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-          <div v-if="timelineSyncError && timelineHasContent" class="status-float status-float-pill status-float-error timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 gap-2" role="alert"><CircleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>同步失败</span><button class="font-medium" @click="selectAgent(activeAgentId)">重试</button></div>
+          <div v-if="timelineSyncError && timelineHasContent" class="status-float status-float-pill status-float-error timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 gap-2" role="alert"><CircleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>同步失败</span><button class="font-medium" @click="selectTask(activeTaskId)">重试</button></div>
         </div>
         <div v-if="timelineLoading && !loading" class="timeline-loading-overlay absolute inset-0 z-10 flex items-start justify-center pt-16" role="status" aria-label="加载中">
           <div class="status-float status-float-pill timeline-loading-indicator gap-2">
@@ -1228,16 +1252,15 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <footer v-if="activeAgent" class="composer-wrap shrink-0 p-3 sm:p-4">
+      <footer v-if="activeTask" class="composer-wrap shrink-0 p-3 sm:p-4">
         <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
         <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex max-w-3xl items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs">
           <span>{{ sendBlockedReason }}</span>
           <button type="button" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</button>
         </div>
         <AgentComposer
-          :key="activeAgentId"
-          :workspace-id="activeWorkspaceId"
-          :task-id="activeAgent?.taskId || ''"
+          :key="activeTaskId"
+          :task-id="activeTask.id"
           :running="isRunning"
           :sending="sending"
           :blocked-reason="sendBlockedReason"
@@ -1246,31 +1269,30 @@ onBeforeUnmount(() => {
           :draft-content="draftContent"
           :on-submit="submitPrompt"
           :on-settings-change="updateAgentSettings"
-          @cancel="v2Api.cancel(activeAgentId)"
-          @draft-change="saveAgentDraft"
+          @cancel="v2Api.cancelTask(activeTaskId)"
+          @draft-change="saveTaskDraft"
         />
       </footer>
     </main>
 
     <Transition name="workspace-drawer">
       <WorkspaceInspector
-        v-if="activeWorkspace && (drawerMode === 'files' || drawerMode === 'diff')"
+        v-if="activeTask && (drawerMode === 'files' || drawerMode === 'diff')"
         v-show="drawerMode"
         ref="workspaceInspector"
-        :workspace-id="activeWorkspace.id"
-        :task-id="activeAgent?.taskId || ''"
-        :workspace-cwd="activeWorkspace.cwd"
+        :task-id="activeTask.id"
+        :workspace-cwd="activeTask.environment?.cwd || activeProject.repositoryRoot"
         :is-dark="isDark"
         :mode="drawerMode || 'files'"
         @close="drawerMode = null"
       />
     </Transition>
-    <Transition name="task-details-drawer">
+    <Transition name="workspace-drawer">
       <TaskDetailsDrawer
-        v-if="activeAgent?.taskId && drawerMode === 'task-details'"
-        :task-id="activeAgent.taskId"
+        v-if="activeTask && drawerMode === 'task-details'"
+        :task-id="activeTask.id"
         @close="drawerMode = null"
-        @changed="refreshWorkspaces"
+        @changed="refreshProjects"
       />
     </Transition>
 
@@ -1283,12 +1305,12 @@ onBeforeUnmount(() => {
       body-class="flex min-h-0 flex-1 flex-col"
       @close="closeDialog"
     >
-      <template #title><h2 class="text-sm font-semibold">新对话</h2></template>
+      <template #title><h2 class="text-sm font-semibold">新会话</h2></template>
       <form class="flex min-h-0 flex-1 flex-col px-4 pb-4" @submit.prevent="createConversation">
         <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
         <DirectorySearchInput
-          ref="workspacePathInput"
-          v-model="workspacePath"
+          ref="projectPathInput"
+          v-model="projectPath"
           class="mt-1"
           :loading="directorySearchLoading"
           :open="directorySuggestionsOpen"
@@ -1303,7 +1325,7 @@ onBeforeUnmount(() => {
         />
         <div class="shrink-0">
           <label class="theme-muted-text mt-4 block text-xs" for="conversation-provider">Provider</label>
-          <select id="conversation-provider" v-model="agentProvider" class="tool-input mt-1" :disabled="creating">
+          <select id="conversation-provider" v-model="taskProvider" class="tool-input mt-1" :disabled="creating">
             <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
           </select>
           <label class="theme-muted-text mt-4 block text-xs" for="task-title">任务标题</label>
@@ -1324,7 +1346,7 @@ onBeforeUnmount(() => {
             <input v-model="taskSlug" class="tool-input mt-2" placeholder="Worktree 名称，例如 fix-login" :disabled="creating" />
           </div>
         </div>
-        <div class="mt-4 flex shrink-0 justify-end"><button class="tool-button tool-button-primary h-9 gap-2 px-4 text-xs" :disabled="!workspacePath.trim() || !agentProvider || creating"><LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />创建对话</button></div>
+        <div class="mt-4 flex shrink-0 justify-end"><button class="tool-button tool-button-primary h-9 gap-2 px-4 text-xs" :disabled="!projectPath.trim() || !taskProvider || creating"><LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />创建会话</button></div>
       </form>
     </DialogShell>
 
@@ -1395,8 +1417,7 @@ onBeforeUnmount(() => {
 .skeleton-line { border-radius: 2px; background: var(--theme-appPanelInset); opacity: 0.72; animation: skeleton-pulse 1.2s ease-in-out infinite; }
 @keyframes skeleton-pulse { 0%, 100% { opacity: 0.48; } 50% { opacity: 0.88; } }
 .timeline-loading-overlay { background: color-mix(in srgb, var(--theme-appPanel) 84%, transparent); }
-.v2-shell :deep(.workspace-inspector) { bottom: 0; left: 240px; position: absolute; right: 0; top: 3.5rem; z-index: 20; }
-.v2-shell :deep(.task-details-drawer) { bottom: 0; position: absolute; right: 0; top: 3.5rem; width: min(100%, 28rem); z-index: 21; }
+.v2-shell :deep(.workspace-inspector), .v2-shell :deep(.task-details-drawer) { bottom: 0; left: 240px; position: absolute; right: 0; top: 3.5rem; z-index: 20; }
 .workspace-sidebar, header, footer, .composer-wrap { border-color: var(--theme-borderDefault); }
 .brand-mark { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
 .sidebar-primary-action { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
@@ -1463,9 +1484,6 @@ onBeforeUnmount(() => {
 .workspace-drawer-enter-active { transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease; }
 .workspace-drawer-leave-active { transition: transform 180ms ease-in, opacity 150ms ease; }
 .workspace-drawer-enter-from, .workspace-drawer-leave-to { transform: translateX(100%); opacity: 0.35; }
-.task-details-drawer-enter-active { transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease; }
-.task-details-drawer-leave-active { transition: transform 180ms ease-in, opacity 150ms ease; }
-.task-details-drawer-enter-from, .task-details-drawer-leave-to { transform: translateX(100%); opacity: 0.35; }
 @media (prefers-reduced-motion: reduce) {
   .sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .drawer-trigger,
   .workspace-sidebar, .timeline-pane, .workspace-drawer-enter-active, .workspace-drawer-leave-active,
@@ -1478,7 +1496,7 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 900px) {
   .v2-shell { grid-template-columns: 200px minmax(0, 1fr); }
-  .v2-shell :deep(.workspace-inspector) { left: 200px; }
+  .v2-shell :deep(.workspace-inspector), .v2-shell :deep(.task-details-drawer) { left: 200px; }
 }
 @media (max-width: 720px) {
   .v2-loading-skeleton { display: block; }
@@ -1499,8 +1517,7 @@ onBeforeUnmount(() => {
   .mobile-panel-active { transform: translateX(0); opacity: 1; pointer-events: auto; }
   .mobile-back-button { display: inline-flex; }
   .mobile-workspace-path { display: block; }
-  .v2-shell :deep(.workspace-inspector) { left: 0; }
-  .v2-shell :deep(.task-details-drawer) { left: 0; width: 100%; }
+  .v2-shell :deep(.workspace-inspector), .v2-shell :deep(.task-details-drawer) { left: 0; }
   .workspace-action, .agent-delete { opacity: 1; }
   .workspace-delete { display: none; }
   .status-text { display: none; }

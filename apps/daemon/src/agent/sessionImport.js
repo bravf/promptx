@@ -63,20 +63,21 @@ export class SessionImportService {
     }
   }
 
-  loadProvider(provider, workspaceList) {
+  loadProvider(provider, projectList) {
     const now = Date.now()
     const cached = this.cache.get(provider.id)
     if (cached && cached.expiresAt > now) return cached.promise
     const loader = this.historyLoaders[provider.id]
-    const promise = Promise.resolve().then(() => loader ? loader(workspaceList) : [])
+    const directories = projectList.map((project) => ({ cwd: project.repositoryRoot }))
+    const promise = Promise.resolve().then(() => loader ? loader(directories) : [])
     this.cache.set(provider.id, { expiresAt: now + this.cacheTtlMs, promise })
     return promise
   }
 
   async list({ providerId = '', query = '', limit = 100 } = {}) {
     const providers = providerId ? [this.providerRegistry.get(providerId)] : this.providerRegistry.list()
-    const workspaceList = this.repository.listWorkspaces()
-    const tasks = providers.map((provider) => this.loadProvider(provider, workspaceList))
+    const projectList = this.repository.listProjects()
+    const tasks = providers.map((provider) => this.loadProvider(provider, projectList))
     const results = await Promise.allSettled(tasks)
     const imported = new Set(this.repository.listAllAgents(true).map((agent) => {
       const handle = agent.nativeHandle || {}
@@ -109,37 +110,39 @@ export class SessionImportService {
     if (!session) throw new Error('找不到该 Provider 会话，可能已被删除或暂时不可用。')
     const requestedCwd = String(cwd || session.cwd || '').trim()
     if (!requestedCwd) throw new Error('无法确定该会话的工作目录，请先在 PromptX 中创建对应项目。')
-    const existingWorkspaceIds = new Set(this.repository.listWorkspaces().map((item) => item.id))
-    const workspace = fs.existsSync(requestedCwd)
-      ? this.repository.createWorkspace({ cwd: requestedCwd })
-      : this.repository.createWorkspaceRecord({ cwd: requestedCwd, title: String(title || session?.title || `${provider.label} 会话`).slice(0, 120) })
-    const workspaceCreated = !existingWorkspaceIds.has(workspace.id)
     let project = null
+    let projectCreated = false
     try {
       const root = await repositoryRoot(requestedCwd)
-      project = this.repository.getProjectByRoot(root) || this.repository.createProject({ repositoryRoot: root, displayName: root.split(/[\\/]/).pop(), defaultBranch: await defaultBranch(root) })
+      project = this.repository.getProjectByRoot(root)
+      if (!project) {
+        project = this.repository.createProject({ repositoryRoot: root, displayName: root.split(/[\\/]/).pop(), defaultBranch: await defaultBranch(root) })
+        projectCreated = true
+      }
     } catch {
-      project = this.repository.createProject({ repositoryRoot: requestedCwd, displayName: requestedCwd.split(/[\\/]/).pop() })
+      project = this.repository.getProjectByRoot(requestedCwd)
+      if (!project) {
+        project = this.repository.createProject({ repositoryRoot: requestedCwd, displayName: requestedCwd.split(/[\\/]/).pop() })
+        projectCreated = true
+      }
     }
-    const environment = this.repository.getEnvironmentByCwd(requestedCwd) || this.repository.createEnvironment({ kind: 'local', cwd: requestedCwd, repositoryRoot: project.repositoryRoot, ownership: 'external', status: fs.existsSync(requestedCwd) ? 'ready' : 'unavailable' })
+    const environment = this.repository.createEnvironment({ kind: 'local', cwd: requestedCwd, repositoryRoot: project.repositoryRoot, ownership: 'external', status: fs.existsSync(requestedCwd) ? 'ready' : 'unavailable' })
     const task = this.repository.createTask({ projectId: project.id, environmentId: environment.id, providerId: provider.id, title: String(title || session?.title || `${provider.label} 会话`).slice(0, 120) })
     const nativeHandle = provider.id === 'codex' ? { threadId: providerHandleId } : { sessionId: providerHandleId }
-    let agent = this.repository.createAgent(workspace.id, {
-      providerId: provider.id,
-      taskId: task.id,
-      title: String(title || session?.title || `${provider.label} 会话`).slice(0, 120),
-      nativeHandle,
-    }, provider.capabilities)
+    let agent = null
     try {
+      agent = this.repository.createAgent(task.id, {
+        providerId: provider.id,
+        nativeHandle,
+      }, provider.capabilities)
       agent = this.repository.updateAgent(agent.id, { lifecycle: 'ready' })
       if (environment.status !== 'unavailable') await this.agentManager.syncTimeline(agent.id)
-      return { agent: this.repository.getAgent(agent.id), imported: true, workspace: this.repository.getWorkspace(workspace.id) }
+      return { agent: this.repository.getAgent(agent.id), imported: true, project, task: this.repository.getTask(task.id), environment }
     } catch (error) {
-      this.agentManager.close(agent.id)
-      this.repository.deleteAgent(agent.id)
-      if (workspaceCreated && this.repository.listAgents(workspace.id, true).length === 0) {
-        this.repository.deleteWorkspace(workspace.id)
-      }
+      if (agent) this.agentManager.close(agent.id)
+      this.repository.deleteTask(task.id)
+      this.repository.deleteEnvironment(environment.id)
+      if (projectCreated && this.repository.listTasks(project.id, true).length === 0) this.repository.deleteProject(project.id)
       throw error
     }
   }

@@ -38,20 +38,20 @@ export class TimelineSyncCoordinator {
     return result
   }
 
-  publishSynced(agentId, result = {}) {
+  publishSynced(agentId, taskId, result = {}) {
     const sync = {
       status: 'synced',
       changed: false,
       ...result,
-      turns: this.repository.listTurns(agentId, 1000),
+      turns: this.repository.listTurns(taskId, 1000),
     }
     this.eventHub.publish(agentId, { type: 'timeline-synced', sync })
     return sync
   }
 
   async runOnce(agent) {
-    const beforeState = this.repository.getTimelineState(agent.id)
-    const syncState = this.repository.getTimelineSyncState(agent.id)
+    const beforeState = this.repository.getTimelineState(agent.taskId)
+    const syncState = this.repository.getTimelineSyncState(agent.taskId)
     const runtime = this.getRuntime(agent)
     if (typeof runtime.readHistorySnapshot !== 'function') {
       return { status: 'unsupported', changed: false }
@@ -60,7 +60,7 @@ export class TimelineSyncCoordinator {
     if (!snapshot || snapshot.status === 'unsupported') return { status: 'unsupported', changed: false }
     if (snapshot.status === 'unavailable') return { status: 'unavailable', changed: false }
     if (snapshot.status === 'unchanged') {
-      return this.publishSynced(agent.id, { syncedAt: syncState?.syncedAt })
+      return this.publishSynced(agent.id, agent.taskId, { syncedAt: syncState?.syncedAt })
     }
     const expectedSourceIds = new Set([
       ...Object.values(agent.nativeHandle || {}).filter((value) => typeof value === 'string'),
@@ -73,16 +73,16 @@ export class TimelineSyncCoordinator {
 
     const plan = reconcileHistory({
       snapshot,
-      localRows: this.repository.listTimelineRows(agent.id),
-      localTurns: this.repository.listTurns(agent.id, 10000),
+      localRows: this.repository.listTimelineRows(agent.taskId),
+      localTurns: this.repository.listTurns(agent.taskId, 10000),
       syncState,
       activeTurnId: this.getActiveTurnId(agent.id),
     })
     if (plan.mode === 'noop') {
-      return this.publishSynced(agent.id, { syncedAt: syncState?.syncedAt })
+      return this.publishSynced(agent.id, agent.taskId, { syncedAt: syncState?.syncedAt })
     }
 
-    const applied = this.repository.applyTimelineSync(agent.id, {
+    const applied = this.repository.applyTimelineSync(agent.taskId, {
       ...plan,
       providerId: agent.providerId,
       sourceId: snapshot.sourceId,
@@ -91,14 +91,14 @@ export class TimelineSyncCoordinator {
     if (applied.mode === 'replace') {
       this.eventHub.publish(agent.id, {
         type: 'reset',
-        timeline: this.timelineStore.fetch(agent.id, { direction: 'tail', limit: 300 }),
+        timeline: this.timelineStore.fetch(agent.taskId, { direction: 'tail', limit: 300 }),
       })
     } else {
       for (const row of applied.rows) {
         this.eventHub.publish(agent.id, { type: 'timeline', epoch: applied.epoch, row })
       }
     }
-    return this.publishSynced(agent.id, {
+    return this.publishSynced(agent.id, agent.taskId, {
       changed: plan.changed,
       mode: applied.mode,
       syncedAt: applied.syncedAt,

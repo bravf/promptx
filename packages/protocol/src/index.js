@@ -1,6 +1,5 @@
 export * from './agent.js'
 export * from './timeline.js'
-export * from './workspace.js'
 export * from './workspaceInspection.js'
 export * from './project.js'
 export * from './task.js'

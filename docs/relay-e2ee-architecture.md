@@ -200,7 +200,7 @@ client(serverId, connectionId) <-> daemon(serverId, connectionId)
 Web 客户端不直接向公网 Relay 发业务 HTTP 请求，而是把 HTTP 语义封装后加密：
 
 ```json
-{ "type": "request.start", "requestId": "req_xxx", "method": "POST", "path": "/api/v2/agents/a/turns", "headers": {} }
+{ "type": "request.start", "requestId": "req_xxx", "method": "POST", "path": "/api/v2/tasks/t/turns", "headers": {} }
 { "type": "request.body", "requestId": "req_xxx", "chunk": "<base64>" }
 { "type": "request.end", "requestId": "req_xxx" }
 ```
@@ -208,7 +208,7 @@ Web 客户端不直接向公网 Relay 发业务 HTTP 请求，而是把 HTTP 语
 daemon 解密并请求本机：
 
 ```text
-http://127.0.0.1:<daemon-port>/api/v2/agents/a/turns
+http://127.0.0.1:<daemon-port>/api/v2/tasks/t/turns
 ```
 
 响应同样分帧并加密：

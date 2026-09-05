@@ -43,9 +43,9 @@ pnpm dev
 
 ## 产品术语约定
 
-- 当前工作台的产品心智是：`工作区 -> Agent 对话 -> Turn -> Timeline`。
-- 一个工作区绑定一个真实目录；同一工作区可以包含多条 Codex、Claude 或 Kimi 对话。
-- 面向用户的主文案使用“工作区”和“对话”；“Session/线程”只用于描述 Provider 原生会话或内部协议。
+- 当前工作台的产品心智是：`工作区 -> Agent 会话 -> Turn -> Timeline`。
+- 一个工作区绑定一个真实目录；同一工作区可以包含多条 Codex、Claude 或 Kimi 会话。
+- 面向用户的主文案使用“工作区”和“会话”；“Session/线程”只用于描述 Provider 原生会话或内部协议。
 - 代码实现与数据库字段沿用 `workspace`、`agent`、`session`、`turn` 和 `timeline` 命名，除非明确进行领域重构，不做仅为文案一致性的批量重命名。
 
 ## 主题开发约定
@@ -63,7 +63,7 @@ pnpm dev
 
 - 运行 `pnpm build`
 - 使用 `pnpm dev` 做基础冒烟验证
-- 手动检查核心流程：新建/导入对话、发送与取消、Timeline 同步、附件上传、文件浏览、Git Diff 和 Relay 设置
+- 手动检查核心流程：新建/导入会话、发送与取消、Timeline 同步、附件上传、文件浏览、Git Diff 和 Relay 设置
 
 后续新增测试时，建议放在功能附近或 `__tests__` 目录，并使用 `*.test.js` 命名。
 

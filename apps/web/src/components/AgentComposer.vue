@@ -8,8 +8,7 @@ const MAX_ATTACHMENTS = 10
 const IMAGE_MIME_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp'])
 
 const props = defineProps({
-  workspaceId: { type: String, required: true },
-  taskId: { type: String, default: '' },
+  taskId: { type: String, required: true },
   running: { type: Boolean, default: false },
   sending: { type: Boolean, default: false },
   blockedReason: { type: String, default: '' },
@@ -129,9 +128,7 @@ async function uploadAttachment(item) {
   item.status = 'uploading'
   item.error = ''
   try {
-    const result = props.taskId
-      ? await v2Api.uploadTaskAsset(props.taskId, item.file, { signal: controller.signal })
-      : await v2Api.uploadAsset(props.workspaceId, item.file, { signal: controller.signal })
+    const result = await v2Api.uploadTaskAsset(props.taskId, item.file, { signal: controller.signal })
     if (item.controller !== controller) return
     item.asset = result.asset
     item.status = 'ready'
@@ -245,7 +242,7 @@ watch(text, () => {
 watch(() => props.draftContent, (content) => {
   if (!text.value && !attachments.value.length && content?.length) restoreDraft(content)
 }, { deep: true, immediate: true })
-watch(() => props.workspaceId, clearDraft)
+watch(() => props.taskId, clearDraft)
 
 onMounted(() => {
   resizeTextarea()

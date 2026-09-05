@@ -34,15 +34,29 @@ export async function defaultBranch(cwd) {
   try { return await runGit(cwd, ['symbolic-ref', '--short', 'HEAD']) } catch { return 'HEAD' }
 }
 
+function appendOrdinal(value, ordinal, maxLength) {
+  if (ordinal === 1) return value
+  const suffix = `-${ordinal}`
+  return `${value.slice(0, maxLength - suffix.length)}${suffix}`
+}
+
 export async function addWorktree({ repositoryRoot: root, baseRef, branchName, slug }) {
   const safeSlug = validateSlug(slug)
-  if (!/^[A-Za-z0-9_./-]{1,200}$/.test(String(branchName || ''))) throw new Error('分支名不合法')
+  const safeBranchName = String(branchName || '')
+  if (!/^[A-Za-z0-9_./-]{1,200}$/.test(safeBranchName)) throw new Error('分支名不合法')
   const hash = crypto.createHash('sha256').update(path.resolve(root).toLowerCase()).digest('hex').slice(0, 16)
-  const target = path.join(worktreesRoot(), hash, safeSlug)
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  if (fs.existsSync(target)) throw new Error('Worktree 目录已存在')
-  await runGit(root, ['worktree', 'add', '-b', branchName, target, baseRef])
-  return { path: target, branchName, baseRef, slug: safeSlug }
+  const parent = path.join(worktreesRoot(), hash)
+  fs.mkdirSync(parent, { recursive: true })
+  const branches = new Set((await runGit(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])).split(/\r?\n/).filter(Boolean))
+  for (let ordinal = 1; ordinal <= 10_000; ordinal += 1) {
+    const candidateSlug = appendOrdinal(safeSlug, ordinal, 64)
+    const candidateBranchName = appendOrdinal(safeBranchName, ordinal, 200)
+    const target = path.join(parent, candidateSlug)
+    if (fs.existsSync(target) || branches.has(candidateBranchName)) continue
+    await runGit(root, ['worktree', 'add', '-b', candidateBranchName, target, baseRef])
+    return { path: target, branchName: candidateBranchName, baseRef, slug: candidateSlug }
+  }
+  throw new Error('无法分配可用的 Worktree 名称')
 }
 
 export async function addExistingBranch({ repositoryRoot: root, branchName, slug }) {

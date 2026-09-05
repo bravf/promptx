@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
+import net from 'node:net'
 import path from 'node:path'
 
 const DEFAULT_DAEMON_PORT = 3001
@@ -26,10 +27,28 @@ function spawnChild(command, args, env) {
   })
 }
 
+async function canListen(host, port) {
+  const server = net.createServer()
+  return new Promise((resolve) => {
+    server.once('error', () => resolve(false))
+    server.listen(port, host, () => server.close(() => resolve(true)))
+  })
+}
+
+async function findAvailablePort(host, preferredPort) {
+  for (let port = preferredPort; port < preferredPort + 100; port += 1) {
+    if (await canListen(host, port)) return port
+  }
+  throw new Error(`找不到可用的 Web 端口（${preferredPort}-${preferredPort + 99}）。`)
+}
+
 const host = String(process.env.HOST || process.env.PROMPTX_DEV_HOST || DEFAULT_HOST).trim() || DEFAULT_HOST
 const daemonPort = Math.max(1, Number(process.env.PORT || process.env.PROMPTX_DAEMON_PORT) || DEFAULT_DAEMON_PORT)
-const webPort = Math.max(1, Number(process.env.WEB_PORT || process.env.PROMPTX_WEB_PORT) || DEFAULT_WEB_PORT)
+const preferredWebPort = Math.max(1, Number(process.env.WEB_PORT || process.env.PROMPTX_WEB_PORT) || DEFAULT_WEB_PORT)
+const webPort = await findAvailablePort(host, preferredWebPort)
 const pnpm = resolvePnpmCommand()
+const webOrigin = `http://${host}:${webPort}`
+const allowedOrigins = [process.env.PROMPTX_ALLOWED_ORIGINS, webOrigin].filter(Boolean).join(',')
 
 console.log(`[promptx-dev] Web:   http://${host}:${webPort}`)
 console.log(`[promptx-dev] Daemon: http://${host}:${daemonPort}`)
@@ -39,8 +58,9 @@ const daemon = spawnChild(pnpm, ['--filter', '@promptx/daemon', 'dev'], {
   HOST: host,
   PORT: String(daemonPort),
   PROMPTX_DAEMON_PORT: String(daemonPort),
+  PROMPTX_ALLOWED_ORIGINS: allowedOrigins,
 })
-const web = spawnChild(pnpm, ['--filter', '@promptx/web', 'exec', 'vite', '--host', host, '--port', String(webPort)], {
+const web = spawnChild(pnpm, ['--filter', '@promptx/web', 'exec', 'vite', '--host', host, '--port', String(webPort), '--strictPort'], {
   VITE_API_PORT: String(daemonPort),
   PROMPTX_WEB_PORT: String(webPort),
 })

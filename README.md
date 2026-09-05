@@ -2,22 +2,22 @@
 
 [English README](README.en.md)
 
-PromptX 是一个本地优先的 AI 编程工作台。它把工作目录、Agent 对话、执行过程、最终回复、文件浏览和 Git Diff 放在同一个界面中，并通过 Relay 支持手机远程访问。
+PromptX 是一个本地优先的 AI 编程工作台。它把工作目录、Agent 会话、执行过程、最终回复、文件浏览和 Git Diff 放在同一个界面中，并通过 Relay 支持手机远程访问。
 
 当前 V2 的核心模型是：
 
 ```text
-工作区 -> Agent 对话 -> Turn -> Timeline
+工作区 -> Agent 会话 -> Turn -> Timeline
 ```
 
-每个工作区对应一个真实目录；同一目录中可以建立多条 Codex、Claude 或 Kimi 对话。PromptX 负责恢复 Provider 原生会话，并把不同 Provider 的历史统一对账到本地 Timeline。
+每个工作区对应一个真实目录；同一目录中可以建立多条 Codex、Claude 或 Kimi 会话。PromptX 负责恢复 Provider 原生会话，并把不同 Provider 的历史统一对账到本地 Timeline。
 
 ## 核心能力
 
 - 支持 Codex、Claude Code 和 Kimi Code。
 - 从本机扫描并导入三种 Provider 的已有会话。
 - 实时展示用户消息、思考过程、工具调用和最终回复。
-- 按对话保留内存草稿，切换对话后可立即恢复；刷新页面后不保留。
+- 按会话保留内存草稿，切换会话后可立即恢复；刷新页面后不保留。
 - 浏览工作区文件并查看 staged、unstaged 和 untracked Diff。
 - 桌面与 H5 共用同一套界面；移动端页面和全屏弹层支持浏览器返回手势。
 - 手机和 Daemon 之间使用端到端加密，公网 Relay 只转发密文。

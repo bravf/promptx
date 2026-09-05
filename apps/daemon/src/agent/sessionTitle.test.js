@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { DEFAULT_AGENT_TITLE, deriveAgentTitle } from './sessionTitle.js'
 
-test('默认 Agent 标题为新对话', () => {
-  assert.equal(DEFAULT_AGENT_TITLE, '新对话')
+test('默认 Agent 标题为新会话', () => {
+  assert.equal(DEFAULT_AGENT_TITLE, '新会话')
 })
 
 test('从第一个非空文本块的第一条非空行派生标题', () => {

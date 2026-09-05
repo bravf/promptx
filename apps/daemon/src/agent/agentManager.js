@@ -30,11 +30,13 @@ export class AgentManager {
   getRuntime(agent) {
     let runtime = this.runtimes.get(agent.id)
     if (runtime) return runtime
-    const task = agent.taskId ? this.repository.getTask(agent.taskId) : null
-    const environment = task ? this.repository.getEnvironment(task.environmentId) : null
-    const workspace = environment ? { cwd: environment.cwd } : this.repository.getWorkspace(agent.workspaceId)
+    const task = this.repository.getTask(agent.taskId)
+    const environment = task && this.repository.getEnvironment(task.environmentId)
+    if (!environment || ['missing', 'orphaned', 'archived', 'unavailable'].includes(environment.status)) {
+      throw new Error('当前会话的执行目录不可用。')
+    }
     runtime = this.providerRegistry.get(agent.providerId).createRuntime({
-      cwd: workspace.cwd,
+      cwd: environment.cwd,
       nativeHandle: agent.nativeHandle,
       modelId: agent.modelId,
       config: agent.config,
@@ -72,7 +74,7 @@ export class AgentManager {
     let agent = this.repository.getAgent(agentId)
     if (!agent) throw new Error('Agent 不存在。')
     if (agent.archivedAt) throw new Error('已归档的 Agent 不能发送消息。')
-    const existing = this.repository.getTurnByClientMessage(agentId, input.clientMessageId)
+    const existing = this.repository.getTurnByClientMessage(agent.taskId, input.clientMessageId)
     if (existing) return existing
     if (this.activeTurns.has(agentId) || this.preparingTurns.has(agentId)) {
       const error = new Error('Agent 正在运行，请等待当前任务完成后再发送。')
@@ -82,7 +84,7 @@ export class AgentManager {
     const providerContent = input.input.content.map((block) => {
       if (block.type === 'text') return block
       const asset = this.repository.getAsset(block.assetId)
-      if (!asset || asset.workspaceId !== agent.workspaceId) throw new Error(`附件不存在或不属于当前工作区：${block.name}`)
+      if (!asset || asset.taskId !== agent.taskId) throw new Error(`附件不存在或不属于当前会话：${block.name}`)
       if (block.type === 'image' && !asset.mimeType.startsWith('image/')) throw new Error(`附件不是图片：${asset.name}`)
       return {
         ...block,
@@ -112,7 +114,7 @@ export class AgentManager {
       agent = currentAgent
 
       const timelineContent = providerContent.map(({ absolutePath, ...block }) => block)
-      const isFirstTurn = !this.repository.hasTurns(agentId)
+      const isFirstTurn = !this.repository.hasTurns(agent.taskId)
       const patch = {}
       if (isFirstTurn && agent.title === DEFAULT_AGENT_TITLE) {
         const title = deriveAgentTitle(input.input.content)
@@ -124,10 +126,12 @@ export class AgentManager {
         patch.attentionAt = null
       }
       if (Object.keys(patch).length) {
+        if (patch.title) this.repository.updateTask(agent.taskId, { title: patch.title })
+        delete patch.title
         agent = this.repository.updateAgent(agent.id, patch)
         this.eventHub.publish(agent.id, { type: 'agent', agent })
       }
-      const turn = this.repository.createTurn(agentId, input.clientMessageId)
+      const turn = this.repository.createTurn(agent.taskId, input.clientMessageId)
       this.activeTurns.set(agentId, turn)
       this.commitTimeline({
         agentId,
@@ -233,6 +237,7 @@ export class AgentManager {
     })
     this.activeTurns.set(agentId, updated)
     this.repository.updateAgent(agentId, { lifecycle: 'running', lastActiveAt: nowIso() })
+    this.repository.updateTask(updated.taskId, { lastActiveAt: nowIso() })
     this.eventHub.publish(agentId, { type: 'turn', turn: updated })
     this.eventHub.publish(agentId, { type: 'agent', agent: this.repository.getAgent(agentId) })
   }
@@ -263,6 +268,7 @@ export class AgentManager {
       lastActiveAt: nowIso(),
       ...attention,
     })
+    this.repository.updateTask(agent.taskId, { lastActiveAt: nowIso() })
     this.eventHub.publish(agentId, { type: 'turn', turn: updated })
     this.eventHub.publish(agentId, { type: 'agent', agent })
     const runtime = this.runtimes.get(agentId)
@@ -274,8 +280,9 @@ export class AgentManager {
   }
 
   commitTimeline({ agentId, turnId, item }) {
-    const row = this.timelineStore.append(agentId, turnId, item)
-    const state = this.repository.getTimelineState(agentId)
+    const agent = this.repository.getAgent(agentId)
+    const row = this.timelineStore.append(agent.taskId, turnId, item)
+    const state = this.repository.getTimelineState(agent.taskId)
     this.eventHub.publish(agentId, { type: 'timeline', epoch: state.epoch, row })
     return row
   }

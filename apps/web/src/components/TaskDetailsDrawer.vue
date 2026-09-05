@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { Archive, Copy, ExternalLink, Info, Trash2 } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { GitBranch, Info, RefreshCw, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
 
 const props = defineProps({ taskId: { type: String, required: true } })
@@ -9,41 +9,83 @@ const loading = ref(true)
 const error = ref('')
 const data = ref(null)
 const git = ref(null)
-const commitMessage = ref('')
 const task = computed(() => data.value?.task)
 const environment = computed(() => data.value?.environment)
+let loadVersion = 0
 
 async function load() {
+  const taskId = props.taskId
+  const requestVersion = ++loadVersion
   loading.value = true
   error.value = ''
-  try { data.value = await v2Api.getTask(props.taskId); git.value = (await v2Api.getTaskGitStatus(props.taskId)).git } catch (err) { error.value = err.message || '读取任务详情失败' } finally { loading.value = false }
+  data.value = null
+  git.value = null
+  try {
+    const [taskDetails, gitStatus] = await Promise.all([
+      v2Api.getTask(taskId),
+      v2Api.getTaskGitStatus(taskId),
+    ])
+    if (requestVersion !== loadVersion || props.taskId !== taskId) return
+    data.value = taskDetails
+    git.value = gitStatus.git
+  } catch (err) {
+    if (requestVersion === loadVersion && props.taskId === taskId) error.value = err.message || '读取任务详情失败'
+  } finally {
+    if (requestVersion === loadVersion && props.taskId === taskId) loading.value = false
+  }
 }
-async function archive() { await v2Api.archiveTask(props.taskId); emit('changed'); await load() }
 async function reconcile() { data.value = { ...data.value, ...(await v2Api.reconcileTaskEnvironment(props.taskId)) }; emit('changed') }
-async function copyTask() { await v2Api.copyTask(props.taskId, {}); emit('changed') }
-async function commit() { if (!commitMessage.value.trim()) return; await v2Api.commitTask(props.taskId, commitMessage.value); commitMessage.value = ''; await load() }
-async function push() { await v2Api.pushTask(props.taskId); await load() }
-async function merge() { await v2Api.mergeTask(props.taskId, {}); emit('changed'); await load() }
-async function remove() { if (!window.confirm('删除此任务？Worktree 默认保留。')) return; await v2Api.deleteTask(props.taskId); emit('changed'); emit('close') }
-onMounted(load)
+watch(() => props.taskId, load, { immediate: true })
 </script>
 
 <template>
-  <aside class="task-details-drawer drawer-panel flex h-full w-full max-w-md flex-col border-l">
-    <header class="flex items-center justify-between border-b px-4 py-3">
-      <div class="flex items-center gap-2 font-medium"><Info class="h-4 w-4" />任务详情</div>
-      <button class="quiet-icon-button h-8 w-8" title="关闭" @click="emit('close')">×</button>
+  <aside class="task-details-drawer relative flex min-h-0 min-w-0 flex-col">
+    <header class="flex h-12 shrink-0 items-center border-b px-3">
+      <div class="flex min-w-0 flex-1 items-center gap-2">
+        <Info class="h-4 w-4 shrink-0" />
+        <span class="truncate font-mono text-xs font-medium" :title="task?.title || '任务详情'">{{ task?.title || '任务详情' }}</span>
+        <span v-if="task" class="details-status shrink-0 px-1.5 py-0.5 text-[9px]">{{ task.lifecycle }}</span>
+      </div>
+      <button class="quiet-icon-button h-8 w-8" title="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></button>
     </header>
-    <div v-if="loading" class="p-4 text-sm theme-muted-text">正在加载…</div>
-    <div v-else-if="error" class="p-4 text-sm text-red-500">{{ error }}</div>
-    <div v-else class="space-y-5 overflow-auto p-4 text-xs">
-      <section><h3 class="theme-heading mb-2 text-sm">{{ task.title }}</h3><p class="theme-muted-text">{{ task.providerId }} · {{ task.lifecycle }}</p></section>
-      <section class="space-y-2"><div class="theme-muted-text">执行环境</div><div>{{ environment.kind }} · {{ environment.status }}</div><div class="theme-muted-text break-all font-mono">{{ environment.cwd }}</div><button v-if="['missing', 'orphaned', 'unavailable'].includes(environment.status)" type="button" class="tool-button gap-1.5 px-2.5 py-1.5 text-xs" @click="reconcile"><ExternalLink class="h-3.5 w-3.5" />重新检查目录</button></section>
-      <section v-if="environment.kind === 'worktree'" class="space-y-2"><div class="theme-muted-text">分支</div><div class="font-mono">{{ environment.branchName }}</div><div class="theme-muted-text">基线 {{ environment.baseRef }}</div></section>
-      <section v-if="git" class="space-y-1"><div class="theme-muted-text">Git 状态</div><div>{{ git.files?.length || 0 }} 个未提交文件</div><div>领先基线 {{ git.ahead || 0 }} 个提交 · 落后 {{ git.behind || 0 }} 个提交</div></section>
-      <section v-if="environment.kind === 'worktree'" class="space-y-2"><input v-model="commitMessage" class="tool-input" placeholder="提交信息" /><div class="flex flex-wrap gap-2"><button type="button" class="tool-button gap-1.5 px-2.5 py-1.5 text-xs" :disabled="!commitMessage.trim()" @click="commit">提交</button><button type="button" class="tool-button gap-1.5 px-2.5 py-1.5 text-xs" @click="push">推送</button></div></section>
-      <button v-if="environment.kind === 'worktree'" type="button" class="tool-button gap-1.5 px-2.5 py-1.5 text-xs" @click="merge">合并到项目默认分支</button>
-      <div class="flex flex-wrap gap-2"><button type="button" class="tool-button gap-1.5 px-2.5 py-1.5 text-xs" @click="copyTask"><Copy class="h-3.5 w-3.5" />复制到新 Worktree</button><button type="button" class="tool-button gap-1.5 px-2.5 py-1.5 text-xs" @click="archive"><Archive class="h-3.5 w-3.5" />归档任务</button><button type="button" class="tool-button tool-button-danger gap-1.5 px-2.5 py-1.5 text-xs" @click="remove"><Trash2 class="h-3.5 w-3.5" />删除任务</button></div>
+    <div v-if="error" class="details-error shrink-0 border-b px-3 py-2 text-xs">{{ error }}</div>
+    <div v-if="loading" class="details-loading min-h-0 flex-1 p-3" role="status" aria-label="正在加载任务详情">
+      <div v-for="index in 7" :key="index" class="details-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
+    </div>
+    <div v-else-if="data" class="details-body min-h-0 flex-1 overflow-auto text-xs">
+      <section class="details-section border-b p-3">
+        <div class="details-label">会话</div>
+        <h3 class="theme-heading mt-2 text-sm font-medium">{{ task.title }}</h3>
+        <p class="theme-muted-text mt-1 font-mono text-[10px]">{{ task.providerId }}</p>
+      </section>
+      <section class="details-section border-b p-3">
+        <div class="details-label">执行环境</div>
+        <div class="mt-2 flex items-center gap-2"><span>{{ environment.kind }}</span><span class="theme-muted-text">{{ environment.status }}</span></div>
+        <div class="theme-muted-text mt-2 break-all font-mono text-[10px] leading-5">{{ environment.cwd }}</div>
+        <button v-if="['missing', 'orphaned', 'unavailable'].includes(environment.status)" type="button" class="tool-button mt-3 gap-1.5 px-2.5 py-1.5 text-xs" @click="reconcile"><RefreshCw class="h-3.5 w-3.5" />重新检查目录</button>
+      </section>
+      <section v-if="environment.kind === 'worktree'" class="details-section border-b p-3">
+        <div class="details-label flex items-center gap-1.5"><GitBranch class="h-3.5 w-3.5" />分支</div>
+        <div class="mt-2 break-all font-mono text-[11px]">{{ environment.branchName }}</div>
+        <div class="theme-muted-text mt-1 text-[10px]">基线 {{ environment.baseRef }}</div>
+      </section>
+      <section v-if="git" class="details-section border-b p-3">
+        <div class="details-label">Git 状态</div>
+        <div class="mt-2">{{ git.files?.length || 0 }} 个未提交文件</div>
+        <div class="theme-muted-text mt-1 text-[10px]">领先 {{ git.ahead || 0 }} · 落后 {{ git.behind || 0 }}</div>
+      </section>
     </div>
   </aside>
 </template>
+
+<style scoped>
+.task-details-drawer { background: var(--theme-appPanel); border-color: var(--theme-borderDefault); box-shadow: var(--theme-shadowPanel); }
+.task-details-drawer header, .details-section { border-color: var(--theme-borderDefault); }
+.details-label { color: var(--theme-textMuted); font-size: 10px; font-weight: 500; }
+.details-status { border-radius: 999px; background: var(--theme-appPanelStrong); color: var(--theme-textMuted); }
+.details-error { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
+.details-skeleton-line { height: 1.75rem; margin-bottom: 0.5rem; border-radius: 2px; background: var(--theme-appPanelInset); opacity: 0.7; animation: details-skeleton-pulse 1.2s ease-in-out infinite; }
+.details-skeleton-line.is-short { width: 68%; }
+@keyframes details-skeleton-pulse { 0%, 100% { opacity: 0.42; } 50% { opacity: 0.82; } }
+@media (prefers-reduced-motion: reduce) { .details-skeleton-line { animation: none; opacity: 0.62; } }
+</style>

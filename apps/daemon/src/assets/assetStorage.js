@@ -15,7 +15,7 @@ export function normalizeAssetName(value = '') {
 export function publicAsset(asset) {
   return {
     id: asset.id,
-    workspaceId: asset.workspaceId,
+    taskId: asset.taskId,
     name: asset.name,
     mimeType: asset.mimeType,
     size: asset.size,
@@ -23,15 +23,15 @@ export function publicAsset(asset) {
   }
 }
 
-export async function storeAsset({ part, workspaceId, assetsDir, repository }) {
+export async function storeAsset({ part, taskId, assetsDir, repository }) {
   const id = randomUUID()
   const name = normalizeAssetName(part.filename)
   const mimeType = String(part.mimetype || 'application/octet-stream').trim().toLowerCase() || 'application/octet-stream'
-  const workspaceDir = path.join(assetsDir, workspaceId)
-  const storagePath = path.join(workspaceDir, id)
+  const taskDir = path.join(assetsDir, taskId)
+  const storagePath = path.join(taskDir, id)
   const hash = createHash('sha256')
   let size = 0
-  fs.mkdirSync(workspaceDir, { recursive: true })
+  fs.mkdirSync(taskDir, { recursive: true })
 
   const hasher = new Transform({
     transform(chunk, encoding, callback) {
@@ -48,7 +48,7 @@ export async function storeAsset({ part, workspaceId, assetsDir, repository }) {
       error.statusCode = 413
       throw error
     }
-    return repository.createAsset(workspaceId, {
+    return repository.createAsset(taskId, {
       id,
       name,
       mimeType,

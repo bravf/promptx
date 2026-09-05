@@ -55,7 +55,7 @@ test('首次导入同步失败时清理新建的空项目', async () => {
   try {
     await assert.rejects(() => service.import({ providerId: 'codex', providerHandleId: 'thread-1' }), /同步失败/)
     assert.equal(repository.listAllAgents(true).length, 0)
-    assert.equal(repository.listWorkspaces().length, 0)
+    assert.equal(repository.listProjects().length, 0)
   } finally {
     db.close()
   }

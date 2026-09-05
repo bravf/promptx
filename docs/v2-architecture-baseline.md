@@ -8,18 +8,20 @@
 V2 是独立版本，不读取或迁移 V1 的任务、文档、Run 和数据库，也不保留旧 Server/Runner 双进程架构。
 
 ```text
-Workspace
-  -> Agent Session
+Project（工作区）
+  -> Task（会话）
+    -> Execution Environment
+    -> Agent Session
     -> Turn
-      -> Timeline Row
+    -> Timeline Row
 ```
 
-- Workspace 对应一个经过 `realpath` 规范化的真实目录。
-- 同一 Workspace 可包含多条 Codex、Claude 或 Kimi Agent Session。
+- Project 对应一个规范化的项目根目录。
+- 同一 Project 可包含多个 Task；每个 Task 绑定一个 Execution Environment 和一个 Agent Session。
 - Turn 表示一次用户提交。
-- Timeline 是跨 Provider 的规范化历史与实时事件视图。
+- Timeline 和附件归属于 Task，是跨 Provider 的规范化历史与实时事件视图。
 
-V2 当前不包含账号、团队权限、任务自动化、公开分享、Raw 导出、fork/rewind/worktree 管理或交互式 Provider 权限确认。
+V2 当前不包含账号、团队权限、任务自动化、公开分享、Raw 导出或交互式 Provider 权限确认。
 
 ## 2. 进程结构
 
@@ -41,7 +43,7 @@ PromptX Daemon
 公共 Relay Server
 ```
 
-Daemon 是 Workspace 文件、Provider Runtime、Turn 并发和 SQLite 的唯一所有者。Relay Server 位于 `packages/relay/src/server.js`，只负责静态 Web 和密文 WebSocket 转发，不保存 Provider 状态，不解析业务请求。
+Daemon 是执行环境文件、Provider Runtime、Turn 并发和 SQLite 的唯一所有者。Relay Server 位于 `packages/relay/src/server.js`，只负责静态 Web 和密文 WebSocket 转发，不保存 Provider 状态，不解析业务请求。
 
 ## 3. 代码所有权
 
@@ -62,14 +64,16 @@ SQLite 默认位于 `~/.promptx/data/promptx-v2.sqlite`，启用 foreign keys、
 
 核心表：
 
-- `workspaces`：规范路径、标题、排序与最近打开时间。
-- `workspace_assets`：附件元数据与受控存储路径。
-- `agent_sessions`：Provider、原生句柄、生命周期、模型配置和 Timeline epoch。
-- `agent_turns`：客户端幂等 ID、原生 Turn ID、状态、用量和时间。
-- `agent_timeline_rows`：Session 内递增 seq、标准 item 和可选 Provider message ID。
-- `agent_timeline_sync_state`：Provider source、revision manifest 和最近同步时间。
+- `projects`：项目根目录、显示名称、默认分支与最近打开时间。
+- `execution_environments`：Task 的执行目录、Worktree、分支、归属和可用状态。
+- `tasks`：会话标题、生命周期、Timeline epoch 和递增序号。
+- `agent_sessions`：Provider、原生句柄、生命周期和模型配置，每个 Task 只能有一个。
+- `task_assets`：Task 附件元数据与受控存储路径。
+- `agent_turns`：Task 内的客户端幂等 ID、原生 Turn ID、状态、用量和时间。
+- `agent_timeline_rows`：Task 内递增 seq、标准 item 和可选 Provider message ID。
+- `agent_timeline_sync_state`：Task 的 Provider source、revision manifest 和最近同步时间。
 
-同一 Agent Session 通过 SQLite 唯一索引最多保留一个 `queued` 或 `running` Turn。删除 Workspace/Agent 时由外键级联清理其数据。
+同一 Task 通过 SQLite 唯一索引最多保留一个 `queued` 或 `running` Turn。删除 Project 或 Task 时由外键级联清理业务数据。数据库使用 `user_version` 严格检查模型版本，不迁移旧开发数据；版本不匹配时运行 `pnpm data:reset` 后重新启动。
 
 ## 5. Provider
 
@@ -79,9 +83,9 @@ SQLite 默认位于 `~/.promptx/data/promptx-v2.sqlite`，启用 foreign keys、
 - Claude：Claude Agent SDK 与本地历史 JSONL。
 - Kimi：ACP Runtime 与本地 wire JSONL。
 
-`native_handle_json` 只保存恢复原生会话所需的最小句柄。SDK 对象、子进程、AbortController、密钥和认证信息不得持久化。
+`native_handle_json` 只保存恢复原生会话所需的最小句柄。`native_source_id` 用于同一 Provider 原生会话的导入去重。SDK 对象、子进程、AbortController、密钥和认证信息不得持久化。
 
-会话导入先扫描 Provider 本地历史，使用 5 秒快照缓存并合并并发扫描。列表按最近活动时间排序，标题、目录、Session ID 和消息预览均参与搜索。首次导入若历史同步失败，会回滚新 Agent，并清理本次新建且仍为空的 Workspace。
+会话导入先扫描 Provider 本地历史，使用 5 秒快照缓存并合并并发扫描。列表按最近活动时间排序，标题、目录、Session ID 和消息预览均参与搜索。首次导入会创建 Project、Task、Execution Environment 和 Agent Session；若 Session 创建或历史同步失败，整组新记录会回滚。
 
 ## 6. Turn 与 Timeline
 
@@ -95,7 +99,7 @@ queued -> running -> completed
 
 客户端生成 `clientMessageId`，重复提交复用原 Turn。Agent 正在运行时输入框可继续编辑内存草稿，但不能发送第二个 Turn。
 
-Timeline Row 使用 Session 内严格递增的 `seq`。`item.type` 由 `packages/protocol/src/timeline.js` 定义，包括用户消息、思考、助手消息、工具、Todo、系统提示和错误。
+Timeline Row 使用 Task 内严格递增的 `seq`。`item.type` 由 `packages/protocol/src/timeline.js` 定义，包括用户消息、思考、助手消息、工具、Todo、系统提示和错误。
 
 读取策略：
 
@@ -104,11 +108,11 @@ Timeline Row 使用 Session 内严格递增的 `seq`。`item.type` 由 `packages
 - `after`：SSE 重连后补齐增量。
 - epoch 失效或出现序列缺口时返回 `reset=true` 和最新尾页。
 
-前端为最近访问的 Agent 保存固定数量的内存 Timeline 快照。首次进入显示骨架；切回缓存 Agent 时立即展示旧内容并后台同步；局部操作使用局部 loading。草稿只存在当前页面内存中，不写 storage，也不同步多端。
+前端为最近访问的 Task 保存固定数量的内存 Timeline 快照。首次进入显示骨架；切回缓存 Task 时立即展示旧内容并后台同步；局部操作使用局部 loading。草稿只存在当前页面内存中，不写 storage，也不同步多端。
 
 ## 7. 历史对账
 
-`TimelineSyncCoordinator` 合并同一 Agent 的并发同步请求；同步进行中再次触发时最多补跑一次。
+`TimelineSyncCoordinator` 合并同一 Task 的并发同步请求；同步进行中再次触发时最多补跑一次。
 
 `HistoryReconciler` 根据 Provider revision、原生 Turn ID、客户端消息 ID 和规范化用户文本进行匹配：
 
@@ -121,7 +125,7 @@ Provider 历史中的“未结束 Turn”可能来自客户端异常退出，不
 
 ## 8. 文件与 Diff
 
-- 所有路径先按 Workspace 根目录解析，并拒绝 `..` 与越界符号链接。
+- 所有路径先按 Task 的 Execution Environment 执行目录解析，并拒绝 `..` 与越界符号链接。
 - 文件预览区分文本、图片、二进制和超大文件。
 - Git Diff 使用子进程流式读取，staged 与 unstaged 并行执行。
 - 单个 Diff 最多保留 2 MiB 或 8000 行，超过限制立即终止 Git 子进程并返回 `truncated=true`。
@@ -136,33 +140,43 @@ GET    /providers
 GET    /directories/search
 GET    /import/sessions
 POST   /import/sessions
-POST   /conversations
 
-GET    /workspaces
-PATCH  /workspaces/:workspaceId
-DELETE /workspaces/:workspaceId
-GET    /workspaces/:workspaceId/files
-GET    /workspaces/:workspaceId/file
-GET    /workspaces/:workspaceId/file/content
-GET    /workspaces/:workspaceId/git/status
-GET    /workspaces/:workspaceId/git/diff
-POST   /workspaces/:workspaceId/assets
+GET    /projects
+POST   /projects
+GET    /projects/:projectId
+PATCH  /projects/:projectId
+DELETE /projects/:projectId
+GET    /projects/:projectId/tasks
+POST   /projects/:projectId/tasks
+
+GET    /tasks/:taskId
+DELETE /tasks/:taskId
+GET    /tasks/:taskId/environment
+GET    /tasks/:taskId/agent
+GET    /tasks/:taskId/control
+PATCH  /tasks/:taskId/settings
+GET    /tasks/:taskId/turns
+POST   /tasks/:taskId/turns
+POST   /tasks/:taskId/cancel
+POST   /tasks/:taskId/archive
+POST   /tasks/:taskId/attention/clear
+GET    /tasks/:taskId/timeline
+POST   /tasks/:taskId/timeline/sync
+GET    /tasks/:taskId/files
+GET    /tasks/:taskId/file
+GET    /tasks/:taskId/file/content
+GET    /tasks/:taskId/git/status
+GET    /tasks/:taskId/git/diff
+GET    /tasks/:taskId/git/commits
+POST   /tasks/:taskId/git/commit
+POST   /tasks/:taskId/git/push
+POST   /tasks/:taskId/git/merge
+POST   /tasks/:taskId/assets
+POST   /tasks/:taskId/environment/reconcile
+POST   /tasks/:taskId/environment/rebind
+POST   /tasks/:taskId/copy
+GET    /tasks/:taskId/events
 GET    /assets/:assetId/content
-
-GET    /workspaces/:workspaceId/agents
-POST   /workspaces/:workspaceId/agents
-GET    /agents/:agentId
-DELETE /agents/:agentId
-GET    /agents/:agentId/control
-PATCH  /agents/:agentId/settings
-GET    /agents/:agentId/turns
-POST   /agents/:agentId/turns
-POST   /agents/:agentId/cancel
-POST   /agents/:agentId/archive
-POST   /agents/:agentId/attention/clear
-GET    /agents/:agentId/timeline
-POST   /agents/:agentId/timeline/sync
-GET    /agents/:agentId/events
 GET    /events
 
 GET    /relay/config

@@ -48,7 +48,7 @@ test('多个页面同时同步同一 Agent 时合并读取并最多补跑一次'
     getRuntime: () => runtime,
     getActiveTurnId: () => '',
   })
-  const agent = { id: 'agent-1', providerId: 'codex', nativeHandle: { threadId: 'thread-1' } }
+  const agent = { id: 'agent-1', taskId: 'task-1', providerId: 'codex', nativeHandle: { threadId: 'thread-1' } }
   const calls = Array.from({ length: 10 }, () => coordinator.sync(agent))
   firstRead.resolve()
   await Promise.all(calls)
@@ -81,7 +81,7 @@ test('同步读取期间 Timeline 变化时丢弃旧计划并重新读取', asyn
     getRuntime: () => ({ threadId: 'thread-1', readHistorySnapshot: async () => { reads += 1; return snapshot() } }),
     getActiveTurnId: () => '',
   })
-  await coordinator.sync({ id: 'agent-1', providerId: 'codex', nativeHandle: { threadId: 'thread-1' } })
+  await coordinator.sync({ id: 'agent-1', taskId: 'task-1', providerId: 'codex', nativeHandle: { threadId: 'thread-1' } })
   assert.equal(reads, 2)
   assert.deepEqual(expectedSeqs, [1, 2])
 })
@@ -104,7 +104,7 @@ test('历史没有变化时仍广播同步成功以清理前端旧错误', async
     getActiveTurnId: () => '',
   })
 
-  const result = await coordinator.sync({ id: 'agent-1', providerId: 'codex', nativeHandle: { threadId: 'thread-1' } })
+  const result = await coordinator.sync({ id: 'agent-1', taskId: 'task-1', providerId: 'codex', nativeHandle: { threadId: 'thread-1' } })
 
   assert.deepEqual(result, {
     status: 'synced',
