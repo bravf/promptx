@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, ArrowLeft, Bot, CircleAlert, FileDiff, Files, Folder, FolderOpen, Info, LoaderCircle, Plus, Search, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, Bot, CircleAlert, FileDiff, Files, Folder, FolderOpen, Info, LoaderCircle, Plus, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
 import { v2Api, agentEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
 import { createEventSource } from '../lib/eventSource.js'
 import { createMobileDialogHistoryState, getMobileDialogHistoryState } from '../lib/mobileDialogHistory.js'
@@ -10,6 +10,7 @@ import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupTimelineTurns, isTimelineTurnRunning } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
 import AgentComposer from '../components/AgentComposer.vue'
+import DirectorySearchInput from '../components/DirectorySearchInput.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import DialogShell from '../components/DialogShell.vue'
 import SessionTitleMarquee from '../components/SessionTitleMarquee.vue'
@@ -1285,54 +1286,21 @@ onBeforeUnmount(() => {
       <template #title><h2 class="text-sm font-semibold">新对话</h2></template>
       <form class="flex min-h-0 flex-1 flex-col px-4 pb-4" @submit.prevent="createConversation">
         <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
-        <div class="relative mt-1 shrink-0">
-          <div class="relative shrink-0">
-            <Search class="theme-muted-text pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2" />
-            <input
-              id="workspace-path"
-              ref="workspacePathInput"
-              v-model="workspacePath"
-              class="tool-input h-11 w-full pl-9 pr-9 font-mono shadow-sm"
-              placeholder="搜索目录名称或输入绝对路径"
-              autocomplete="off"
-              role="combobox"
-              aria-controls="directory-suggestions"
-              :aria-expanded="directorySuggestionsOpen"
-              :aria-activedescendant="selectedDirectoryIndex >= 0 ? `directory-suggestion-${selectedDirectoryIndex}` : undefined"
-              @input="scheduleDirectorySearch"
-              @keydown="handleDirectoryKeydown"
-            />
-            <LoaderCircle v-if="directorySearchLoading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" />
-          </div>
-          <div
-            v-if="directorySuggestionsOpen"
-            id="directory-suggestions"
-            class="directory-suggestions theme-popover overflow-y-auto rounded-sm border shadow-sm"
-            role="listbox"
-          >
-            <button
-              v-for="(directory, index) in directorySuggestions"
-              :id="`directory-suggestion-${index}`"
-              :key="directory.path"
-              type="button"
-              class="directory-suggestion flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left"
-              :class="index === selectedDirectoryIndex ? 'row-active' : ''"
-              role="option"
-              :aria-selected="index === selectedDirectoryIndex"
-              @mouseenter="selectedDirectoryIndex = index"
-              @mousedown.prevent
-              @click="selectDirectory(directory)"
-            >
-              <FolderOpen class="h-4 w-4 shrink-0" />
-              <span class="min-w-0 flex-1">
-                <span class="block truncate text-xs font-medium">{{ directory.name }}</span>
-                <span class="theme-muted-text block truncate font-mono text-[10px]">{{ directory.path }}</span>
-              </span>
-            </button>
-            <div v-if="directorySearchError" class="error-row m-2 rounded-sm border px-3 py-2 text-xs">{{ directorySearchError }}</div>
-            <div v-else-if="!directorySearchLoading && !directorySuggestions.length" class="theme-muted-text px-3 py-5 text-center text-xs">没有找到匹配目录</div>
-          </div>
-        </div>
+        <DirectorySearchInput
+          ref="workspacePathInput"
+          v-model="workspacePath"
+          class="mt-1"
+          :loading="directorySearchLoading"
+          :open="directorySuggestionsOpen"
+          :suggestions="directorySuggestions"
+          :error="directorySearchError"
+          :selected-index="selectedDirectoryIndex"
+          :disabled="creating"
+          @input="scheduleDirectorySearch"
+          @keydown="handleDirectoryKeydown"
+          @mouseenter="selectedDirectoryIndex = $event"
+          @select="selectDirectory"
+        />
         <div class="shrink-0">
           <label class="theme-muted-text mt-4 block text-xs" for="conversation-provider">Provider</label>
           <select id="conversation-provider" v-model="agentProvider" class="tool-input mt-1" :disabled="creating">
@@ -1472,9 +1440,7 @@ onBeforeUnmount(() => {
 @keyframes timeline-generating-pulse { 0%, 55%, 100% { opacity: 0.28; } 25% { opacity: 1; } }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .writer-blocked-row { border-color: var(--theme-warning); background: var(--theme-warningSoft); color: var(--theme-warningText); }
-.directory-suggestions { position: absolute; z-index: 30; top: calc(100% + 0.375rem); left: 0; right: 0; max-height: min(18rem, calc(100dvh - 16rem)); background: var(--theme-appPanelStrong); border-color: var(--theme-borderDefault); }
-.directory-suggestion:hover { background: var(--theme-appPanelHover); }
-.sidebar-primary-action, .sidebar-secondary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .settings-entry, .import-session-row, .import-provider-filter, .import-query-clear {
+.sidebar-primary-action, .sidebar-secondary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .settings-entry, .import-session-row, .import-provider-filter, .import-query-clear {
   transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease, transform 140ms ease;
 }
 .import-session-row { border-color: var(--theme-borderDefault); }
@@ -1501,7 +1467,7 @@ onBeforeUnmount(() => {
 .task-details-drawer-leave-active { transition: transform 180ms ease-in, opacity 150ms ease; }
 .task-details-drawer-enter-from, .task-details-drawer-leave-to { transform: translateX(100%); opacity: 0.35; }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .directory-suggestion, .drawer-trigger,
+  .sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .drawer-trigger,
   .workspace-sidebar, .timeline-pane, .workspace-drawer-enter-active, .workspace-drawer-leave-active,
   .workspace-agents-enter-active, .workspace-agents-leave-active,
   .import-session-row, .import-provider-filter, .import-query-clear,
