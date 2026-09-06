@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
+import PxIconButton from './PxIconButton.vue'
 
 const props = defineProps({
   open: {
@@ -186,17 +187,16 @@ onBeforeUnmount(() => {
 
             <div v-if="$slots['header-actions'] || showClose" class="flex items-center gap-2">
               <slot name="header-actions" />
-              <button
+              <PxIconButton
                 v-if="showClose"
                 type="button"
-                class="theme-icon-button h-8 w-8 shrink-0"
-                title="关闭"
-                aria-label="关闭"
+                class="h-8 w-8 shrink-0"
+                label="关闭"
                 :disabled="closeDisabled"
                 @click="requestClose"
               >
                 <X class="h-4 w-4" />
-              </button>
+              </PxIconButton>
             </div>
           </div>
 

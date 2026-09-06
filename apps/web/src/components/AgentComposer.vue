@@ -1,7 +1,10 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Brain, ChevronDown, CircleStop, FileText, LoaderCircle, Paperclip, RotateCcw, Send, X } from 'lucide-vue-next'
+import { Brain, CircleStop, FileText, LoaderCircle, Paperclip, RotateCcw, Send, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
+import PxSelect from './PxSelect.vue'
+import PxButton from './PxButton.vue'
+import PxIconButton from './PxIconButton.vue'
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024
 const MAX_ATTACHMENTS = 10
@@ -48,6 +51,8 @@ const contextUsageTone = computed(() => {
 const contextUsageTitle = computed(() => contextUsage.value
   ? `上下文：已使用 ${Math.round(contextPercentage.value)}%（${contextUsage.value.usedTokens.toLocaleString()} / ${contextUsage.value.maxTokens.toLocaleString()} tokens）`
   : '发送消息后显示上下文用量')
+const modelOptions = computed(() => (props.control?.models || []).map((model) => ({ value: model.id, label: model.label })))
+const effortOptions = computed(() => (props.control?.reasoningEfforts || []).map((effort) => ({ value: effort.id, label: effort.label })))
 
 function formatBytes(value) {
   const size = Number(value || 0)
@@ -56,11 +61,8 @@ function formatBytes(value) {
   return `${(size / 1024 / 1024).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`
 }
 
-async function changeSetting(event, key) {
-  const element = event.currentTarget
-  await props.onSettingsChange({ [key]: element.value })
-  await nextTick()
-  element.value = props.control?.[key === 'modelId' ? 'currentModelId' : 'currentReasoningEffort'] || ''
+async function changeSetting(value, key) {
+  await props.onSettingsChange({ [key]: value })
 }
 
 function resizeTextarea() {
@@ -265,9 +267,9 @@ onBeforeUnmount(() => {
   >
     <div v-if="attachments.length" class="attachment-list flex gap-2 overflow-x-auto p-2">
       <div v-for="item in attachments" :key="item.localId" class="attachment-pill relative flex h-14 min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-sm p-1.5 pr-8">
-        <button v-if="item.objectUrl" type="button" class="attachment-preview h-10 w-10 shrink-0 overflow-hidden rounded-sm" title="预览图片" @click="preview = item">
+        <PxButton v-if="item.objectUrl" variant="ghost" size="sm" class="attachment-preview h-10 w-10 min-h-0 shrink-0 overflow-hidden rounded-sm border-0 p-0" title="预览图片" @click="preview = item">
           <img :src="item.objectUrl" :alt="item.file.name" class="h-full w-full object-cover" />
-        </button>
+        </PxButton>
         <div v-else class="attachment-file flex h-10 w-10 shrink-0 items-center justify-center rounded-sm"><FileText class="h-4 w-4" /></div>
         <div class="min-w-0">
           <div class="truncate text-xs font-medium">{{ item.file.name }}</div>
@@ -277,8 +279,8 @@ onBeforeUnmount(() => {
             <span>{{ item.status === 'uploading' ? '上传中' : formatBytes(item.asset?.size || item.file.size) }}</span>
           </div>
         </div>
-        <button v-if="item.status === 'error' && item.file.size <= MAX_FILE_SIZE" type="button" class="attachment-action round-icon-button absolute right-1 top-1 h-6 w-6" title="重试" @click="uploadAttachment(item)"><RotateCcw class="h-3 w-3" /></button>
-        <button type="button" class="attachment-action round-icon-button absolute bottom-1 right-1 h-6 w-6" title="移除附件" @click="removeAttachment(item)"><X class="h-3 w-3" /></button>
+        <PxIconButton v-if="item.status === 'error' && item.file.size <= MAX_FILE_SIZE" class="attachment-action absolute right-1 top-1 h-6 w-6" label="重试" @click="uploadAttachment(item)"><RotateCcw class="h-3 w-3" /></PxIconButton>
+        <PxIconButton variant="danger" class="attachment-action absolute bottom-1 right-1 h-6 w-6" label="移除附件" @click="removeAttachment(item)"><X class="h-3 w-3" /></PxIconButton>
       </div>
     </div>
 
@@ -295,34 +297,31 @@ onBeforeUnmount(() => {
     <div class="composer-toolbar flex min-h-11 flex-wrap items-center justify-between gap-2 px-2 pb-2 pt-1">
       <div class="composer-controls flex min-w-0 flex-1 items-center gap-1">
         <input ref="fileInput" class="hidden" type="file" multiple @change="handleFileInput" />
-        <button type="button" class="composer-control-button h-7 w-7" title="添加图片或文件" :disabled="running || attachments.length >= MAX_ATTACHMENTS" @click="chooseFiles"><Paperclip class="h-4 w-4" /></button>
+        <PxIconButton class="composer-control-button h-7 w-7" label="添加图片或文件" :disabled="running || attachments.length >= MAX_ATTACHMENTS" @click="chooseFiles"><Paperclip class="h-4 w-4" /></PxIconButton>
         <span v-if="dragging" class="theme-muted-text text-[10px]">松开以添加附件</span>
-        <div v-if="control?.models?.length" class="composer-select-wrap model-select relative min-w-0 max-w-48 rounded-full">
-          <select
-            class="composer-select h-7 w-full appearance-none rounded-full py-0 pl-2 pr-6 text-xs outline-none"
-            :value="control.currentModelId"
-            title="模型"
+        <div v-if="control?.models?.length" class="composer-select-wrap model-select min-w-0 max-w-48">
+          <PxSelect
+            :model-value="control.currentModelId"
+            :options="modelOptions"
+            size="sm"
+            tone="pill"
             aria-label="模型"
             :disabled="running || settingsLoading"
-            @change="changeSetting($event, 'modelId')"
-          >
-            <option v-for="model in control.models" :key="model.id" :value="model.id">{{ model.label }}</option>
-          </select>
-          <ChevronDown class="theme-muted-text pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2" />
+            @update:model-value="changeSetting($event, 'modelId')"
+          />
         </div>
         <div v-if="control?.reasoningEfforts?.length" class="effort-control relative min-w-0 rounded-full">
-          <Brain class="theme-muted-text pointer-events-none absolute left-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
-          <select
-            class="composer-select h-7 max-w-28 appearance-none rounded-full py-0 pl-6 pr-6 text-xs outline-none"
-            :value="control.currentReasoningEffort"
-            title="思考强度"
+          <Brain class="theme-muted-text pointer-events-none absolute left-1.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2" />
+          <PxSelect
+            class="effort-select"
+            :model-value="control.currentReasoningEffort"
+            :options="effortOptions"
+            size="sm"
+            tone="pill"
             aria-label="思考强度"
             :disabled="running || settingsLoading"
-            @change="changeSetting($event, 'reasoningEffort')"
-          >
-            <option v-for="effort in control.reasoningEfforts" :key="effort.id" :value="effort.id">{{ effort.label }}</option>
-          </select>
-          <ChevronDown class="theme-muted-text pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2" />
+            @update:model-value="changeSetting($event, 'reasoningEffort')"
+          />
         </div>
         <LoaderCircle v-if="settingsLoading" class="theme-muted-text h-3.5 w-3.5 shrink-0 animate-spin" />
       </div>
@@ -339,17 +338,17 @@ onBeforeUnmount(() => {
             <circle v-if="contextUsage" class="context-ring-progress" :class="contextUsageTone" cx="8" cy="8" r="6" fill="none" stroke-width="2" stroke-linecap="round" :style="contextProgressStyle" />
           </svg>
         </div>
-        <button v-if="running" type="button" class="quiet-icon-button h-8 w-8" title="停止" @click="emit('cancel')"><CircleStop class="h-4 w-4" /></button>
-        <button v-else type="button" class="tool-button tool-button-primary round-icon-button h-8 w-8" :title="blockedReason || '发送'" :disabled="sendDisabled" @click="submit">
+        <PxIconButton v-if="running" class="h-8 w-8" label="停止" @click="emit('cancel')"><CircleStop class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-else variant="primary" class="h-8 w-8" :label="blockedReason || '发送'" :disabled="sendDisabled" @click="submit">
           <LoaderCircle v-if="submitting || sending" class="h-4 w-4 animate-spin" />
           <Send v-else class="h-4 w-4" />
-        </button>
+        </PxIconButton>
       </div>
     </div>
   </div>
 
   <div v-if="preview" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-6" @click.self="preview = null">
-    <button type="button" class="image-preview-overlay__button tool-button round-icon-button absolute right-4 top-4 h-9 w-9" title="关闭预览" @click="preview = null"><X class="h-4 w-4" /></button>
+    <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 h-9 w-9" label="关闭预览" @click="preview = null"><X class="h-4 w-4" /></PxIconButton>
     <img :src="preview.objectUrl" :alt="preview.file.name" class="max-h-full max-w-full object-contain" />
   </div>
 </template>
@@ -367,9 +366,10 @@ onBeforeUnmount(() => {
 .composer-control-button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 9999px; color: var(--theme-textMuted); transition: background-color 120ms ease, color 120ms ease; }
 .composer-control-button:hover:not(:disabled), .composer-select-wrap:hover, .effort-control:hover { background: var(--theme-appPanelMuted); }
 .composer-control-button:disabled { cursor: not-allowed; opacity: 0.5; }
-.composer-select { width: auto; max-width: 100%; border: 0; background: transparent; color: var(--theme-textMuted); cursor: pointer; field-sizing: content; }
-.composer-select:focus { background: var(--theme-appPanelMuted); color: var(--theme-textPrimary); }
-.composer-select:disabled { cursor: not-allowed; opacity: 0.5; }
+.composer-select-wrap :deep(.px-select-trigger) { min-height: 1.75rem; border-color: transparent; background: transparent; color: var(--theme-textMuted); }
+.composer-select-wrap :deep(.px-select-trigger:hover:not(:disabled)), .composer-select-wrap :deep(.px-select-trigger:focus-visible) { border-color: transparent; background: transparent; }
+.effort-select :deep(.px-select-trigger) { padding-left: 2rem; }
+.model-select :deep(.px-select-trigger) { max-width: min(7.5rem, 34vw); }
 .context-usage { color: var(--theme-textMuted); }
 .context-ring { transform: rotate(-90deg); }
 .context-ring-track { stroke: var(--theme-appPanelMuted); }

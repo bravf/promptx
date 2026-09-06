@@ -2,6 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { GitBranch, Info, RefreshCw, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
+import PxButton from './PxButton.vue'
+import PxIconButton from './PxIconButton.vue'
 
 const props = defineProps({ taskId: { type: String, required: true } })
 const emit = defineEmits(['close', 'changed'])
@@ -34,7 +36,16 @@ async function load() {
     if (requestVersion === loadVersion && props.taskId === taskId) loading.value = false
   }
 }
-async function reconcile() { data.value = { ...data.value, ...(await v2Api.reconcileTaskEnvironment(props.taskId)) }; emit('changed') }
+async function reconcile() {
+  error.value = ''
+  try {
+    const result = await v2Api.reconcileTaskEnvironment(props.taskId)
+    if (result?.environment) data.value = { ...data.value, environment: result.environment }
+    emit('changed')
+  } catch (cause) {
+    error.value = cause.message || '重新检查目录失败'
+  }
+}
 watch(() => props.taskId, load, { immediate: true })
 </script>
 
@@ -46,7 +57,7 @@ watch(() => props.taskId, load, { immediate: true })
         <span class="truncate font-mono text-xs font-medium" :title="task?.title || '任务详情'">{{ task?.title || '任务详情' }}</span>
         <span v-if="task" class="details-status shrink-0 px-1.5 py-0.5 text-[9px]">{{ task.lifecycle }}</span>
       </div>
-      <button class="quiet-icon-button h-8 w-8" title="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></button>
+      <PxIconButton class="h-8 w-8" label="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
     </header>
     <div v-if="error" class="details-error shrink-0 border-b px-3 py-2 text-xs">{{ error }}</div>
     <div v-if="loading" class="details-loading min-h-0 flex-1 p-3" role="status" aria-label="正在加载任务详情">
@@ -62,7 +73,7 @@ watch(() => props.taskId, load, { immediate: true })
         <div class="details-label">执行环境</div>
         <div class="mt-2 flex items-center gap-2"><span>{{ environment.kind }}</span><span class="theme-muted-text">{{ environment.status }}</span></div>
         <div class="theme-muted-text mt-2 break-all font-mono text-[10px] leading-5">{{ environment.cwd }}</div>
-        <button v-if="['missing', 'orphaned', 'unavailable'].includes(environment.status)" type="button" class="tool-button mt-3 gap-1.5 px-2.5 py-1.5 text-xs" @click="reconcile"><RefreshCw class="h-3.5 w-3.5" />重新检查目录</button>
+        <PxButton v-if="['missing', 'orphaned', 'unavailable'].includes(environment.status)" variant="secondary" size="sm" class="mt-3" @click="reconcile"><RefreshCw class="h-3.5 w-3.5" />重新检查目录</PxButton>
       </section>
       <section v-if="environment.kind === 'worktree'" class="details-section border-b p-3">
         <div class="details-label flex items-center gap-1.5"><GitBranch class="h-3.5 w-3.5" />分支</div>

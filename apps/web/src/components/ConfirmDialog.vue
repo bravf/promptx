@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { TriangleAlert } from 'lucide-vue-next'
 import DialogShell from './DialogShell.vue'
+import PxButton from './PxButton.vue'
 
 const props = defineProps({
   open: {
@@ -70,18 +71,19 @@ const resolvedCancelText = computed(() => props.cancelText || '取消')
     </template>
 
     <div class="flex justify-end gap-2 px-5 py-4">
-      <button type="button" class="tool-button px-4 py-2 text-sm" :disabled="loading" @click="emit('cancel')">
+      <PxButton size="sm" :disabled="loading" @click="emit('cancel')">
         {{ resolvedCancelText }}
-      </button>
-      <button
+      </PxButton>
+      <PxButton
         type="button"
-        class="tool-button px-4 py-2 text-sm"
-        :class="danger ? 'tool-button-danger' : 'tool-button-primary'"
+        :variant="danger ? 'danger' : 'primary'"
+        size="sm"
+        :loading="loading"
         :disabled="loading"
         @click="emit('confirm')"
       >
-        {{ loading ? '处理中...' : resolvedConfirmText }}
-      </button>
+        {{ resolvedConfirmText }}
+      </PxButton>
     </div>
   </DialogShell>
 </template>

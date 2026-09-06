@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { Check, Copy } from 'lucide-vue-next'
 import { formatMessageDateTime, formatMessageTime } from '../lib/timelinePresentation.js'
 import { writeClipboardText } from '../lib/clipboard.js'
+import PxIconButton from './PxIconButton.vue'
 
 const props = defineProps({
   text: { type: String, default: '' },
@@ -32,10 +33,10 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 
 <template>
   <div class="message-meta theme-muted-text mt-1 flex h-6 items-center gap-1 text-[10px]" :class="align === 'right' ? 'justify-end' : 'justify-start'">
-    <button type="button" class="theme-icon-button h-6 w-6" :title="copied ? '已复制' : '复制消息'" :aria-label="copied ? '已复制' : '复制消息'" @click="copyMessage">
+    <PxIconButton class="theme-icon-button h-6 w-6" :label="copied ? '已复制' : '复制消息'" @click="copyMessage">
       <Check v-if="copied" class="h-3 w-3" />
       <Copy v-else class="h-3 w-3" />
-    </button>
+    </PxIconButton>
     <time v-if="shortTime" :datetime="timestamp" :title="fullTime">{{ shortTime }}</time>
   </div>
 </template>

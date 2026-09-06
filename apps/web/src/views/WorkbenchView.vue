@@ -12,7 +12,12 @@ import { useTheme } from '../composables/useTheme.js'
 import AgentComposer from '../components/AgentComposer.vue'
 import DirectorySearchInput from '../components/DirectorySearchInput.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-import DialogShell from '../components/DialogShell.vue'
+import PxAlert from '../components/PxAlert.vue'
+import PxButton from '../components/PxButton.vue'
+import PxDialog from '../components/PxDialog.vue'
+import PxField from '../components/PxField.vue'
+import PxIconButton from '../components/PxIconButton.vue'
+import PxSelect from '../components/PxSelect.vue'
 import SessionTitleMarquee from '../components/SessionTitleMarquee.vue'
 import TimelineTurn from '../components/TimelineTurn.vue'
 import V2SettingsDialog from '../components/V2SettingsDialog.vue'
@@ -66,6 +71,18 @@ const taskBranchName = ref('')
 const taskSlug = ref('')
 const creating = ref(false)
 const conversationError = ref('')
+const providerOptions = computed(() => providers.value.map((provider) => ({ value: provider.id, label: provider.label })))
+const executionOptions = [
+  { value: 'worktree', label: '新建 Worktree' },
+  { value: 'local', label: '当前目录' },
+]
+const baseRefOptions = [
+  { value: 'HEAD', label: 'HEAD（当前提交）' },
+  { value: 'origin/main', label: 'origin/main' },
+  { value: 'origin/master', label: 'origin/master' },
+  { value: 'main', label: 'main' },
+  { value: 'master', label: 'master' },
+]
 const confirmation = ref({ open: false, title: '', description: '', confirmText: '', danger: false, resolve: null })
 const timelineElement = ref(null)
 const workspaceInspector = ref(null)
@@ -1131,47 +1148,46 @@ onBeforeUnmount(() => {
         </div>
       </header>
       <div class="shrink-0 px-2 pb-2 pt-2">
-        <button class="sidebar-primary-action flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs font-medium" @click="openConversationDialog()">
+        <PxButton variant="primary" size="sm" class="sidebar-primary-action h-9 w-full justify-start px-2 text-left text-xs" @click="openConversationDialog()">
           <Plus class="h-4 w-4 shrink-0" />
           <span>新会话</span>
-        </button>
-        <button class="sidebar-secondary-action mt-1 flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs" @click="openImportDialog">
+        </PxButton>
+        <PxButton variant="secondary" size="sm" class="sidebar-secondary-action mt-1 h-8 w-full justify-start px-2 text-left text-xs" @click="openImportDialog">
           <FolderOpen class="h-3.5 w-3.5 shrink-0" />
           <span>导入会话</span>
-        </button>
+        </PxButton>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <div class="theme-muted-text flex h-8 items-center px-2 text-[10px] font-medium uppercase tracking-wide">工作区</div>
         <div v-for="project in projects" :key="project.id" class="workspace-group mb-2">
           <div class="workspace-heading group flex h-9 min-w-0 cursor-pointer items-center rounded-sm" :class="project.id === activeProjectId ? 'workspace-active' : ''" @click="handleProjectRowClick(project)">
-            <button
-              class="workspace-toggle round-icon-button flex h-7 w-7 shrink-0 items-center justify-center"
-              :title="expandedProjectIds.has(project.id) ? '收起工作区' : '展开工作区'"
-              :aria-label="expandedProjectIds.has(project.id) ? '收起工作区' : '展开工作区'"
+            <PxIconButton
+              class="workspace-toggle h-7 w-7 shrink-0"
+              :label="expandedProjectIds.has(project.id) ? '收起工作区' : '展开工作区'"
               :aria-expanded="expandedProjectIds.has(project.id)"
               @click.stop="toggleProject(project.id)"
             >
               <FolderOpen v-if="expandedProjectIds.has(project.id)" class="h-4 w-4" />
               <Folder v-else class="h-4 w-4" />
-            </button>
-            <button class="flex min-w-0 flex-1 items-center gap-2 py-1 text-left" :title="project.repositoryRoot" @click.stop="handleProjectRowClick(project)">
+            </PxIconButton>
+            <PxButton variant="ghost" size="sm" class="flex min-w-0 flex-1 justify-start gap-2 py-1 text-left" :title="project.repositoryRoot" @click.stop="handleProjectRowClick(project)">
               <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ project.displayName }}</span>
-            </button>
-            <button class="workspace-action round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`在 ${project.displayName} 中新建会话`" @click.stop="openConversationDialog(project)"><Plus class="h-3.5 w-3.5" /></button>
-            <button class="workspace-action workspace-delete round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`移除 ${project.displayName}`" @click.stop="removeProject(project)"><Trash2 class="h-3.5 w-3.5" /></button>
+            </PxButton>
+            <PxIconButton class="workspace-action h-7 w-7 shrink-0" :label="`在 ${project.displayName} 中新建会话`" @click.stop="openConversationDialog(project)"><Plus class="h-3.5 w-3.5" /></PxIconButton>
+            <PxIconButton class="workspace-action workspace-delete h-7 w-7 shrink-0" :label="`移除 ${project.displayName}`" @click.stop="removeProject(project)"><Trash2 class="h-3.5 w-3.5" /></PxIconButton>
           </div>
           <Transition name="workspace-agents">
             <div v-if="expandedProjectIds.has(project.id)" class="workspace-agents-wrapper">
               <div class="agent-list ml-6">
                 <div v-for="task in tasksForProject(project.id)" :key="task.id" class="agent-row group flex min-w-0 items-center rounded-sm" :class="task.id === activeTaskId ? 'row-active' : ''">
-                  <button class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })">
+                  <button type="button" class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })">
                     <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
                     <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="task.title" />
                     <LoaderCircle v-if="task.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
                   </button>
-                  <button class="agent-delete round-icon-button flex h-7 w-7 shrink-0 items-center justify-center" :title="`删除 ${task.title}`" @click="removeTask(task)"><X class="h-3 w-3" /></button>
+                  <PxIconButton class="agent-delete h-7 w-7 shrink-0" :label="`删除 ${task.title}`" @click="removeTask(task)"><X class="h-3 w-3" /></PxIconButton>
                 </div>
-                <button v-if="!tasksForProject(project.id).length" class="theme-muted-text flex h-8 w-full items-center gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</button>
+                <PxButton v-if="!tasksForProject(project.id).length" variant="ghost" size="sm" class="theme-muted-text h-8 w-full justify-start gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</PxButton>
               </div>
             </div>
           </Transition>
@@ -1179,10 +1195,10 @@ onBeforeUnmount(() => {
         <div v-if="!projects.length && !loading" class="theme-muted-text px-3 py-8 text-center text-xs">还没有工作区</div>
       </div>
       <footer class="border-t p-2">
-        <button class="settings-entry flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs font-medium" @click="openManagedDialog('settings')">
+        <PxButton variant="ghost" size="sm" class="settings-entry h-9 w-full justify-start gap-2 px-2 text-left text-xs" @click="openManagedDialog('settings')">
           <Settings class="h-4 w-4 shrink-0" />
           <span>设置</span>
-        </button>
+        </PxButton>
       </footer>
     </aside>
 
@@ -1193,24 +1209,22 @@ onBeforeUnmount(() => {
       :aria-hidden="isMobile ? mobileView !== 'timeline' : undefined"
     >
       <header class="timeline-header flex h-14 shrink-0 items-center gap-2 border-b px-4">
-        <button class="mobile-back-button quiet-icon-button h-8 w-8" title="返回项目列表" aria-label="返回项目列表" @click="showMobileSidebar">
-          <ArrowLeft class="h-4 w-4" />
-        </button>
+        <PxIconButton class="mobile-back-button h-8 w-8" label="返回项目列表" @click="showMobileSidebar"><ArrowLeft class="h-4 w-4" /></PxIconButton>
         <div v-if="activeProject" class="mobile-workspace-path min-w-0 flex-1" :title="activeProject.repositoryRoot">
           <span class="block truncate text-sm font-medium">{{ activeProjectDirectoryName }}</span>
         </div>
         <div class="ml-auto flex shrink-0 items-center gap-2">
           <div v-if="timelineSyncing" class="timeline-sync-status theme-muted-text flex h-8 w-8 items-center justify-center" title="正在同步 Timeline" aria-label="正在同步 Timeline"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
           <div v-if="activeTask" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
-          <button v-if="activeTask" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :title="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></button>
-           <button v-if="activeTask" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :title="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></button>
-           <button v-if="activeTask" class="drawer-trigger quiet-icon-button h-8 w-8" :class="drawerMode === 'task-details' ? 'is-active' : ''" title="任务详情" :aria-pressed="drawerMode === 'task-details'" @click="toggleDrawer('task-details')"><Info class="h-4 w-4" /></button>
+          <PxIconButton v-if="activeTask" class="drawer-trigger h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :label="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></PxIconButton>
+          <PxIconButton v-if="activeTask" class="drawer-trigger h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :label="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></PxIconButton>
+          <PxIconButton v-if="activeTask" class="drawer-trigger h-8 w-8" :class="drawerMode === 'task-details' ? 'is-active' : ''" label="任务详情" :aria-pressed="drawerMode === 'task-details'" @click="toggleDrawer('task-details')"><Info class="h-4 w-4" /></PxIconButton>
         </div>
       </header>
 
       <div class="relative min-h-0 flex-1">
         <div ref="timelineElement" class="timeline h-full overflow-y-auto" @scroll.passive="handleTimelineScroll">
-          <div v-if="timelineSyncError && !timelineHasContent" class="flex h-full items-center justify-center p-8 text-center"><div class="max-w-sm"><p class="error-row rounded-sm border px-3 py-2 text-left text-xs">Timeline 同步失败：{{ timelineSyncError }}</p><button class="tool-button mt-3 h-8 px-3 text-xs" @click="selectTask(activeTaskId)">重试</button></div></div>
+          <div v-if="timelineSyncError && !timelineHasContent" class="flex h-full items-center justify-center p-8 text-center"><div class="max-w-sm"><p class="error-row rounded-sm border px-3 py-2 text-left text-xs">Timeline 同步失败：{{ timelineSyncError }}</p><PxButton variant="secondary" size="sm" class="mt-3" @click="selectTask(activeTaskId)">重试</PxButton></div></div>
           <div v-else-if="!activeTask || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeTask ? '开始一段新的协作' : '新建一条会话' }}</p><p v-if="activeTask" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
@@ -1232,7 +1246,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-          <div v-if="timelineSyncError && timelineHasContent" class="status-float status-float-pill status-float-error timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 gap-2" role="alert"><CircleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>同步失败</span><button class="font-medium" @click="selectTask(activeTaskId)">重试</button></div>
+          <div v-if="timelineSyncError && timelineHasContent" class="status-float status-float-pill status-float-error timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 gap-2" role="alert"><CircleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>同步失败</span><PxButton variant="ghost" size="sm" class="font-medium" @click="selectTask(activeTaskId)">重试</PxButton></div>
         </div>
         <div v-if="timelineLoading && !loading" class="timeline-loading-overlay absolute inset-0 z-10 flex items-start justify-center pt-16" role="status" aria-label="加载中">
           <div class="status-float status-float-pill timeline-loading-indicator gap-2">
@@ -1243,22 +1257,21 @@ onBeforeUnmount(() => {
         <div v-if="loadingOlderHistory" class="status-float status-float-icon pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2" role="status" aria-label="正在加载更早记录">
           <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
         </div>
-        <button
+        <PxIconButton
           v-if="!followingTimeline && timelineHasContent"
-          class="timeline-jump-button tool-button round-icon-button absolute bottom-3 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center p-0 shadow-sm"
-          :title="hasNewTimelineItems ? '有新消息，回到底部' : '回到底部'"
-          :aria-label="hasNewTimelineItems ? '有新消息，回到底部' : '回到底部'"
+          class="timeline-jump-button absolute bottom-3 left-1/2 z-10 h-9 w-9 -translate-x-1/2 p-0 shadow-sm"
+          :label="hasNewTimelineItems ? '有新消息，回到底部' : '回到底部'"
           @click="jumpToLatest"
         >
           <ArrowDown class="h-3.5 w-3.5" />
-        </button>
+        </PxIconButton>
       </div>
 
       <footer v-if="activeTask" class="composer-wrap shrink-0 p-3 sm:p-4">
         <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
         <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex max-w-3xl items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs">
           <span>{{ sendBlockedReason }}</span>
-          <button type="button" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</button>
+          <PxButton variant="ghost" size="sm" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</PxButton>
         </div>
         <AgentComposer
           :key="activeTaskId"
@@ -1300,60 +1313,57 @@ onBeforeUnmount(() => {
 
     <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" />
 
-    <DialogShell
+    <PxDialog
       :open="dialog === 'conversation'"
-      panel-class="new-conversation-panel h-[100dvh] max-w-none border-0 sm:h-[min(32rem,calc(100dvh-3rem))] sm:max-w-md sm:border"
+      panel-class="new-conversation-panel h-[100dvh] max-h-[100dvh] max-w-none border-0 sm:h-[min(32rem,calc(100dvh-3rem))] sm:max-h-[min(32rem,calc(100dvh-3rem))] sm:max-w-md sm:border"
       header-class="h-14 px-4 sm:px-5"
       body-class="flex min-h-0 flex-1 flex-col"
       @close="closeDialog"
     >
       <template #title><h2 class="text-sm font-semibold">新会话</h2></template>
-      <form class="flex min-h-0 flex-1 flex-col px-4 pb-4" @submit.prevent="createConversation">
-        <label class="theme-muted-text mt-4 block text-xs" for="workspace-path">路径</label>
-        <DirectorySearchInput
-          ref="projectPathInput"
-          v-model="projectPath"
-          class="mt-1"
-          :loading="directorySearchLoading"
-          :open="directorySuggestionsOpen"
-          :suggestions="directorySuggestions"
-          :error="directorySearchError"
-          :selected-index="selectedDirectoryIndex"
-          :disabled="creating"
-          @input="scheduleDirectorySearch"
-          @keydown="handleDirectoryKeydown"
-          @mouseenter="selectedDirectoryIndex = $event"
-          @select="selectDirectory"
-        />
-        <div v-if="conversationError" class="error-row mt-3 shrink-0 rounded-sm border px-3 py-2 text-xs" role="alert">{{ conversationError }}</div>
+      <form class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4" @submit.prevent="createConversation">
+        <PxField label="路径" for-id="workspace-path" :error="directorySearchError">
+          <DirectorySearchInput
+            ref="projectPathInput"
+            v-model="projectPath"
+            class="mt-1"
+            :loading="directorySearchLoading"
+            :open="directorySuggestionsOpen"
+            :suggestions="directorySuggestions"
+            :error="directorySearchError"
+            :selected-index="selectedDirectoryIndex"
+            :disabled="creating"
+            @input="scheduleDirectorySearch"
+            @keydown="handleDirectoryKeydown"
+            @mouseenter="selectedDirectoryIndex = $event"
+            @select="selectDirectory"
+          />
+        </PxField>
+        <PxAlert v-if="conversationError" class="mt-3 shrink-0">{{ conversationError }}</PxAlert>
         <div class="shrink-0">
-          <label class="theme-muted-text mt-4 block text-xs" for="conversation-provider">Provider</label>
-          <select id="conversation-provider" v-model="taskProvider" class="tool-input mt-1" :disabled="creating">
-            <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
-          </select>
-          <label class="theme-muted-text mt-4 block text-xs" for="task-title">任务标题</label>
-          <input id="task-title" v-model="taskTitle" class="tool-input mt-1" placeholder="任务标题" :disabled="creating" />
-          <label class="theme-muted-text mt-4 block text-xs" for="execution-kind">执行位置</label>
-          <select id="execution-kind" v-model="executionKind" class="tool-input mt-1" :disabled="creating">
-            <option value="worktree">新建 Worktree</option><option value="local">当前目录</option>
-          </select>
+          <PxField class="mt-4" label="Provider" for-id="conversation-provider">
+            <PxSelect id="conversation-provider" v-model="taskProvider" :options="providerOptions" :disabled="creating" aria-label="Provider" />
+          </PxField>
+          <PxField class="mt-4" label="任务标题" for-id="task-title">
+            <input id="task-title" v-model="taskTitle" class="tool-input mt-1" placeholder="任务标题" :disabled="creating" />
+          </PxField>
+          <PxField class="mt-4" label="执行位置" for-id="execution-kind">
+            <PxSelect id="execution-kind" v-model="executionKind" :options="executionOptions" :disabled="creating" aria-label="执行位置" />
+          </PxField>
           <div v-if="executionKind === 'worktree'" class="grid grid-cols-1 gap-2">
-            <label class="sr-only" for="task-base-ref">基线</label>
-            <select id="task-base-ref" v-model="taskBaseRef" class="tool-input mt-2" :disabled="creating">
-              <option value="HEAD">HEAD（当前提交）</option>
-              <option value="origin/main">origin/main</option>
-              <option value="origin/master">origin/master</option>
-              <option value="main">main</option>
-              <option value="master">master</option>
-            </select>
-            <input v-model="taskSlug" class="tool-input mt-2" placeholder="Worktree 名称，例如 fix-login" :disabled="creating" />
+            <PxField class="mt-2" label="基线" for-id="task-base-ref">
+              <PxSelect id="task-base-ref" v-model="taskBaseRef" :options="baseRefOptions" :disabled="creating" aria-label="基线" />
+            </PxField>
+            <PxField label="Worktree 名称" hint="可选，例如 fix-login">
+              <input v-model="taskSlug" class="tool-input mt-1" placeholder="Worktree 名称，例如 fix-login" :disabled="creating" />
+            </PxField>
           </div>
         </div>
-        <div class="mt-4 flex shrink-0 justify-end"><button class="tool-button tool-button-primary h-9 gap-2 px-4 text-xs" :disabled="!projectPath.trim() || !taskProvider || creating"><LoaderCircle v-if="creating" class="h-3.5 w-3.5 animate-spin" />创建会话</button></div>
+        <div class="sticky bottom-0 mt-4 flex shrink-0 justify-end border-t px-0 pb-0 pt-3" style="background: var(--theme-appPanel);"><PxButton type="submit" variant="primary" size="sm" :loading="creating" :disabled="!projectPath.trim() || !taskProvider">创建会话</PxButton></div>
       </form>
-    </DialogShell>
+    </PxDialog>
 
-    <DialogShell
+    <PxDialog
       :open="dialog === 'import'"
       panel-class="import-dialog-panel h-[100dvh] max-w-none border-0 sm:h-[min(40rem,calc(100dvh-3rem))] sm:max-w-2xl sm:border"
       header-class="h-14 px-4 sm:px-5"
@@ -1364,13 +1374,13 @@ onBeforeUnmount(() => {
       <div class="flex min-h-0 flex-1 flex-col px-4 pb-4">
         <div class="import-layout flex min-h-0 flex-1 gap-3 pt-1">
           <aside class="import-provider-list flex w-28 shrink-0 flex-col gap-1 border-r pr-3">
-            <button class="import-provider-filter flex h-8 items-center rounded-sm px-2 text-left text-xs" :class="!importProviderFilter ? 'is-active' : ''" @click="selectImportProvider('')">全部 Provider</button>
-            <button v-for="provider in providers" :key="provider.id" class="import-provider-filter flex h-8 items-center rounded-sm px-2 text-left text-xs" :class="importProviderFilter === provider.id ? 'is-active' : ''" @click="selectImportProvider(provider.id)">{{ provider.label }}</button>
+            <PxButton variant="ghost" size="sm" class="import-provider-filter h-8 justify-start px-2 text-left text-xs" :class="!importProviderFilter ? 'is-active' : ''" @click="selectImportProvider('')">全部 Provider</PxButton>
+            <PxButton v-for="provider in providers" :key="provider.id" variant="ghost" size="sm" class="import-provider-filter h-8 justify-start px-2 text-left text-xs" :class="importProviderFilter === provider.id ? 'is-active' : ''" @click="selectImportProvider(provider.id)">{{ provider.label }}</PxButton>
           </aside>
           <section class="flex min-w-0 min-h-0 flex-1 flex-col">
             <div class="relative shrink-0">
               <input v-model="importQuery" class="tool-input h-9 w-full pr-9 text-xs" placeholder="搜索标题、目录、Session ID 或首条消息" @input="scheduleImportSearch" />
-              <button v-if="importQuery" type="button" class="import-query-clear round-icon-button theme-muted-text absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center" title="清空搜索" aria-label="清空搜索" @click="clearImportQuery"><X class="h-3.5 w-3.5" /></button>
+              <PxIconButton v-if="importQuery" class="import-query-clear theme-muted-text absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2" label="清空搜索" @click="clearImportQuery"><X class="h-3.5 w-3.5" /></PxIconButton>
               <LoaderCircle v-else-if="importLoading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin" />
             </div>
             <div v-if="importError" class="error-row mt-3 rounded-sm border px-3 py-2 text-xs">{{ importError }}</div>
@@ -1380,7 +1390,7 @@ onBeforeUnmount(() => {
                 <div v-else-if="!importSessions.length" key="empty" class="theme-muted-text flex h-full min-h-0 items-center justify-center text-xs">没有可导入的会话</div>
                 <div v-else key="results" class="h-full min-h-0">
                   <TransitionGroup name="import-session" tag="div" class="h-full min-h-0 space-y-1 overflow-y-auto pr-1">
-                    <button v-for="session in importSessions" :key="`${session.providerId}:${session.providerHandleId}`" class="import-session-row flex w-full min-w-0 items-center gap-3 rounded-sm border px-3 py-2 text-left" :disabled="Boolean(importingId)" @click="importSession(session)">
+                    <button v-for="session in importSessions" :key="`${session.providerId}:${session.providerHandleId}`" type="button" class="import-session-row flex w-full min-w-0 items-center gap-3 rounded-sm border px-3 py-2 text-left" :disabled="Boolean(importingId)" @click="importSession(session)">
                       <span class="import-provider-mark flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-[10px] font-semibold">{{ providerLabel(session.providerId).slice(0, 1) }}</span>
                       <span class="min-w-0 flex-1">
                         <span class="flex items-center gap-2"><span class="truncate text-xs font-medium">{{ session.title }}</span><span class="theme-muted-text shrink-0 text-[10px]">{{ providerLabel(session.providerId) }}</span><span class="theme-muted-text ml-auto shrink-0 text-[10px]">{{ formatImportActivity(session.lastActivityAt) }}</span></span>
@@ -1399,7 +1409,7 @@ onBeforeUnmount(() => {
           </section>
         </div>
       </div>
-    </DialogShell>
+    </PxDialog>
 
     <ConfirmDialog
       :open="confirmation.open"

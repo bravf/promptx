@@ -6,6 +6,7 @@ import { workspaceLinksForTool } from '../lib/timelineWorkspaceLinks.js'
 import TimelineMarkdown from './TimelineMarkdown.vue'
 import TimelineMessageMeta from './TimelineMessageMeta.vue'
 import TimelineUserMessage from './TimelineUserMessage.vue'
+import PxButton from './PxButton.vue'
 
 const props = defineProps({
   turn: { type: Object, required: true },
@@ -72,10 +73,10 @@ onBeforeUnmount(() => clearInterval(clockTimer))
     </article>
 
     <section v-if="showProcess" class="process-group mb-5 ml-7">
-      <button type="button" class="theme-muted-text flex w-full items-center gap-1.5 py-1 text-left text-xs disabled:cursor-default" :disabled="!hasProcessEntries" :aria-expanded="hasProcessEntries ? expanded : undefined" @click="expanded = !expanded">
+      <PxButton variant="ghost" size="sm" class="theme-muted-text h-auto w-full justify-start gap-1.5 py-1 text-left text-xs disabled:cursor-default" :disabled="!hasProcessEntries" :aria-expanded="hasProcessEntries ? expanded : undefined" @click="expanded = !expanded">
         <span>{{ heading }}</span>
         <ChevronRight v-if="hasProcessEntries" class="h-3.5 w-3.5 shrink-0 transition-transform" :class="expanded ? 'rotate-90' : ''" />
-      </button>
+      </PxButton>
       <div v-if="expanded && hasProcessEntries" class="process-content pb-1 pl-5 pt-1">
         <div v-for="entry in visibleProcessEntries" :key="`${entry.seqStart}-${entry.item.callId || entry.item.type}`" class="process-entry py-1.5 text-xs">
           <TimelineMarkdown v-if="entry.item.type === 'assistant_message'" class="theme-secondary-text" :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
@@ -86,11 +87,11 @@ onBeforeUnmount(() => clearInterval(clockTimer))
               <div class="flex items-center gap-2"><span class="truncate font-medium">{{ entry.item.name }}</span><Check v-if="entry.item.status === 'completed'" class="h-3.5 w-3.5 shrink-0" /><LoaderCircle v-else-if="entry.item.status === 'running'" class="h-3.5 w-3.5 shrink-0 animate-spin" /></div>
               <div v-if="entry.item.detail?.command || entry.item.detail?.type" class="theme-muted-text mt-0.5 truncate font-mono text-[10px]">{{ entry.item.detail?.command || entry.item.detail?.type }}</div>
               <div v-if="toolLinks(entry).length" class="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1">
-                <button v-for="link in toolLinks(entry)" :key="`${link.intent}:${link.path}`" type="button" class="workspace-path-link flex min-w-0 items-center gap-1 text-left font-mono text-[10px]" :title="link.path" @click="emit('open-workspace-path', link)">
+                <PxButton v-for="link in toolLinks(entry)" :key="`${link.intent}:${link.path}`" variant="ghost" size="sm" class="workspace-path-link h-auto min-h-0 min-w-0 justify-start gap-1 border-0 p-0 text-left font-mono text-[10px]" :title="link.path" @click="emit('open-workspace-path', link)">
                   <FileDiff v-if="link.intent === 'diff'" class="h-3 w-3 shrink-0" />
                   <FileText v-else class="h-3 w-3 shrink-0" />
                   <span class="truncate">{{ link.path }}<template v-if="link.line">:{{ link.line }}</template></span>
-                </button>
+                </PxButton>
               </div>
               <div v-if="entry.item.error?.message" class="theme-danger-text mt-1">{{ entry.item.error.message }}</div>
             </div>

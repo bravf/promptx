@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { FileText, ImageOff, LoaderCircle, RotateCw, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
+import PxButton from './PxButton.vue'
+import PxIconButton from './PxIconButton.vue'
 
 const props = defineProps({
   content: { type: Array, default: () => [] },
@@ -108,11 +110,12 @@ onBeforeUnmount(() => {
   <div class="user-message max-w-[85%] rounded-sm px-3 py-2 text-sm">
     <div v-if="text" class="whitespace-pre-wrap">{{ text }}</div>
     <div v-if="attachments.length" class="flex flex-wrap gap-2" :class="text ? 'mt-2' : ''">
-      <button
+      <PxButton
         v-for="block in attachments.filter((item) => item.type === 'image')"
         :key="block.assetId"
-        type="button"
-        class="message-image relative overflow-hidden rounded-sm"
+        variant="ghost"
+        size="md"
+        class="message-image relative min-h-0 overflow-hidden rounded-sm border-0 p-0"
         :data-state="assetStates[block.assetId] || 'loading'"
         :disabled="!['ready', 'error'].includes(assetStates[block.assetId])"
         :aria-busy="['loading', 'decoding'].includes(assetStates[block.assetId])"
@@ -136,7 +139,7 @@ onBeforeUnmount(() => {
           <ImageOff class="h-4 w-4" />
           <span class="flex items-center gap-1 text-[10px]"><RotateCw class="h-3 w-3" />重试</span>
         </span>
-      </button>
+      </PxButton>
       <a v-for="block in attachments.filter((item) => item.type === 'file')" :key="block.assetId" class="message-file flex min-w-0 max-w-64 items-center gap-2 rounded-sm px-2 py-1.5" :href="assetUrls[block.assetId] || undefined" :download="block.name">
         <FileText class="h-4 w-4 shrink-0" />
         <span class="min-w-0"><span class="block truncate text-xs font-medium">{{ block.name }}</span><span class="theme-muted-text block text-[10px]">{{ formatBytes(block.size) }}</span></span>
@@ -145,7 +148,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div v-if="preview" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-6" @click.self="closePreview">
-    <button type="button" class="image-preview-overlay__button tool-button round-icon-button absolute right-4 top-4 h-9 w-9" title="关闭预览" @click="closePreview"><X class="h-4 w-4" /></button>
+    <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 h-9 w-9" label="关闭预览" @click="closePreview"><X class="h-4 w-4" /></PxIconButton>
     <div v-if="previewLoading" class="theme-muted-text absolute inset-0 flex items-center justify-center gap-2 text-xs">
       <LoaderCircle class="h-4 w-4 animate-spin" />
       <span>正在加载大图</span>

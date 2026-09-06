@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { Check } from 'lucide-vue-next'
 import { useTheme } from '../composables/useTheme.js'
+import PxButton from './PxButton.vue'
 
 const { currentTheme, setTheme, themes } = useTheme()
 
@@ -35,11 +36,12 @@ function handleThemeSelect(themeId) {
     <div class="space-y-4">
       <section v-for="group in themeGroups" :key="group.id" class="space-y-1.5">
         <div class="theme-muted-text px-1 text-[10px] font-medium uppercase tracking-[0.16em]">{{ group.label }}</div>
-        <button
+        <PxButton
           v-for="theme in group.items"
           :key="theme.id"
-          type="button"
-          class="theme-option theme-toggle-card w-full rounded-sm border px-3 py-2 text-left transition"
+          variant="ghost"
+          size="md"
+          class="theme-option theme-toggle-card h-auto w-full justify-start rounded-sm border px-3 py-2 text-left"
           :class="theme.id === currentTheme.id ? 'theme-option-active' : 'theme-option-idle'"
           @click="handleThemeSelect(theme.id)"
         >
@@ -60,7 +62,7 @@ function handleThemeSelect(themeId) {
               <div class="theme-muted-text theme-note-text mt-1">{{ theme.description }}</div>
             </div>
           </div>
-        </button>
+        </PxButton>
       </section>
     </div>
   </div>

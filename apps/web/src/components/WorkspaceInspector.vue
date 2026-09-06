@@ -17,6 +17,8 @@ import {
   X,
 } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
+import PxIconButton from './PxIconButton.vue'
+import PxButton from './PxButton.vue'
 import { inferPreviewLanguageFromPath, renderSourceCodePreview } from '../lib/sourceCodePreview.js'
 
 const props = defineProps({
@@ -284,9 +286,9 @@ defineExpose({ openPath, refreshGit })
         <span v-if="mode === 'diff' && gitStatus?.files.length" class="tab-count">{{ gitStatus.files.length }}</span>
       </div>
       <div class="flex items-center gap-0.5">
-        <button v-if="mode === 'files'" class="drawer-action quiet-icon-button h-8 w-8" :class="!showHiddenFiles ? 'is-active' : ''" :title="showHiddenFiles ? '隐藏点文件' : '显示点文件'" :aria-pressed="!showHiddenFiles" @click="showHiddenFiles = !showHiddenFiles"><Eye v-if="showHiddenFiles" class="h-3.5 w-3.5" /><EyeOff v-else class="h-3.5 w-3.5" /></button>
-        <button class="quiet-icon-button h-8 w-8" title="刷新" @click="mode === 'files' ? loadDirectory('', true) : loadGitStatus()"><RefreshCw class="h-3.5 w-3.5" :class="(directoryLoading.has('') || gitLoading) ? 'animate-spin' : ''" /></button>
-        <button class="quiet-icon-button h-8 w-8" title="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></button>
+        <PxIconButton v-if="mode === 'files'" class="drawer-action h-8 w-8" :class="!showHiddenFiles ? 'is-active' : ''" :label="showHiddenFiles ? '隐藏点文件' : '显示点文件'" :aria-pressed="!showHiddenFiles" @click="showHiddenFiles = !showHiddenFiles"><Eye v-if="showHiddenFiles" class="h-3.5 w-3.5" /><EyeOff v-else class="h-3.5 w-3.5" /></PxIconButton>
+        <PxIconButton class="h-8 w-8" label="刷新" @click="mode === 'files' ? loadDirectory('', true) : loadGitStatus()"><RefreshCw class="h-3.5 w-3.5" :class="(directoryLoading.has('') || gitLoading) ? 'animate-spin' : ''" /></PxIconButton>
+        <PxIconButton class="h-8 w-8" label="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
       </div>
     </header>
 
@@ -298,10 +300,12 @@ defineExpose({ openPath, refreshGit })
           <div v-for="index in 8" :key="index" class="inspector-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
         </div>
         <template v-else>
-          <button
+          <PxButton
             v-for="entry in visibleFiles"
             :key="entry.path"
-            class="tree-row flex h-7 w-full min-w-0 items-center gap-1.5 pr-2 text-left text-xs"
+            variant="ghost"
+            size="sm"
+            class="tree-row h-7 min-h-0 w-full min-w-0 justify-start gap-1.5 border-0 pr-2 text-left text-xs"
             :class="selectedPath === entry.path ? 'is-selected' : ''"
             :style="{ paddingLeft: `${8 + entry.depth * 14}px` }"
             :title="entry.path"
@@ -315,7 +319,7 @@ defineExpose({ openPath, refreshGit })
             <File v-else class="theme-muted-text h-3.5 w-3.5 shrink-0" />
             <span class="truncate">{{ entry.name }}</span>
             <LoaderCircle v-if="directoryLoading.has(entry.path)" class="theme-muted-text ml-auto h-3 w-3 shrink-0 animate-spin" />
-          </button>
+          </PxButton>
         </template>
         <div v-if="directoryCache[''] && !visibleFiles.length" class="theme-muted-text px-3 py-8 text-center text-xs">工作区为空</div>
       </div>
@@ -347,11 +351,11 @@ defineExpose({ openPath, refreshGit })
         <div v-else-if="gitStatus && !gitStatus.files.length" class="theme-muted-text px-4 py-8 text-center text-xs">没有未提交的变更</div>
         <template v-else>
           <div v-if="gitStatus?.branch" class="theme-muted-text flex h-7 items-center gap-1.5 px-3 text-[10px]"><GitBranch class="h-3 w-3" />{{ gitStatus.branch }}</div>
-          <button v-for="file in gitStatus?.files" :key="file.path" class="change-row flex h-8 w-full min-w-0 items-center gap-2 px-3 text-left text-xs" :class="selectedDiffPath === file.path ? 'is-selected' : ''" :title="file.path" @click="selectDiff(file.path)">
+          <PxButton v-for="file in gitStatus?.files" :key="file.path" variant="ghost" size="sm" class="change-row h-8 min-h-0 w-full min-w-0 justify-start gap-2 border-0 px-3 text-left text-xs" :class="selectedDiffPath === file.path ? 'is-selected' : ''" :title="file.path" @click="selectDiff(file.path)">
             <span class="change-status w-4 shrink-0 text-center font-mono text-[10px]" :data-status="file.status">{{ statusLabel(file.status) }}</span>
             <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{{ file.path }}</span>
             <span v-if="file.staged" class="theme-muted-text shrink-0 text-[9px]">S</span>
-          </button>
+          </PxButton>
         </template>
       </div>
 

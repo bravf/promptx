@@ -5,6 +5,8 @@ import QRCode from 'qrcode'
 import DialogShell from './DialogShell.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ThemeToggle from './ThemeToggle.vue'
+import PxButton from './PxButton.vue'
+import PxIconButton from './PxIconButton.vue'
 import { v2Api } from '../lib/v2Api.js'
 import { writeClipboardText } from '../lib/clipboard.js'
 
@@ -139,25 +141,24 @@ watch(
           <Settings2 class="h-4 w-4 shrink-0" />
           <span>设置</span>
         </h2>
-        <button type="button" class="quiet-icon-button h-8 w-8 shrink-0" title="关闭设置" aria-label="关闭设置" @click="emit('close')">
-          <X class="h-4 w-4" />
-        </button>
+        <PxIconButton class="h-8 w-8 shrink-0" label="关闭设置" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
       </div>
     </template>
 
     <aside class="v2-settings-nav shrink-0 px-2 py-2 sm:w-52 sm:px-3 sm:py-4">
       <nav class="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-visible">
-        <button
+        <PxButton
           v-for="section in sections"
           :key="section.id"
-          type="button"
-          class="v2-settings-nav-item flex h-9 shrink-0 items-center gap-2 rounded-sm px-3 text-left text-xs font-medium sm:w-full"
+          variant="ghost"
+          size="sm"
+          class="v2-settings-nav-item h-9 shrink-0 justify-start gap-2 rounded-sm px-3 text-left text-xs sm:w-full"
           :class="activeSection === section.id ? 'is-active' : ''"
           @click="activeSection = section.id"
         >
           <component :is="section.icon" class="h-4 w-4 shrink-0" />
           <span>{{ section.label }}</span>
-        </button>
+        </PxButton>
       </nav>
     </aside>
 
@@ -207,13 +208,11 @@ watch(
               <p class="theme-muted-text mt-1 text-xs">完整链接等同远程访问凭证，不要公开分享。</p>
               <div class="relay-link mt-3 flex min-w-0 items-center gap-2 rounded-sm px-3 py-2">
                 <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{{ relayData.pairing.url }}</span>
-                <button type="button" class="quiet-icon-button h-7 w-7 shrink-0" :title="copied ? '已复制' : '复制链接'" @click="copyPairingUrl">
-                  <Check v-if="copied" class="h-3.5 w-3.5" /><Copy v-else class="h-3.5 w-3.5" />
-                </button>
+                <PxIconButton class="h-7 w-7 shrink-0" :label="copied ? '已复制' : '复制链接'" @click="copyPairingUrl"><Check v-if="copied" class="h-3.5 w-3.5" /><Copy v-else class="h-3.5 w-3.5" /></PxIconButton>
               </div>
               <div class="mt-4 flex flex-wrap gap-2">
-                <button type="button" class="tool-button h-8 gap-1.5 px-3 text-xs" :disabled="relayLoading" @click="reconnectRelay"><RefreshCw class="h-3.5 w-3.5" :class="relayLoading ? 'animate-spin' : ''" />重新连接</button>
-                <button type="button" class="tool-button h-8 gap-1.5 px-3 text-xs" :disabled="relayLoading" @click="confirmReset = true"><RotateCcw class="h-3.5 w-3.5" />重置远程身份</button>
+                <PxButton variant="secondary" size="sm" class="h-8 gap-1.5 text-xs" :disabled="relayLoading" @click="reconnectRelay"><RefreshCw class="h-3.5 w-3.5" :class="relayLoading ? 'animate-spin' : ''" />重新连接</PxButton>
+                <PxButton variant="secondary" size="sm" class="h-8 gap-1.5 text-xs" :disabled="relayLoading" @click="confirmReset = true"><RotateCcw class="h-3.5 w-3.5" />重置远程身份</PxButton>
               </div>
             </div>
             <img v-if="pairingQr" :src="pairingQr" alt="PromptX 远程访问二维码" class="relay-qr h-40 w-40 rounded-sm p-2" />

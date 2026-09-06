@@ -133,7 +133,7 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
 
   await desktop.getByRole('button', { name: '在 移动端回归工作区 中新建会话' }).click()
   await desktop.getByLabel('任务标题').fill('界面创建会话')
-  assert.equal(await desktop.getByLabel('执行位置').inputValue(), 'local')
+  assert.equal((await desktop.getByLabel('执行位置').textContent()).trim(), '当前目录')
   await desktop.getByRole('button', { name: '创建会话', exact: true }).click()
   await desktop.getByRole('button', { name: '界面创建会话', exact: true }).waitFor()
   await desktop.getByRole('button', { name: '删除 界面创建会话' }).click()

@@ -29,7 +29,10 @@ export async function reconcileEnvironment(environment) {
     try {
       const status = await runGit(environment.cwd, ['status', '--porcelain'])
       return { ...environment, status: status ? 'dirty' : 'clean' }
-    } catch { return { ...environment, status: 'unavailable' } }
+    } catch {
+      // 本地执行目录可以不是 Git 仓库，只要目录仍然存在就可以继续运行 Agent。
+      return { ...environment, status: 'ready' }
+    }
   }
   try {
     const porcelain = await listWorktrees(environment.repositoryRoot)
