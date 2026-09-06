@@ -1315,13 +1315,13 @@ onBeforeUnmount(() => {
 
     <PxDialog
       :open="dialog === 'conversation'"
-      panel-class="new-conversation-panel h-[100dvh] max-h-[100dvh] max-w-none border-0 sm:h-[min(32rem,calc(100dvh-3rem))] sm:max-h-[min(32rem,calc(100dvh-3rem))] sm:max-w-md sm:border"
+      panel-class="new-conversation-panel h-[100dvh] max-h-[100dvh] max-w-none border-0 sm:h-[min(44rem,calc(100dvh-1.5rem))] sm:max-h-[min(44rem,calc(100dvh-1.5rem))] sm:max-w-md sm:border"
       header-class="h-14 px-4 sm:px-5"
       body-class="flex min-h-0 flex-1 flex-col"
       @close="closeDialog"
     >
       <template #title><h2 class="text-sm font-semibold">新会话</h2></template>
-      <form class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4" @submit.prevent="createConversation">
+      <form class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4 pt-4 sm:pt-5" @submit.prevent="createConversation">
         <PxField label="路径" for-id="workspace-path" :error="directorySearchError">
           <DirectorySearchInput
             ref="projectPathInput"
