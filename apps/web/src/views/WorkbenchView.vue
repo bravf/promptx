@@ -1293,9 +1293,9 @@ onBeforeUnmount(() => {
       </footer>
     </main>
 
-    <div v-if="activeTask && drawerMode" :key="`${activeTask.id}:${drawerMode}`" class="contents">
+    <Transition name="workspace-drawer">
       <WorkspaceInspector
-        v-if="drawerMode === 'files'"
+        v-if="activeTask && drawerMode === 'files'"
         ref="filesDrawer"
         :task-id="activeTask.id"
         :workspace-cwd="activeTask.environment?.cwd || activeProject.repositoryRoot"
@@ -1303,8 +1303,10 @@ onBeforeUnmount(() => {
         mode="files"
         @close="drawerMode = null"
       />
+    </Transition>
+    <Transition name="workspace-drawer">
       <WorkspaceInspector
-        v-else-if="drawerMode === 'diff'"
+        v-if="activeTask && drawerMode === 'diff'"
         ref="diffDrawer"
         :task-id="activeTask.id"
         :workspace-cwd="activeTask.environment?.cwd || activeProject.repositoryRoot"
@@ -1312,13 +1314,15 @@ onBeforeUnmount(() => {
         mode="diff"
         @close="drawerMode = null"
       />
+    </Transition>
+    <Transition name="workspace-drawer">
       <TaskDetailsDrawer
-        v-else
+        v-if="activeTask && drawerMode === 'task-details'"
         :task-id="activeTask.id"
         @close="drawerMode = null"
         @changed="refreshProjects"
       />
-    </div>
+    </Transition>
 
     <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" />
 

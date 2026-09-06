@@ -56,6 +56,16 @@ async function availablePort() {
   return port
 }
 
+async function assertDrawerTransition(locator) {
+  await locator.waitFor()
+  const transition = await locator.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { duration: style.transitionDuration, property: style.transitionProperty }
+  })
+  assert.match(transition.property, /transform/)
+  assert.notEqual(transition.duration, '0s')
+}
+
 test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v2-web-e2e-'))
   const assetsDir = path.join(root, 'uploads')
@@ -156,10 +166,17 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   await mobile.getByRole('button', { name: '新会话' }).waitFor()
 
   await desktop.getByRole('button', { name: '浏览文件' }).click()
+  await assertDrawerTransition(desktop.locator('.workspace-inspector'))
   await desktop.waitForTimeout(300)
   const inspectorBox = await desktop.locator('.workspace-inspector').boundingBox()
   await desktop.getByRole('button', { name: '关闭抽屉' }).click()
+  await desktop.locator('.workspace-inspector').waitFor({ state: 'detached' })
+  await desktop.getByRole('button', { name: '查看 Diff' }).click()
+  await assertDrawerTransition(desktop.locator('.workspace-inspector'))
+  await desktop.getByRole('button', { name: '关闭抽屉' }).click()
+  await desktop.locator('.workspace-inspector').waitFor({ state: 'detached' })
   await desktop.getByRole('button', { name: '任务详情' }).click()
+  await assertDrawerTransition(desktop.locator('.task-details-drawer'))
   await desktop.waitForTimeout(300)
   const detailsBox = await desktop.locator('.task-details-drawer').boundingBox()
   assert.deepEqual(detailsBox, inspectorBox)

@@ -263,12 +263,13 @@ test('V2 全面桌面交互回归', async (t) => {
   await page.locator('button[title=".hidden-note"]').waitFor()
 
   await page.getByTitle('查看 Diff').click()
-  await page.getByText('main', { exact: true }).waitFor()
-  await page.locator('button[title="README.md"]').click()
+  const diffDrawer = page.locator('.workspace-inspector:not(.workspace-drawer-leave-active)')
+  await diffDrawer.getByText('main', { exact: true }).waitFor()
+  await diffDrawer.locator('button[title="README.md"]').click()
   await page.getByText('+工作区修改', { exact: true }).waitFor()
-  await page.locator('button[title="staged.txt"]').click()
+  await diffDrawer.locator('button[title="staged.txt"]').click()
   await page.getByText('+staged content', { exact: true }).waitFor()
-  await page.locator('button[title="untracked.txt"]').click()
+  await diffDrawer.locator('button[title="untracked.txt"]').click()
   await page.getByText('+untracked content', { exact: true }).waitFor()
   await saveScreenshot(page, 'desktop-diff.png')
 
