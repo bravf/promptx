@@ -651,6 +651,11 @@ body {
     color: var(--theme-textPrimary);
   }
 
+  .theme-option:focus-visible {
+    outline: 2px solid var(--theme-focusRing);
+    outline-offset: 1px;
+  }
+
   .theme-option-idle:hover {
     background: var(--theme-appPanelMuted);
     border-color: var(--theme-borderDefault);

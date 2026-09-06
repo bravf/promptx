@@ -1440,6 +1440,7 @@ onBeforeUnmount(() => {
 .workspace-heading:hover, .agent-row:hover { background: var(--theme-appPanelHover); }
 .workspace-active { color: var(--theme-text); }
 .workspace-toggle, .workspace-action, .agent-delete { color: var(--theme-textMuted); }
+.workspace-action, .agent-delete { border: 0; background: transparent; }
 .workspace-agents-enter-active, .workspace-agents-leave-active {
   display: grid;
   grid-template-rows: 1fr;
