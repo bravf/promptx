@@ -87,11 +87,11 @@ onBeforeUnmount(() => clearInterval(clockTimer))
               <div class="flex items-center gap-2"><span class="truncate font-medium">{{ entry.item.name }}</span><Check v-if="entry.item.status === 'completed'" class="h-3.5 w-3.5 shrink-0" /><LoaderCircle v-else-if="entry.item.status === 'running'" class="h-3.5 w-3.5 shrink-0 animate-spin" /></div>
               <div v-if="entry.item.detail?.command || entry.item.detail?.type" class="theme-muted-text mt-0.5 truncate font-mono text-[10px]">{{ entry.item.detail?.command || entry.item.detail?.type }}</div>
               <div v-if="toolLinks(entry).length" class="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1">
-                <PxButton v-for="link in toolLinks(entry)" :key="`${link.intent}:${link.path}`" variant="ghost" size="sm" class="workspace-path-link h-auto min-h-0 min-w-0 justify-start gap-1 border-0 p-0 text-left font-mono text-[10px]" :title="link.path" @click="emit('open-workspace-path', link)">
+                <button v-for="link in toolLinks(entry)" :key="`${link.intent}:${link.path}`" type="button" class="workspace-path-link inline-flex h-auto min-h-0 min-w-0 items-center justify-start gap-1 border-0 p-0 text-left font-mono text-[10px]" :title="link.path" @click="emit('open-workspace-path', link)">
                   <FileDiff v-if="link.intent === 'diff'" class="h-3 w-3 shrink-0" />
                   <FileText v-else class="h-3 w-3 shrink-0" />
                   <span class="truncate">{{ link.path }}<template v-if="link.line">:{{ link.line }}</template></span>
-                </PxButton>
+                </button>
               </div>
               <div v-if="entry.item.error?.message" class="theme-danger-text mt-1">{{ entry.item.error.message }}</div>
             </div>

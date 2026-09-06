@@ -1,7 +1,6 @@
 <script setup>
 import { ref } from 'vue'
 import { FolderOpen, LoaderCircle, Search } from 'lucide-vue-next'
-import PxButton from './PxButton.vue'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -38,13 +37,12 @@ defineExpose({ focus: () => input.value?.focus() })
     />
     <LoaderCircle v-if="props.loading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" />
     <div v-if="props.open" id="directory-suggestions" class="directory-suggestions theme-popover overflow-y-auto rounded-sm border shadow-sm" role="listbox">
-      <PxButton
+      <button
         v-for="(directory, index) in props.suggestions"
         :id="`directory-suggestion-${index}`"
         :key="directory.path"
-        variant="ghost"
-        size="sm"
-        class="directory-suggestion h-auto min-h-0 w-full min-w-0 justify-start gap-2 border-0 px-3 py-2 text-left"
+        type="button"
+        class="directory-suggestion flex h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 border-0 px-3 py-2 text-left"
         :class="index === props.selectedIndex ? 'row-active' : ''"
         role="option"
         :aria-selected="index === props.selectedIndex"
@@ -57,7 +55,7 @@ defineExpose({ focus: () => input.value?.focus() })
           <span class="block truncate text-xs font-medium">{{ directory.name }}</span>
           <span class="theme-muted-text block truncate font-mono text-[10px]">{{ directory.path }}</span>
         </span>
-      </PxButton>
+      </button>
       <div v-if="props.error" class="error-row m-2 rounded-sm border px-3 py-2 text-xs">{{ props.error }}</div>
       <div v-else-if="!props.loading && !props.suggestions.length" class="theme-muted-text px-3 py-5 text-center text-xs">没有找到匹配目录</div>
     </div>

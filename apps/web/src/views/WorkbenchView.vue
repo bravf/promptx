@@ -1173,9 +1173,9 @@ onBeforeUnmount(() => {
               <FolderOpen v-if="expandedProjectIds.has(project.id)" class="h-4 w-4" />
               <Folder v-else class="h-4 w-4" />
             </PxIconButton>
-            <PxButton variant="ghost" size="sm" class="flex min-w-0 flex-1 justify-start gap-2 py-1 text-left" :title="project.repositoryRoot" @click.stop="handleProjectRowClick(project)">
+            <button type="button" class="flex min-w-0 flex-1 items-center gap-2 py-1 text-left" :title="project.repositoryRoot" @click.stop="handleProjectRowClick(project)">
               <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ project.displayName }}</span>
-            </PxButton>
+            </button>
             <PxIconButton class="workspace-action h-7 w-7 shrink-0" :label="`在 ${project.displayName} 中新建会话`" @click.stop="openConversationDialog(project)"><Plus class="h-3.5 w-3.5" /></PxIconButton>
             <PxIconButton class="workspace-action workspace-delete h-7 w-7 shrink-0" :label="`移除 ${project.displayName}`" @click.stop="removeProject(project)"><Trash2 class="h-3.5 w-3.5" /></PxIconButton>
           </div>
@@ -1190,7 +1190,7 @@ onBeforeUnmount(() => {
                   </button>
                   <PxIconButton class="agent-delete h-7 w-7 shrink-0" :label="`删除 ${task.title}`" @click="removeTask(task)"><X class="h-3 w-3" /></PxIconButton>
                 </div>
-                <PxButton v-if="!tasksForProject(project.id).length" variant="ghost" size="sm" class="theme-muted-text h-8 w-full justify-start gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</PxButton>
+                <button v-if="!tasksForProject(project.id).length" type="button" class="theme-muted-text flex h-8 w-full items-center justify-start gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</button>
               </div>
             </div>
           </Transition>
@@ -1383,8 +1383,8 @@ onBeforeUnmount(() => {
       <div class="flex min-h-0 flex-1 flex-col px-4 pb-4">
         <div class="import-layout flex min-h-0 flex-1 gap-3 pt-1">
           <aside class="import-provider-list flex w-28 shrink-0 flex-col gap-1 border-r pr-3">
-            <PxButton variant="ghost" size="sm" class="import-provider-filter h-8 justify-start px-2 text-left text-xs" :class="!importProviderFilter ? 'is-active' : ''" @click="selectImportProvider('')">全部 Provider</PxButton>
-            <PxButton v-for="provider in providers" :key="provider.id" variant="ghost" size="sm" class="import-provider-filter h-8 justify-start px-2 text-left text-xs" :class="importProviderFilter === provider.id ? 'is-active' : ''" @click="selectImportProvider(provider.id)">{{ provider.label }}</PxButton>
+            <button type="button" class="import-provider-filter flex h-8 items-center justify-start px-2 text-left text-xs" :class="!importProviderFilter ? 'is-active' : ''" @click="selectImportProvider('')">全部 Provider</button>
+            <button v-for="provider in providers" :key="provider.id" type="button" class="import-provider-filter flex h-8 items-center justify-start px-2 text-left text-xs" :class="importProviderFilter === provider.id ? 'is-active' : ''" @click="selectImportProvider(provider.id)">{{ provider.label }}</button>
           </aside>
           <section class="flex min-w-0 min-h-0 flex-1 flex-col">
             <div class="relative shrink-0">

@@ -147,18 +147,17 @@ watch(
 
     <aside class="v2-settings-nav shrink-0 px-2 py-2 sm:w-52 sm:px-3 sm:py-4">
       <nav class="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-visible">
-        <PxButton
+        <button
           v-for="section in sections"
           :key="section.id"
-          variant="ghost"
-          size="sm"
-          class="v2-settings-nav-item h-9 shrink-0 justify-start gap-2 rounded-sm px-3 text-left text-xs sm:w-full"
+          type="button"
+          class="v2-settings-nav-item flex h-9 shrink-0 items-center justify-start gap-2 rounded-sm border-0 px-3 text-left text-xs sm:w-full"
           :class="activeSection === section.id ? 'is-active' : ''"
           @click="activeSection = section.id"
         >
           <component :is="section.icon" class="h-4 w-4 shrink-0" />
           <span>{{ section.label }}</span>
-        </PxButton>
+        </button>
       </nav>
     </aside>
 
