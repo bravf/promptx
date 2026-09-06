@@ -5,4 +5,9 @@ export const ProjectSchema = z.object({
   createdAt: z.string(), updatedAt: z.string(), lastOpenedAt: z.string(),
 })
 
-export const CreateProjectInputSchema = z.object({ repositoryRoot: z.string().trim().min(1), displayName: z.string().trim().max(120).optional(), defaultBranch: z.string().trim().optional() })
+export const CreateProjectInputSchema = z.object({
+  repositoryRoot: z.string().trim().min(1),
+  displayName: z.string({ error: '工作区名称必须是文本。' }).trim().max(120, '工作区名称不能超过 120 个字符。').optional(),
+  defaultBranch: z.string({ error: '默认分支必须是文本。' }).trim().optional(),
+})
+export const UpdateProjectInputSchema = CreateProjectInputSchema.pick({ displayName: true, defaultBranch: true })

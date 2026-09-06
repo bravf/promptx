@@ -30,7 +30,7 @@ function normalizeOrigin(value) {
   }
 }
 
-export function createCorsPolicy(allowedOrigins = process.env.PROMPTX_ALLOWED_ORIGINS) {
+export function createCorsPolicy(allowedOrigins = process.env.PROMPTX_ALLOWED_ORIGINS, getListeningPort = () => null) {
   const configured = parseOrigins(allowedOrigins).map(normalizeOrigin).filter(Boolean)
   const allowed = new Set([...DEFAULT_ALLOWED_ORIGINS, ...configured])
   return {
@@ -38,7 +38,13 @@ export function createCorsPolicy(allowedOrigins = process.env.PROMPTX_ALLOWED_OR
     allows(origin) {
       if (!origin) return true
       const normalized = normalizeOrigin(origin)
-      return Boolean(normalized && allowed.has(normalized))
+      if (!normalized) return false
+      if (allowed.has(normalized)) return true
+      const url = new URL(normalized)
+      // 使用真实监听端口，不信任请求中的 Host 或转发头。
+      return url.protocol === 'http:'
+        && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
+        && Number(url.port || 80) === getListeningPort()
     },
   }
 }

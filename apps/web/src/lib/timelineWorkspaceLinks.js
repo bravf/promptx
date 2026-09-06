@@ -27,10 +27,14 @@ function isAbsolutePath(value) {
   return value.startsWith('/') || isWindowsAbsolutePath(value)
 }
 
+function normalizePathSyntax(value) {
+  return String(value || '').trim().replaceAll('\\', '/').replace(/^\/(?=[a-z]:\/)/i, '')
+}
+
 function normalizePath(value, workspaceCwd = '') {
-  let filePath = String(value || '').trim().replaceAll('\\', '/')
+  let filePath = normalizePathSyntax(value)
   if (!filePath || /^(?:https?|data):/i.test(filePath)) return ''
-  const cwd = String(workspaceCwd || '').trim().replaceAll('\\', '/').replace(/\/$/, '')
+  const cwd = normalizePathSyntax(workspaceCwd).replace(/\/$/, '')
   if (isAbsolutePath(filePath)) {
     if (!cwd || !isAbsolutePath(cwd)) return ''
     const caseInsensitive = isWindowsAbsolutePath(filePath) || isWindowsAbsolutePath(cwd)

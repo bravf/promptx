@@ -74,7 +74,6 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   const app = await createApp({
     databasePath: ':memory:',
     assetsDir,
-    allowedOrigins: [baseUrl],
     logger: false,
     relay: false,
     relayOptions: {

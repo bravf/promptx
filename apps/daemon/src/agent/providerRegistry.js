@@ -13,7 +13,12 @@ export class ProviderRegistry {
 
   get(id) {
     const provider = this.providers.get(id)
-    if (!provider) throw new Error(`不支持的 Provider：${id}`)
+    if (!provider) {
+      const error = new Error(`不支持的 Provider：${id}`)
+      error.statusCode = 400
+      error.code = 'unsupported_provider'
+      throw error
+    }
     return provider
   }
 }

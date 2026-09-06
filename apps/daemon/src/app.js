@@ -19,7 +19,7 @@ import { reconcileEnvironment } from './environments/environmentReconcile.js'
 
 export async function createApp(options = {}) {
   const app = Fastify({ logger: options.logger ?? true })
-  const corsPolicy = createCorsPolicy(options.allowedOrigins)
+  const corsPolicy = createCorsPolicy(options.allowedOrigins, () => app.server.address()?.port)
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin
     if (request.url.startsWith('/api/') && origin && !corsPolicy.allows(origin)) {
@@ -69,6 +69,7 @@ export async function createApp(options = {}) {
     await app.register(fastifyStatic, { root: webRoot, wildcard: false })
     app.get('/*', async (request, reply) => {
       if (request.url.startsWith('/api/')) return reply.code(404).send({ error: 'not_found' })
+      if (request.url.startsWith('/assets/')) return reply.sendFile(request.params['*'])
       return reply.sendFile('index.html')
     })
   }

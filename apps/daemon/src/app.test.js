@@ -96,6 +96,30 @@ function multipartFile(name, mimeType, content) {
   }
 }
 
+test('前端重新构建后的新资源可直接读取，缺失资源不返回 HTML', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-rebuild-assets-'))
+  let app
+  t.after(async () => {
+    await app?.close()
+    await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 5 })
+  })
+  const webRoot = path.join(root, 'web')
+  fs.mkdirSync(path.join(webRoot, 'assets'), { recursive: true })
+  fs.writeFileSync(path.join(webRoot, 'index.html'), '<html>PromptX</html>')
+  app = await createApp({
+    databasePath: ':memory:', assetsDir: path.join(root, 'uploads'), logger: false, webRoot, relay: false,
+    relayOptions: { configPath: path.join(root, 'relay.json'), identityPath: path.join(root, 'identity.json') },
+  })
+  await app.ready()
+  fs.writeFileSync(path.join(webRoot, 'assets', 'new-build.js'), 'export const rebuilt = true')
+  const asset = await app.inject({ method: 'GET', url: '/assets/new-build.js' })
+  assert.equal(asset.statusCode, 200)
+  assert.match(asset.headers['content-type'], /javascript/)
+  assert.equal(asset.body, 'export const rebuilt = true')
+  assert.equal((await app.inject({ method: 'GET', url: '/assets/missing.js' })).statusCode, 404)
+  assert.match((await app.inject({ method: 'GET', url: '/workbench' })).body, /<html>PromptX/)
+})
+
 test('CORS 预检允许 v2 的 PATCH 和 DELETE 请求', async () => {
   const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
 
@@ -282,10 +306,37 @@ test('Task inspection API 提供文件、Git 状态并拒绝路径逃逸', async
   }
 })
 
-test('同一 Project 可以创建独立 Worktree Task', async () => {
-  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
+test('同一 Project 可以创建独立 Worktree Task', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-app-worktree-'))
+  const workspace = path.join(root, 'repository')
+  const previousWorktreesDir = process.env.PROMPTX_WORKTREES_DIR
+  let app
+  t.after(async () => {
+    try {
+      await app?.close()
+    } finally {
+      if (previousWorktreesDir === undefined) delete process.env.PROMPTX_WORKTREES_DIR
+      else process.env.PROMPTX_WORKTREES_DIR = previousWorktreesDir
+      await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 5 })
+    }
+  })
+  fs.mkdirSync(workspace)
+  process.env.PROMPTX_WORKTREES_DIR = path.join(root, 'worktrees')
+  for (const args of [
+    ['init', '-q'],
+    ['config', 'user.email', 'promptx@example.com'],
+    ['config', 'user.name', 'PromptX Test'],
+    ['commit', '--allow-empty', '-qm', 'initial'],
+  ]) {
+    const result = spawnSync('git', args, { cwd: workspace, encoding: 'utf8', windowsHide: true })
+    assert.equal(result.status, 0, result.stderr)
+  }
+  app = await createApp({
+    databasePath: ':memory:', assetsDir: path.join(root, 'uploads'), logger: false, webRoot: false, relay: false,
+    relayOptions: { configPath: path.join(root, 'relay.json'), identityPath: path.join(root, 'identity.json') },
+  })
 
-  const firstResponse = await createLocalTask(app, { cwd: process.cwd(), providerId: 'codex' })
+  const firstResponse = await createLocalTask(app, { cwd: workspace, providerId: 'codex' })
   const first = firstResponse.json()
   const secondResponse = await app.inject({ method: 'POST', url: `/api/v2/projects/${first.project.id}/tasks`, payload: { executionKind: 'worktree', providerId: 'claude', slug: `test-${Date.now()}` } })
   assert.equal(secondResponse.statusCode, 201)
@@ -299,8 +350,6 @@ test('同一 Project 可以创建独立 Worktree Task', async () => {
   assert.equal(deleteResponse.statusCode, 204)
   const tasksResponse = await app.inject({ method: 'GET', url: `/api/v2/projects/${first.project.id}/tasks` })
   assert.equal(tasksResponse.json().tasks.some((task) => task.id === second.task.id), true)
-
-  await app.close()
 })
 
 test('Agent 使用首条用户文本生成标题，后续消息不再覆盖', async () => {

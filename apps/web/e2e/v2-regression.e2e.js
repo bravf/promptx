@@ -171,7 +171,6 @@ async function createFixture(t) {
   const app = await createApp({
     databasePath: ':memory:',
     assetsDir: path.join(root, 'uploads'),
-    allowedOrigins: [baseUrl],
     logger: false,
     relay: false,
     webRoot,
@@ -472,4 +471,76 @@ test('V2 移动端布局、弹层和 History 回归', async (t) => {
   await page.getByRole('button', { name: '新会话' }).waitFor()
   await assertNoHorizontalOverflow(page)
   assert.deepEqual(failures, [])
+})
+
+test('新建会话失败时关闭目录建议，桌面和移动端错误提示均无遮挡', async (t) => {
+  const fixture = await createFixture(t)
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    const page = await fixture.browser.newPage({ viewport })
+    const failures = collectPageFailures(page)
+    await page.route('**/api/v2/projects/*/tasks', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue()
+      return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'invalid_request', message: '模拟创建失败，请检查会话配置。' }) })
+    })
+    await page.goto(fixture.baseUrl, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: '新会话', exact: true }).click()
+    await page.getByLabel('路径').fill(fixture.workspace)
+    await page.getByRole('listbox').waitFor()
+    await page.getByRole('option').first().waitFor()
+    await page.getByRole('button', { name: '创建会话', exact: true }).click()
+    const alert = page.getByRole('alert')
+    await alert.getByText('模拟创建失败，请检查会话配置。', { exact: true }).waitFor()
+    await page.getByRole('listbox').waitFor({ state: 'detached' })
+    assert.equal(await alert.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    }), true)
+    await saveScreenshot(page, `create-error-visible-${viewport.width}.png`)
+    consumeExpectedResourceError(failures)
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
+})
+
+test('Timeline 报告链接打开文件抽屉且不跳转或新开页面', async (t) => {
+  const fixture = await createFixture(t)
+  const documents = [
+    { label: '测试计划', name: 'test-plan-2026-09-06.md', content: '测试计划回归内容' },
+    { label: '完整报告', name: 'qa-report-2026-09-06.md', content: '完整报告回归内容' },
+  ]
+  fs.mkdirSync(path.join(fixture.workspace, 'docs'))
+  const links = documents.map((document) => {
+    const absolutePath = path.join(fixture.workspace, 'docs', document.name).replaceAll('\\', '/')
+    fs.writeFileSync(absolutePath, document.content)
+    const href = absolutePath.startsWith('/') ? absolutePath : `/${absolutePath}`
+    return `[${document.label}](${href})`
+  })
+  const turn = fixture.app.sqliteRepository.createTurn(fixture.task.id, 'report-link-regression')
+  fixture.app.sqliteRepository.updateTurn(turn.id, { status: 'completed' })
+  fixture.app.sqliteRepository.appendTimeline(fixture.task.id, turn.id, {
+    type: 'assistant_message', phase: 'final_answer', text: `已完成本轮测试，${links.join('和')}已生成。`,
+  })
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    const page = await fixture.browser.newPage({ viewport })
+    const failures = collectPageFailures(page)
+    let popups = 0
+    page.on('popup', () => { popups += 1 })
+    await page.goto(fixture.baseUrl, { waitUntil: 'domcontentloaded' })
+    if (viewport.width < 1024) await page.getByRole('button', { name: '主回归会话', exact: true }).click()
+    await page.getByRole('link', { name: '测试计划', exact: true }).waitFor()
+    const originalUrl = page.url()
+    for (const document of documents) {
+      await page.getByRole('link', { name: document.label, exact: true }).click()
+      const drawer = page.locator('.workspace-inspector:not(.workspace-drawer-leave-active)')
+      await drawer.getByText(document.content, { exact: true }).waitFor({ timeout: 5000 })
+      assert.equal(page.url(), originalUrl)
+      assert.equal(popups, 0)
+      await page.waitForTimeout(300)
+      await saveScreenshot(page, `report-link-${document.name}-${viewport.width}.png`)
+      await drawer.getByTitle('关闭抽屉').click()
+      await page.locator('.workspace-inspector').waitFor({ state: 'detached' })
+    }
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
 })

@@ -18,7 +18,12 @@ export function runGit(cwd, args) {
 
 export function validateSlug(value) {
   const slug = String(value || '').trim()
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(slug) || slug === '.' || slug === '..') throw new Error('Worktree 名称只能包含 ASCII 字母、数字、- 和 _，长度不超过 64')
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(slug)) {
+    const error = new Error('Worktree 名称只能包含 ASCII 字母、数字、- 和 _，长度不超过 64')
+    error.statusCode = 400
+    error.code = 'invalid_worktree_slug'
+    throw error
+  }
   return slug
 }
 
@@ -78,7 +83,12 @@ function appendOrdinal(value, ordinal, maxLength) {
 export async function addWorktree({ repositoryRoot: root, baseRef, branchName, slug }) {
   const safeSlug = validateSlug(slug)
   const safeBranchName = String(branchName || '')
-  if (!/^[A-Za-z0-9_./-]{1,200}$/.test(safeBranchName)) throw new Error('分支名不合法')
+  if (!/^[A-Za-z0-9_./-]{1,200}$/.test(safeBranchName)) {
+    const error = new Error('分支名不合法')
+    error.statusCode = 400
+    error.code = 'invalid_branch_name'
+    throw error
+  }
   const parent = path.join(worktreesRoot(), worktreeRepositoryDirectory(root))
   fs.mkdirSync(parent, { recursive: true })
   const branches = new Set((await runGit(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])).split(/\r?\n/).filter(Boolean))

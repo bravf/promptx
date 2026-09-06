@@ -3,6 +3,7 @@ import {
   CreateTaskInputSchema,
   CreateTurnInputSchema,
   UpdateAgentSettingsInputSchema,
+  UpdateProjectInputSchema,
 } from '../../../../packages/protocol/src/index.js'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -70,14 +71,22 @@ function publicTask(repository, task) {
   }
 }
 
-async function resolveProjectInput(input) {
+function resolveDirectoryPath(value) {
+  if (typeof value !== 'string' || !value.trim()) throw badRequest('请提供有效的目录路径。')
   let requested
+  let stat
   try {
-    requested = fs.realpathSync(path.resolve(input.repositoryRoot))
+    requested = fs.realpathSync(path.resolve(value.trim()))
+    stat = fs.statSync(requested)
   } catch {
     throw badRequest('工作区路径不存在或无法访问。')
   }
-  if (!fs.statSync(requested).isDirectory()) throw badRequest('工作区路径不是目录。')
+  if (!stat.isDirectory()) throw badRequest('工作区路径不是目录。')
+  return requested
+}
+
+async function resolveProjectInput(input) {
+  const requested = resolveDirectoryPath(input.repositoryRoot)
   try {
     const root = await repositoryRoot(requested)
     return { repositoryRoot: root, defaultBranch: input.defaultBranch || await defaultBranch(root) }
@@ -106,8 +115,8 @@ export function registerRoutes(app, context) {
       const cwd = input.executionKind === 'worktree'
         ? createdWorktree.path
         : input.executionKind === 'existing'
-          ? fs.realpathSync(path.resolve(input.cwd || project.repositoryRoot))
-          : project.repositoryRoot
+          ? resolveDirectoryPath(input.cwd ?? project.repositoryRoot)
+          : resolveDirectoryPath(project.repositoryRoot)
       const result = repository.transaction(() => {
         environment = repository.createEnvironment({
           kind: input.executionKind === 'worktree' ? 'worktree' : 'local',
@@ -164,7 +173,8 @@ export function registerRoutes(app, context) {
     return project ? { project } : reply.code(404).send({ error: 'project_not_found', message: '工作区不存在。' })
   })
   app.patch('/api/v2/projects/:projectId', async (request, reply) => {
-    const project = repository.updateProject(request.params.projectId, request.body || {})
+    const input = UpdateProjectInputSchema.parse(request.body ?? {})
+    const project = repository.updateProject(request.params.projectId, input)
     return project ? { project } : reply.code(404).send({ error: 'project_not_found', message: '工作区不存在。' })
   })
   app.delete('/api/v2/projects/:projectId', async (request, reply) => {
@@ -313,9 +323,10 @@ export function registerRoutes(app, context) {
   app.post('/api/v2/tasks/:taskId/git/push', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)
     if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    if (!current.environment.branchName) return reply.code(409).send({ error: 'branch_required' })
-    await runGit(current.environment.cwd, ['push', '-u', 'origin', current.environment.branchName])
-    return { pushed: true, branchName: current.environment.branchName }
+    const branchName = await defaultBranch(current.environment.cwd)
+    if (branchName === 'HEAD') return reply.code(409).send({ error: 'branch_required', message: '请先切换到要推送的分支。' })
+    await runGit(current.environment.cwd, ['push', '-u', 'origin', `refs/heads/${branchName}:refs/heads/${branchName}`])
+    return { pushed: true, branchName }
   })
   app.post('/api/v2/tasks/:taskId/git/merge', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)
@@ -325,6 +336,8 @@ export function registerRoutes(app, context) {
     }
     const target = String(request.body?.targetBranch || current.project.defaultBranch || '').trim()
     if (!target) return reply.code(400).send({ error: 'target_branch_required' })
+    const sourceStatus = await getWorkspaceGitStatus(current.environment.cwd)
+    if (sourceStatus.files?.length) return reply.code(409).send({ error: 'worktree_dirty', message: '请先提交会话工作区中的修改，再执行合并。', git: sourceStatus })
     const rootStatus = await getWorkspaceGitStatus(current.project.repositoryRoot)
     if (rootStatus.files?.length) return reply.code(409).send({ error: 'project_dirty', git: rootStatus })
     await runGit(current.project.repositoryRoot, ['checkout', target])
@@ -370,10 +383,12 @@ export function registerRoutes(app, context) {
   app.post('/api/v2/tasks/:taskId/environment/rebind', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)
     if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    const cwd = fs.realpathSync(path.resolve(String(request.body?.cwd || '').trim()))
+    const cwd = resolveDirectoryPath(request.body?.cwd)
     return { environment: repository.rebindEnvironment(current.environment.id, {
       cwd,
-      repositoryRoot: request.body?.repositoryRoot || current.environment.repositoryRoot,
+      repositoryRoot: request.body?.repositoryRoot === undefined
+        ? current.environment.repositoryRoot
+        : resolveDirectoryPath(request.body.repositoryRoot),
       kind: 'local',
       ownership: 'external',
     }) }

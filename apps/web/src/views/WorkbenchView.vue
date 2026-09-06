@@ -706,6 +706,7 @@ function cancelDirectorySearch() {
   directorySearchTimer = null
   directorySearchController?.abort()
   directorySearchController = null
+  directorySearchLoading.value = false
 }
 
 async function searchDirectorySuggestions(query = projectPath.value) {
@@ -947,6 +948,9 @@ function handleDirectoryKeydown(event) {
 
 async function createConversation() {
   if (creating.value) return
+  cancelDirectorySearch()
+  directorySuggestionsOpen.value = false
+  selectedDirectoryIndex.value = -1
   creating.value = true
   conversationError.value = ''
   try {

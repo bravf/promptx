@@ -79,6 +79,26 @@ test('将 Windows Markdown 绝对路径转换为工作区文件链接', () => {
   })
 })
 
+test('识别带前导斜杠的 Windows 报告链接及编码和行号', () => {
+  for (const name of ['test-plan-2026-09-06.md', 'qa-report-2026-09-06.md']) {
+    assert.deepEqual(workspaceLinkForHref(`/D:/code/promptx/docs/${name}`, 'D:\\code\\promptx'), {
+      path: `docs/${name}`, intent: 'file', line: null,
+    })
+  }
+  assert.deepEqual(workspaceLinkForHref('/d%3A/code/promptx/docs/My%20File.md:12', 'D:/code/promptx'), {
+    path: 'docs/My File.md', intent: 'file', line: 12,
+  })
+  assert.deepEqual(workspaceLinkForHref('/D:/code/promptx/README.md#L8', '/d:/code/promptx'), {
+    path: 'README.md', intent: 'file', line: 8,
+  })
+})
+
+test('带前导斜杠的 Windows 路径仍拒绝工作区之外的文件', () => {
+  for (const href of ['/E:/code/promptx/secret.md', '/D:/code/promptx-other/secret.md', '/D:/other/secret.md']) {
+    assert.equal(workspaceLinkForHref(href, 'D:/code/promptx'), null)
+  }
+})
+
 test('拒绝其他 Windows 目录和盘符中的工具路径', () => {
   const item = {
     type: 'tool_call',
