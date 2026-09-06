@@ -19,12 +19,24 @@ function pathCandidates(value, candidates) {
   }
 }
 
+function isWindowsAbsolutePath(value) {
+  return /^[a-z]:\//i.test(value) || value.startsWith('//')
+}
+
+function isAbsolutePath(value) {
+  return value.startsWith('/') || isWindowsAbsolutePath(value)
+}
+
 function normalizePath(value, workspaceCwd = '') {
   let filePath = String(value || '').trim().replaceAll('\\', '/')
   if (!filePath || /^(?:https?|data):/i.test(filePath)) return ''
   const cwd = String(workspaceCwd || '').trim().replaceAll('\\', '/').replace(/\/$/, '')
-  if (filePath.startsWith('/')) {
-    if (!cwd || (filePath !== cwd && !filePath.startsWith(`${cwd}/`))) return ''
+  if (isAbsolutePath(filePath)) {
+    if (!cwd || !isAbsolutePath(cwd)) return ''
+    const caseInsensitive = isWindowsAbsolutePath(filePath) || isWindowsAbsolutePath(cwd)
+    const comparablePath = caseInsensitive ? filePath.toLowerCase() : filePath
+    const comparableCwd = caseInsensitive ? cwd.toLowerCase() : cwd
+    if (comparablePath !== comparableCwd && !comparablePath.startsWith(`${comparableCwd}/`)) return ''
     filePath = filePath.slice(cwd.length).replace(/^\//, '')
   }
   filePath = filePath.replace(/^\.\//, '')
@@ -42,7 +54,8 @@ function decodedHref(value) {
 
 export function workspaceLinkForHref(value, workspaceCwd = '') {
   let href = decodedHref(value)
-  if (!href || href.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(href)) return null
+  const hasExternalScheme = /^[a-z][a-z\d+.-]*:/i.test(href) && !/^[a-z]:[\\/]/i.test(href)
+  if (!href || href.startsWith('#') || hasExternalScheme) return null
 
   let line = null
   const lineMatch = href.match(/#L(\d+)(?:C\d+)?$/i)

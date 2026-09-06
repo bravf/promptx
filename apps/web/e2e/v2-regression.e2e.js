@@ -141,6 +141,13 @@ function seedWorkspace(root, repository) {
     detail: { type: 'read', path: path.join(workspace, 'src', 'main.js'), line: 1 },
   })
   repository.appendTimeline(task.id, turn.id, {
+    type: 'tool_call',
+    callId: 'tool-2',
+    name: '文件修改',
+    status: 'completed',
+    detail: { type: 'fileChange', changes: [{ path: path.join(workspace, 'README.md') }] },
+  })
+  repository.appendTimeline(task.id, turn.id, {
     type: 'todo',
     items: [{ text: '检查功能', status: 'completed' }, { text: '执行测试', status: 'in_progress' }],
   })
@@ -247,20 +254,28 @@ test('V2 全面桌面交互回归', async (t) => {
   await processToggle.click()
   await page.getByText('先分析代码结构').waitFor()
   await page.getByText('读取文件', { exact: true }).waitFor()
+  await page.locator('.workspace-path-link[title="README.md"]').click()
+  await page.getByText('+工作区修改', { exact: true }).waitFor()
+  assert.equal(await page.getByText('只能访问工作区内的相对路径。', { exact: true }).count(), 0)
+  await page.locator('.workspace-inspector:not(.workspace-drawer-leave-active)').getByTitle('关闭抽屉').click()
+  await page.locator('.workspace-inspector').waitFor({ state: 'detached' })
   await page.getByText('执行测试', { exact: true }).waitFor()
 
   await page.getByRole('button', { name: '浏览文件' }).click()
-  await page.locator('button[title="README.md"]').click()
+  const filesDrawer = page.locator('.workspace-inspector:not(.workspace-drawer-leave-active)')
+  await filesDrawer.waitFor()
+  await page.waitForTimeout(300)
+  await filesDrawer.locator('button[title="README.md"]').click()
   await page.getByText('工作区修改').waitFor()
-  await page.locator('button[title="pixel.png"]').click()
+  await filesDrawer.locator('button[title="pixel.png"]').click()
   await page.getByAltText('pixel.png').waitFor()
-  await page.locator('button[title="binary.bin"]').click()
+  await filesDrawer.locator('button[title="binary.bin"]').click()
   await page.getByText('二进制文件暂不支持预览').waitFor()
-  await page.locator('button[title="large.txt"]').click()
+  await filesDrawer.locator('button[title="large.txt"]').click()
   await page.getByText('文件过大，暂不支持预览').waitFor()
-  assert.equal(await page.locator('button[title=".hidden-note"]').count(), 0)
-  await page.getByTitle('显示点文件').click()
-  await page.locator('button[title=".hidden-note"]').waitFor()
+  assert.equal(await filesDrawer.locator('button[title=".hidden-note"]').count(), 0)
+  await filesDrawer.getByTitle('显示点文件').click()
+  await filesDrawer.locator('button[title=".hidden-note"]').waitFor()
 
   await page.getByTitle('查看 Diff').click()
   const diffDrawer = page.locator('.workspace-inspector:not(.workspace-drawer-leave-active)')

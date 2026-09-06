@@ -61,6 +61,37 @@ test('解析 ACP JSON rawInput 并将工作区绝对路径转为相对路径', (
   assert.deepEqual(links, [{ path: 'README.md', intent: 'diff', line: null }])
 })
 
+test('将 Windows 工具绝对路径按工作区转换为相对路径', () => {
+  const links = workspaceLinksForTool({
+    type: 'tool_call',
+    name: '文件修改',
+    detail: { type: 'fileChange', changes: [{ path: 'D:/code/promptx/apps/web/src/App.vue' }] },
+  }, 'd:\\code\\promptx')
+
+  assert.deepEqual(links, [{ path: 'apps/web/src/App.vue', intent: 'diff', line: null }])
+})
+
+test('将 Windows Markdown 绝对路径转换为工作区文件链接', () => {
+  assert.deepEqual(workspaceLinkForHref('D:\\code\\promptx\\README.md:18', 'd:/code/promptx'), {
+    path: 'README.md',
+    intent: 'file',
+    line: 18,
+  })
+})
+
+test('拒绝其他 Windows 目录和盘符中的工具路径', () => {
+  const item = {
+    type: 'tool_call',
+    name: '文件修改',
+    detail: { type: 'fileChange', changes: [
+      { path: 'D:/code/another/file.js' },
+      { path: 'F:/code/promptx/file.js' },
+    ] },
+  }
+
+  assert.deepEqual(workspaceLinksForTool(item, 'D:\\code\\promptx'), [])
+})
+
 test('不从命令文本猜测文件，并拒绝工作区外路径', () => {
   assert.deepEqual(workspaceLinksForTool({
     type: 'tool_call',
