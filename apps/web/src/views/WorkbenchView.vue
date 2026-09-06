@@ -1155,7 +1155,7 @@ onBeforeUnmount(() => {
           <Plus class="h-4 w-4 shrink-0" />
           <span>新会话</span>
         </PxButton>
-        <PxButton variant="secondary" size="sm" class="sidebar-secondary-action mt-1 h-8 w-full justify-start px-2 text-left text-xs" @click="openImportDialog">
+        <PxButton variant="ghost" size="sm" class="sidebar-secondary-action mt-1 h-8 w-full justify-start px-2 text-left text-xs" @click="openImportDialog">
           <FolderOpen class="h-3.5 w-3.5 shrink-0" />
           <span>导入会话</span>
         </PxButton>
