@@ -157,6 +157,21 @@ test('Daemon 允许正式版同源网页访问 API', async () => {
   }
 })
 
+test('Daemon 允许 5175 Vite 开发端口访问 API', async () => {
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
+  try {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v2/providers',
+      headers: { origin: 'http://127.0.0.1:5175' },
+    })
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.headers['access-control-allow-origin'], 'http://127.0.0.1:5175')
+  } finally {
+    await app.close()
+  }
+})
+
 test('可预期的工作区和 Relay 配置输入错误返回 400 与中文提示', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-input-errors-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))

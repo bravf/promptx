@@ -15,7 +15,7 @@ function resolveDefaultApiBase() {
   }
 
   const currentPort = String(url.port || '')
-  const viteDevPorts = new Set(['4173', '5173', '5174'])
+  const viteDevPorts = new Set(['4173', '5173', '5174', '5175'])
   if (importMetaEnv.DEV === true || viteDevPorts.has(currentPort)) {
     url.port = '3001'
     return url.toString().replace(/\/$/, '')
