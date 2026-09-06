@@ -47,7 +47,12 @@ export async function createApp(options = {}) {
   const eventHub = new EventHub()
   const providerRegistry = options.providerRegistry || new ProviderRegistry()
   const agentManager = new AgentManager({ repository, timelineStore, providerRegistry, eventHub })
-  const sessionImport = new SessionImportService({ repository, providerRegistry, agentManager })
+  const sessionImport = new SessionImportService({
+    ...(options.sessionImportOptions || {}),
+    repository,
+    providerRegistry,
+    agentManager,
+  })
   app.decorate('sqliteRepository', repository)
   repository.failActiveTurnsOnStartup()
   registerRoutes(app, { repository, timelineStore, eventHub, providerRegistry, agentManager, sessionImport, assetsDir, corsPolicy })

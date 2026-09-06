@@ -67,6 +67,10 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
     allowedOrigins: [baseUrl],
     logger: false,
     relay: false,
+    relayOptions: {
+      configPath: path.join(root, 'relay-config.json'),
+      identityPath: path.join(root, 'relay-identity.json'),
+    },
     webRoot,
     providerRegistry: providerRegistry(),
   })

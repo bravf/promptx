@@ -25,6 +25,12 @@ function parseCursor(value) {
   return epoch && Number.isInteger(Number(seq)) ? { epoch, seq: Number(seq) } : null
 }
 
+function badRequest(message) {
+  const error = new Error(message)
+  error.statusCode = 400
+  return error
+}
+
 function sseWrite(raw, event) {
   if (event.type === 'timeline') raw.write(`id: ${event.epoch}:${event.row.seq}\n`)
   raw.write(`event: ${event.type}\n`)
@@ -65,8 +71,13 @@ function publicTask(repository, task) {
 }
 
 async function resolveProjectInput(input) {
-  const requested = fs.realpathSync(path.resolve(input.repositoryRoot))
-  if (!fs.statSync(requested).isDirectory()) throw new Error('工作区路径不是目录。')
+  let requested
+  try {
+    requested = fs.realpathSync(path.resolve(input.repositoryRoot))
+  } catch {
+    throw badRequest('工作区路径不存在或无法访问。')
+  }
+  if (!fs.statSync(requested).isDirectory()) throw badRequest('工作区路径不是目录。')
   try {
     const root = await repositoryRoot(requested)
     return { repositoryRoot: root, defaultBranch: input.defaultBranch || await defaultBranch(root) }

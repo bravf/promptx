@@ -59,17 +59,33 @@ function booleanValue(value, fallback = true) {
   return !['0', 'false', 'off', 'no'].includes(String(value).toLowerCase())
 }
 
+function invalidConfig(message) {
+  const error = new Error(message)
+  error.statusCode = 400
+  return error
+}
+
 function normalizeWebSocketUrl(value) {
-  const url = new URL(String(value || DEFAULT_RELAY_URL).trim())
+  let url
+  try {
+    url = new URL(String(value || DEFAULT_RELAY_URL).trim())
+  } catch {
+    throw invalidConfig('Relay 地址格式无效。')
+  }
   if (url.protocol === 'https:') url.protocol = 'wss:'
   if (url.protocol === 'http:') url.protocol = 'ws:'
-  if (!['ws:', 'wss:'].includes(url.protocol)) throw new Error('Relay 地址必须使用 ws 或 wss。')
+  if (!['ws:', 'wss:'].includes(url.protocol)) throw invalidConfig('Relay 地址必须使用 ws 或 wss。')
   return url.toString()
 }
 
 function normalizeAppUrl(value) {
-  const url = new URL(String(value || DEFAULT_APP_URL).trim())
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('公网 Web 地址必须使用 http 或 https。')
+  let url
+  try {
+    url = new URL(String(value || DEFAULT_APP_URL).trim())
+  } catch {
+    throw invalidConfig('公网 Web 地址格式无效。')
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) throw invalidConfig('公网 Web 地址必须使用 http 或 https。')
   return url.toString()
 }
 

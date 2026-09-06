@@ -65,6 +65,7 @@ const taskBaseRef = ref('HEAD')
 const taskBranchName = ref('')
 const taskSlug = ref('')
 const creating = ref(false)
+const conversationError = ref('')
 const confirmation = ref({ open: false, title: '', description: '', confirmText: '', danger: false, resolve: null })
 const timelineElement = ref(null)
 const workspaceInspector = ref(null)
@@ -736,6 +737,7 @@ async function openConversationDialog(project = null) {
   taskBaseRef.value = 'HEAD'
   taskSlug.value = ''
   taskBranchName.value = ''
+  conversationError.value = ''
   taskProvider.value = providers.value.some((provider) => provider.id === 'codex')
     ? 'codex'
     : providers.value[0]?.id || ''
@@ -926,7 +928,7 @@ function handleDirectoryKeydown(event) {
 async function createConversation() {
   if (creating.value) return
   creating.value = true
-  error.value = ''
+  conversationError.value = ''
   try {
     const availableProjects = (await v2Api.listProjects()).projects || []
     let project = availableProjects.find((item) => item.repositoryRoot.toLowerCase() === projectPath.value.trim().toLowerCase())
@@ -941,7 +943,7 @@ async function createConversation() {
     setProjectExpanded(project.id)
     await selectTask(task.id, { navigate: true })
   } catch (cause) {
-    error.value = cause.message
+    conversationError.value = cause.message
   } finally {
     creating.value = false
   }
@@ -1323,6 +1325,7 @@ onBeforeUnmount(() => {
           @mouseenter="selectedDirectoryIndex = $event"
           @select="selectDirectory"
         />
+        <div v-if="conversationError" class="error-row mt-3 shrink-0 rounded-sm border px-3 py-2 text-xs" role="alert">{{ conversationError }}</div>
         <div class="shrink-0">
           <label class="theme-muted-text mt-4 block text-xs" for="conversation-provider">Provider</label>
           <select id="conversation-provider" v-model="taskProvider" class="tool-input mt-1" :disabled="creating">

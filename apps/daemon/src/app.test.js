@@ -157,6 +157,40 @@ test('Daemon 允许正式版同源网页访问 API', async () => {
   }
 })
 
+test('可预期的工作区和 Relay 配置输入错误返回 400 与中文提示', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-input-errors-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const app = await createApp({
+    databasePath: ':memory:',
+    logger: false,
+    webRoot: false,
+    relay: false,
+    relayOptions: {
+      configPath: path.join(root, 'relay-config.json'),
+      identityPath: path.join(root, 'relay-identity.json'),
+    },
+  })
+  try {
+    const projectResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v2/projects',
+      payload: { repositoryRoot: path.join(root, 'missing') },
+    })
+    assert.equal(projectResponse.statusCode, 400)
+    assert.equal(projectResponse.json().message, '工作区路径不存在或无法访问。')
+
+    const relayResponse = await app.inject({
+      method: 'PUT',
+      url: '/api/v2/relay/config',
+      payload: { relayUrl: 'invalid-relay-url' },
+    })
+    assert.equal(relayResponse.statusCode, 400)
+    assert.equal(relayResponse.json().message, 'Relay 地址格式无效。')
+  } finally {
+    await app.close()
+  }
+})
+
 test('Project、Task 和 Timeline API 形成完整基础链路', async () => {
   const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
 
