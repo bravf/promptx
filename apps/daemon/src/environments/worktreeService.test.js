@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import { addWorktree, removeWorktree, repositoryContext, repositoryRoot } from './worktreeService.js'
+import { addWorktree, removeWorktree, repositoryContext, repositoryRoot, worktreeRepositoryDirectory } from './worktreeService.js'
 
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
@@ -30,6 +30,7 @@ test('重复的 Worktree 名称和分支自动使用递增后缀', async () => {
     first = await addWorktree({ repositoryRoot: repository, baseRef: 'HEAD', branchName: 'codex/task', slug: 'task' })
     second = await addWorktree({ repositoryRoot: repository, baseRef: 'HEAD', branchName: 'codex/task', slug: 'task' })
 
+    assert.match(path.basename(path.dirname(first.path)), /^repository-[0-9a-f]{12}$/)
     assert.equal(path.basename(first.path), 'task')
     assert.equal(first.branchName, 'codex/task')
     assert.equal(path.basename(second.path), 'task-2')
@@ -41,6 +42,15 @@ test('重复的 Worktree 名称和分支自动使用递增后缀', async () => {
     else process.env.PROMPTX_WORKTREES_DIR = previousWorktreesDir
     fs.rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('Worktree 父目录包含清理后的项目名并用路径哈希区分同名项目', () => {
+  const first = worktreeRepositoryDirectory(path.join('C:\\code', '项目:name. '))
+  const second = worktreeRepositoryDirectory(path.join('D:\\archive', '项目:name. '))
+
+  assert.match(first, /^项目-name-[0-9a-f]{12}$/)
+  assert.match(second, /^项目-name-[0-9a-f]{12}$/)
+  assert.notEqual(first, second)
 })
 
 test('从 linked worktree 解析到主仓库及当前 checkout', async () => {

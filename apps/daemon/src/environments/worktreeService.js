@@ -26,6 +26,18 @@ export function worktreesRoot() {
   return path.resolve(process.env.PROMPTX_WORKTREES_DIR || path.join(process.env.PROMPTX_HOME || path.join(os.homedir(), '.promptx'), 'worktrees'))
 }
 
+export function worktreeRepositoryDirectory(root) {
+  const resolvedRoot = path.resolve(root)
+  const repositoryName = Array.from(path.basename(resolvedRoot).normalize('NFKC')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/[. ]+$/g, '') || 'repository')
+    .slice(0, 40)
+    .join('')
+  const hashKey = process.platform === 'win32' ? resolvedRoot.toLowerCase() : resolvedRoot
+  const hash = crypto.createHash('sha256').update(hashKey).digest('hex').slice(0, 12)
+  return `${repositoryName}-${hash}`
+}
+
 function normalizeGitPath(value) {
   return path.resolve(String(value || '').replace(/[\\/]+$/, ''))
 }
@@ -67,8 +79,7 @@ export async function addWorktree({ repositoryRoot: root, baseRef, branchName, s
   const safeSlug = validateSlug(slug)
   const safeBranchName = String(branchName || '')
   if (!/^[A-Za-z0-9_./-]{1,200}$/.test(safeBranchName)) throw new Error('分支名不合法')
-  const hash = crypto.createHash('sha256').update(path.resolve(root).toLowerCase()).digest('hex').slice(0, 16)
-  const parent = path.join(worktreesRoot(), hash)
+  const parent = path.join(worktreesRoot(), worktreeRepositoryDirectory(root))
   fs.mkdirSync(parent, { recursive: true })
   const branches = new Set((await runGit(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])).split(/\r?\n/).filter(Boolean))
   for (let ordinal = 1; ordinal <= 10_000; ordinal += 1) {
@@ -84,8 +95,7 @@ export async function addWorktree({ repositoryRoot: root, baseRef, branchName, s
 
 export async function addExistingBranch({ repositoryRoot: root, branchName, slug }) {
   const safeSlug = validateSlug(slug)
-  const hash = crypto.createHash('sha256').update(path.resolve(root).toLowerCase()).digest('hex').slice(0, 16)
-  const target = path.join(worktreesRoot(), hash, safeSlug)
+  const target = path.join(worktreesRoot(), worktreeRepositoryDirectory(root), safeSlug)
   fs.mkdirSync(path.dirname(target), { recursive: true })
   await runGit(root, ['worktree', 'add', target, branchName])
   return { path: target, branchName, slug: safeSlug }

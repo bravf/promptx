@@ -119,7 +119,7 @@ codex/implement-worktree
 origin/main
 
 工作目录
-~/.promptx/worktrees/xxxx/implement-worktree
+~/.promptx/worktrees/promptx-0c3d13d4915d/implement-worktree
 
 Git 状态
 3 个未提交文件
@@ -197,7 +197,7 @@ git -C <repositoryRoot> worktree add <worktreePath> <branchName>
 
 ```text
 ~/.promptx/worktrees/
-└── <repository-hash>/
+└── <repository-name>-<repository-hash>/
     ├── fix-login/
     ├── update-docs/
     └── refactor-api/
@@ -217,6 +217,8 @@ slug 规则：
 - 禁止 `.`、`..` 和路径分隔符。
 - 冲突时自动追加短 ID。
 - 分支名和目录名分开校验，不直接互相替换。
+
+仓库目录名取自 `repositoryRoot` 的末级目录，并清理 Windows 禁止字符、限制为 40 个字符；后附 12 位路径哈希，用于区分同名仓库。
 
 每个执行环境记录：
 
