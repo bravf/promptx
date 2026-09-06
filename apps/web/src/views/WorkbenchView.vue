@@ -1450,7 +1450,7 @@ onBeforeUnmount(() => {
 .workspace-agents-enter-from, .workspace-agents-leave-to { grid-template-rows: 0fr; opacity: 0; }
 .workspace-agents-wrapper { min-height: 0; }
 .workspace-agents-wrapper > .agent-list { min-height: 0; overflow: hidden; }
-.settings-entry { color: var(--theme-textMuted); }
+.settings-entry { justify-content: flex-start; color: var(--theme-textMuted); }
 .settings-entry:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 .workspace-toggle:hover, .workspace-action:hover, .agent-delete:hover { color: var(--theme-text); }
 .workspace-delete:hover, .agent-delete:hover { color: var(--theme-dangerText); }
