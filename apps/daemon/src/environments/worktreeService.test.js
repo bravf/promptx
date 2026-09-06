@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import { addWorktree, removeWorktree } from './worktreeService.js'
+import { addWorktree, removeWorktree, repositoryContext, repositoryRoot } from './worktreeService.js'
 
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
@@ -39,6 +39,31 @@ test('重复的 Worktree 名称和分支自动使用递增后缀', async () => {
     if (first?.path) await removeWorktree(repository, first.path, true).catch(() => {})
     if (previousWorktreesDir === undefined) delete process.env.PROMPTX_WORKTREES_DIR
     else process.env.PROMPTX_WORKTREES_DIR = previousWorktreesDir
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('从 linked worktree 解析到主仓库及当前 checkout', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-worktree-context-'))
+  const repository = path.join(root, 'repository')
+  const linked = path.join(root, 'linked')
+  fs.mkdirSync(repository)
+  try {
+    git(repository, ['init'])
+    git(repository, ['config', 'user.email', 'promptx@example.test'])
+    git(repository, ['config', 'user.name', 'PromptX Test'])
+    fs.writeFileSync(path.join(repository, 'README.md'), '# PromptX\n')
+    git(repository, ['add', 'README.md'])
+    git(repository, ['commit', '-m', 'initial'])
+    git(repository, ['worktree', 'add', '-b', 'codex/imported', linked, 'HEAD'])
+
+    const context = await repositoryContext(linked)
+    assert.equal(context.repositoryRoot, fs.realpathSync(repository))
+    assert.equal(context.checkoutRoot, fs.realpathSync(linked))
+    assert.equal(context.isWorktree, true)
+    assert.equal(context.branchName, 'codex/imported')
+    assert.equal(await repositoryRoot(linked), fs.realpathSync(repository))
+  } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
 })

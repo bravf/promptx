@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { test } from 'node:test'
 import { openDatabase } from '../db/database.js'
 import { createRepository } from '../db/repository.js'
@@ -16,6 +20,11 @@ function setup({ loader, syncTimeline = async () => {} } = {}) {
     cacheTtlMs: 10_000,
   })
   return { db, repository, service }
+}
+
+function git(cwd, args) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
+  assert.equal(result.status, 0, result.stderr)
 }
 
 test('导入列表在缓存期内合并 Provider 扫描并基于快照搜索', async () => {
@@ -58,5 +67,38 @@ test('首次导入同步失败时清理新建的空项目', async () => {
     assert.equal(repository.listProjects().length, 0)
   } finally {
     db.close()
+  }
+})
+
+test('导入 linked worktree 会话时归属主仓库项目', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-session-import-worktree-'))
+  const projectRoot = path.join(root, 'project')
+  const worktreeRoot = path.join(root, 'task')
+  fs.mkdirSync(projectRoot)
+  git(projectRoot, ['init'])
+  git(projectRoot, ['config', 'user.email', 'promptx@example.test'])
+  git(projectRoot, ['config', 'user.name', 'PromptX Test'])
+  fs.writeFileSync(path.join(projectRoot, 'README.md'), '# PromptX\n')
+  git(projectRoot, ['add', 'README.md'])
+  git(projectRoot, ['commit', '-m', 'initial'])
+  git(projectRoot, ['worktree', 'add', '-b', 'codex/task', worktreeRoot, 'HEAD'])
+
+  const loader = async () => [{ providerId: 'codex', providerHandleId: 'thread-worktree', title: 'hello', cwd: worktreeRoot }]
+  const { db, repository, service } = setup({ loader })
+  try {
+    const existingProject = repository.createProject({ repositoryRoot: projectRoot, displayName: '主项目' })
+    const result = await service.import({ providerId: 'codex', providerHandleId: 'thread-worktree' })
+
+    assert.equal(repository.listProjects().length, 1)
+    assert.equal(result.project.id, existingProject.id)
+    assert.equal(result.task.projectId, existingProject.id)
+    assert.equal(result.environment.kind, 'worktree')
+    assert.equal(result.environment.repositoryRoot, fs.realpathSync(projectRoot))
+    assert.equal(result.environment.worktreePath, fs.realpathSync(worktreeRoot))
+    assert.equal(result.environment.ownership, 'external')
+    assert.equal(result.environment.branchName, 'codex/task')
+  } finally {
+    db.close()
+    fs.rmSync(root, { recursive: true, force: true })
   }
 })

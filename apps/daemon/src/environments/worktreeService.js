@@ -26,8 +26,31 @@ export function worktreesRoot() {
   return path.resolve(process.env.PROMPTX_WORKTREES_DIR || path.join(process.env.PROMPTX_HOME || path.join(os.homedir(), '.promptx'), 'worktrees'))
 }
 
+function normalizeGitPath(value) {
+  return path.resolve(String(value || '').replace(/[\\/]+$/, ''))
+}
+
+function samePath(left, right) {
+  const normalize = (value) => process.platform === 'win32' ? normalizeGitPath(value).toLowerCase() : normalizeGitPath(value)
+  return normalize(left) === normalize(right)
+}
+
+export async function repositoryContext(cwd) {
+  const checkoutRoot = normalizeGitPath(await runGit(cwd, ['rev-parse', '--show-toplevel']))
+  const worktreeList = await runGit(checkoutRoot, ['worktree', 'list', '--porcelain'])
+  const mainWorktreeLine = worktreeList.split(/\r?\n/).find((line) => line.startsWith('worktree '))
+  const root = normalizeGitPath(mainWorktreeLine?.slice('worktree '.length) || checkoutRoot)
+  const isWorktree = !samePath(root, checkoutRoot)
+  return {
+    repositoryRoot: root,
+    checkoutRoot,
+    isWorktree,
+    branchName: await defaultBranch(checkoutRoot),
+  }
+}
+
 export async function repositoryRoot(cwd) {
-  return (await runGit(cwd, ['rev-parse', '--show-toplevel'])).replace(/[\\/]+$/, '')
+  return (await repositoryContext(cwd)).repositoryRoot
 }
 
 export async function defaultBranch(cwd) {

@@ -2,7 +2,7 @@ import { JsonRpcProcess } from './jsonRpcProcess.js'
 import fs from 'node:fs'
 import { listClaudeHistorySessions } from './history/providers/claudeHistory.js'
 import { listKimiHistorySessions } from './history/providers/kimiHistory.js'
-import { repositoryRoot, defaultBranch } from '../environments/worktreeService.js'
+import { repositoryContext, defaultBranch } from '../environments/worktreeService.js'
 import { CODEX_BIN } from './providers/codexCli.js'
 
 function unixSecondsToIso(value) {
@@ -112,8 +112,10 @@ export class SessionImportService {
     if (!requestedCwd) throw new Error('无法确定该会话的工作目录，请先在 PromptX 中创建对应项目。')
     let project = null
     let projectCreated = false
+    let gitContext = null
     try {
-      const root = await repositoryRoot(requestedCwd)
+      gitContext = await repositoryContext(requestedCwd)
+      const root = gitContext.repositoryRoot
       project = this.repository.getProjectByRoot(root)
       if (!project) {
         project = this.repository.createProject({ repositoryRoot: root, displayName: root.split(/[\\/]/).pop(), defaultBranch: await defaultBranch(root) })
@@ -126,7 +128,15 @@ export class SessionImportService {
         projectCreated = true
       }
     }
-    const environment = this.repository.createEnvironment({ kind: 'local', cwd: requestedCwd, repositoryRoot: project.repositoryRoot, ownership: 'external', status: fs.existsSync(requestedCwd) ? 'ready' : 'unavailable' })
+    const environment = this.repository.createEnvironment({
+      kind: gitContext?.isWorktree ? 'worktree' : 'local',
+      cwd: requestedCwd,
+      repositoryRoot: project.repositoryRoot,
+      branchName: gitContext?.branchName || '',
+      worktreePath: gitContext?.isWorktree ? gitContext.checkoutRoot : null,
+      ownership: 'external',
+      status: fs.existsSync(requestedCwd) ? 'ready' : 'unavailable',
+    })
     const task = this.repository.createTask({ projectId: project.id, environmentId: environment.id, providerId: provider.id, title: String(title || session?.title || `${provider.label} 会话`).slice(0, 120) })
     const nativeHandle = provider.id === 'codex' ? { threadId: providerHandleId } : { sessionId: providerHandleId }
     let agent = null
