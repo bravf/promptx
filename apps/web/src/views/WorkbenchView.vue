@@ -85,7 +85,8 @@ const baseRefOptions = [
 ]
 const confirmation = ref({ open: false, title: '', description: '', confirmText: '', danger: false, resolve: null })
 const timelineElement = ref(null)
-const workspaceInspector = ref(null)
+const filesDrawer = ref(null)
+const diffDrawer = ref(null)
 const drawerMode = ref(null)
 const mobileView = ref('sidebar')
 const isMobile = ref(false)
@@ -631,14 +632,16 @@ function scheduleInspectorRefresh() {
   if (inspectorRefreshTimer) clearTimeout(inspectorRefreshTimer)
   inspectorRefreshTimer = setTimeout(() => {
     inspectorRefreshTimer = null
-    workspaceInspector.value?.refreshGit({ preserveDiff: true })
+    const drawer = drawerMode.value === 'diff' ? diffDrawer.value : filesDrawer.value
+    drawer?.refreshGit({ preserveDiff: true })
   }, 250)
 }
 
 async function openProjectPath(target) {
   drawerMode.value = target.intent === 'diff' ? 'diff' : 'files'
   await nextTick()
-  workspaceInspector.value?.openPath(target)
+  const drawer = target.intent === 'diff' ? diffDrawer.value : filesDrawer.value
+  drawer?.openPath(target)
 }
 
 function toggleDrawer(mode) {
@@ -1290,26 +1293,32 @@ onBeforeUnmount(() => {
       </footer>
     </main>
 
-    <Transition name="workspace-drawer">
+    <div v-if="activeTask && drawerMode" :key="`${activeTask.id}:${drawerMode}`" class="contents">
       <WorkspaceInspector
-        v-if="activeTask && (drawerMode === 'files' || drawerMode === 'diff')"
-        v-show="drawerMode"
-        ref="workspaceInspector"
+        v-if="drawerMode === 'files'"
+        ref="filesDrawer"
         :task-id="activeTask.id"
         :workspace-cwd="activeTask.environment?.cwd || activeProject.repositoryRoot"
         :is-dark="isDark"
-        :mode="drawerMode || 'files'"
+        mode="files"
         @close="drawerMode = null"
       />
-    </Transition>
-    <Transition name="workspace-drawer">
+      <WorkspaceInspector
+        v-else-if="drawerMode === 'diff'"
+        ref="diffDrawer"
+        :task-id="activeTask.id"
+        :workspace-cwd="activeTask.environment?.cwd || activeProject.repositoryRoot"
+        :is-dark="isDark"
+        mode="diff"
+        @close="drawerMode = null"
+      />
       <TaskDetailsDrawer
-        v-if="activeTask && drawerMode === 'task-details'"
+        v-else
         :task-id="activeTask.id"
         @close="drawerMode = null"
         @changed="refreshProjects"
       />
-    </Transition>
+    </div>
 
     <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" />
 
