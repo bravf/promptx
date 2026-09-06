@@ -145,7 +145,10 @@ function seedWorkspace(root, repository) {
     callId: 'tool-2',
     name: '文件修改',
     status: 'completed',
-    detail: { type: 'fileChange', changes: [{ path: path.join(workspace, 'README.md') }] },
+    detail: { type: 'fileChange', changes: [
+      { path: path.join(workspace, 'README.md') },
+      { path: path.join(workspace, 'src', 'main.js') },
+    ] },
   })
   repository.appendTimeline(task.id, turn.id, {
     type: 'todo',
@@ -254,6 +257,11 @@ test('V2 全面桌面交互回归', async (t) => {
   await processToggle.click()
   await page.getByText('先分析代码结构').waitFor()
   await page.getByText('读取文件', { exact: true }).waitFor()
+  await page.locator('.workspace-path-link[title="src/main.js"]').last().click()
+  await page.getByText('没有可显示的文本 Diff', { exact: true }).waitFor()
+  assert.equal(await page.getByLabel('正在加载 Diff').count(), 0)
+  await page.locator('.workspace-inspector:not(.workspace-drawer-leave-active)').getByTitle('关闭抽屉').click()
+  await page.locator('.workspace-inspector').waitFor({ state: 'detached' })
   await page.locator('.workspace-path-link[title="README.md"]').click()
   await page.getByText('+工作区修改', { exact: true }).waitFor()
   assert.equal(await page.getByText('只能访问工作区内的相对路径。', { exact: true }).count(), 0)

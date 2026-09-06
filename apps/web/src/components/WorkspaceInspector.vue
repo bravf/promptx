@@ -47,6 +47,8 @@ const diffLoading = ref(false)
 const error = ref('')
 const showHiddenFiles = ref(false)
 let workspaceVersion = 0
+let gitLoadPromise = null
+let diffRequestVersion = 0
 
 function clearFilePreviewObjectUrl() {
   if (filePreviewObjectUrl.value) URL.revokeObjectURL(filePreviewObjectUrl.value)
@@ -182,41 +184,51 @@ async function selectTreeEntry(entry) {
 }
 
 async function loadGitStatus(options = {}) {
-  if (!props.taskId || gitLoading.value) return
+  if (!props.taskId) return
+  if (gitLoadPromise) return gitLoadPromise
   gitLoading.value = true
   if (!options.quiet) error.value = ''
   const version = workspaceVersion
-  try {
-    const result = await v2Api.getTaskGitStatus(props.taskId)
-    if (version !== workspaceVersion) return
-    gitStatus.value = result.git
-    if (selectedDiffPath.value && !result.git.files.some((file) => file.path === selectedDiffPath.value)) {
-      selectedDiffPath.value = ''
-      displayedDiffPath.value = ''
-      diff.value = null
+  const request = (async () => {
+    try {
+      const result = await v2Api.getTaskGitStatus(props.taskId)
+      if (version !== workspaceVersion) return
+      gitStatus.value = result.git
+      if (selectedDiffPath.value && !result.git.files.some((file) => file.path === selectedDiffPath.value)) {
+        selectedDiffPath.value = ''
+        displayedDiffPath.value = ''
+        diff.value = null
+      }
+    } catch (cause) {
+      if (version === workspaceVersion && !options.quiet) error.value = cause.message
+    } finally {
+      if (version === workspaceVersion) gitLoading.value = false
     }
-  } catch (cause) {
-    if (version === workspaceVersion && !options.quiet) error.value = cause.message
+  })()
+  gitLoadPromise = request
+  try {
+    return await request
   } finally {
-    if (version === workspaceVersion) gitLoading.value = false
+    if (gitLoadPromise === request) gitLoadPromise = null
   }
 }
 
 async function selectDiff(filePath) {
+  const requestVersion = ++diffRequestVersion
   selectedDiffPath.value = filePath
   diffLoading.value = true
   error.value = ''
   const version = workspaceVersion
   try {
     const result = await v2Api.getTaskGitDiff(props.taskId, filePath)
-    if (version === workspaceVersion && selectedDiffPath.value === filePath) {
+    if (version === workspaceVersion && requestVersion === diffRequestVersion && selectedDiffPath.value === filePath) {
       diff.value = result.diff
       displayedDiffPath.value = filePath
     }
   } catch (cause) {
-    if (version === workspaceVersion) error.value = cause.message
+    if (version === workspaceVersion && requestVersion === diffRequestVersion) error.value = cause.message
   } finally {
-    if (version === workspaceVersion && selectedDiffPath.value === filePath) diffLoading.value = false
+    if (version === workspaceVersion && requestVersion === diffRequestVersion) diffLoading.value = false
   }
 }
 
@@ -249,6 +261,9 @@ async function refreshGit(options = {}) {
 
 watch(() => props.taskId, async () => {
   workspaceVersion += 1
+  gitLoadPromise = null
+  diffRequestVersion += 1
+  diffLoading.value = false
   clearFilePreviewObjectUrl()
   directoryCache.value = {}
   expandedPaths.value = new Set()
