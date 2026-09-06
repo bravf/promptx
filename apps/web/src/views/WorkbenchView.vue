@@ -1433,9 +1433,9 @@ onBeforeUnmount(() => {
 .v2-shell :deep(.workspace-inspector), .v2-shell :deep(.task-details-drawer) { bottom: 0; left: 240px; position: absolute; right: 0; top: 3.5rem; z-index: 20; }
 .workspace-sidebar, header, footer, .composer-wrap { border-color: var(--theme-borderDefault); }
 .brand-mark { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
-.sidebar-primary-action { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
+.sidebar-primary-action { justify-content: flex-start; background: var(--theme-primaryBg); color: var(--theme-primaryText); }
 .sidebar-primary-action:hover { filter: brightness(0.96); }
-.sidebar-secondary-action { color: var(--theme-textMuted); }
+.sidebar-secondary-action { justify-content: flex-start; color: var(--theme-textMuted); }
 .sidebar-secondary-action:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 .workspace-heading:hover, .agent-row:hover { background: var(--theme-appPanelHover); }
 .workspace-active { color: var(--theme-text); }
