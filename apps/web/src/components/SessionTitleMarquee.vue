@@ -6,6 +6,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  active: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const viewport = ref(null)
@@ -43,7 +47,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
   <span
     ref="viewport"
     class="session-title-marquee"
-    :class="{ 'is-overflowing': overflowing }"
+    :class="{ 'is-overflowing': overflowing, 'is-active': active }"
     :style="marqueeStyle"
   >
     <span ref="content" class="session-title-marquee__content">{{ title }}</span>
@@ -63,7 +67,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
   min-width: max-content;
 }
 
-.session-title-marquee.is-overflowing:hover .session-title-marquee__content {
+.session-title-marquee.is-overflowing.is-active .session-title-marquee__content {
   animation: session-title-marquee var(--marquee-duration) ease-in-out infinite alternate;
   will-change: transform;
 }
@@ -79,7 +83,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .session-title-marquee.is-overflowing:hover .session-title-marquee__content {
+  .session-title-marquee.is-overflowing.is-active .session-title-marquee__content {
     animation: none;
   }
 }

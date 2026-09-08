@@ -67,6 +67,7 @@ async function assertDrawerTransition(locator) {
 }
 
 test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
+  const renamedTitle = '已重命名会话，这是一个用于验证超长标题跑马灯滚动效果的会话名称'
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v2-web-e2e-')))
   const assetsDir = path.join(root, 'uploads')
   const port = await availablePort()
@@ -154,17 +155,21 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   await desktop.getByLabel('任务标题').fill('界面创建会话')
   assert.equal((await desktop.getByLabel('执行位置').textContent()).trim(), '当前目录')
   await desktop.getByRole('button', { name: '创建会话', exact: true }).click()
-  await desktop.getByRole('button', { name: '界面创建会话', exact: true }).waitFor()
+  await desktop.getByRole('link', { name: '界面创建会话', exact: true }).waitFor()
   await desktop.getByRole('button', { name: '界面创建会话 的更多操作' }).click()
   await desktop.getByRole('menuitem', { name: '重命名', exact: true }).click()
-  await desktop.getByLabel('重命名 界面创建会话').fill('已重命名会话')
+  await desktop.getByLabel('重命名 界面创建会话').fill(renamedTitle)
   await desktop.getByLabel('重命名 界面创建会话').press('Enter')
-  await desktop.getByRole('button', { name: '已重命名会话', exact: true }).waitFor()
-  await desktop.getByRole('button', { name: '已重命名会话 的更多操作' }).click()
+  const renamedTaskLink = desktop.getByRole('link', { name: renamedTitle, exact: true })
+  await renamedTaskLink.waitFor()
+  assert.equal(await renamedTaskLink.getAttribute('aria-current'), 'page')
+  await desktop.waitForTimeout(50)
+  assert.notEqual(await renamedTaskLink.locator('.session-title-marquee__content').evaluate((element) => getComputedStyle(element).animationName), 'none')
+  await desktop.getByRole('button', { name: `${renamedTitle} 的更多操作` }).click()
   await desktop.getByRole('menuitem', { name: '置顶', exact: true }).click()
-  await desktop.getByRole('button', { name: '已重命名会话 的更多操作' }).click()
+  await desktop.getByRole('button', { name: `${renamedTitle} 的更多操作` }).click()
   await desktop.getByRole('menuitem', { name: '取消置顶', exact: true }).click()
-  await desktop.getByRole('button', { name: '已重命名会话 的更多操作' }).click()
+  await desktop.getByRole('button', { name: `${renamedTitle} 的更多操作` }).click()
   await desktop.getByRole('menuitem', { name: '归档会话', exact: true }).click()
   await desktop.getByRole('button', { name: '归档', exact: true }).click()
 
@@ -182,7 +187,7 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   await mobile.getByRole('button', { name: '设置' }).click()
   await mobile.getByRole('heading', { name: '设置' }).waitFor()
   await mobile.getByRole('button', { name: '归档', exact: true }).click()
-  await mobile.getByText('已重命名会话', { exact: true }).waitFor()
+  await mobile.getByText(renamedTitle, { exact: true }).waitFor()
   assert.deepEqual(await mobile.evaluate(() => ({
     width: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
@@ -191,6 +196,11 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   await mobile.getByText('没有符合条件的归档记录').waitFor()
   await mobile.goBack()
   await mobile.getByRole('button', { name: '新会话' }).waitFor()
+  const mobileTaskLink = mobile.locator('.task-navigation').filter({ hasText: renamedTitle })
+  await mobileTaskLink.click()
+  assert.equal(await mobileTaskLink.getAttribute('aria-current'), 'page')
+  await mobile.waitForTimeout(50)
+  assert.notEqual(await mobileTaskLink.locator('.session-title-marquee__content').evaluate((element) => getComputedStyle(element).animationName), 'none')
 
   await desktop.getByRole('button', { name: '浏览文件' }).click()
   await assertDrawerTransition(desktop.locator('.workspace-inspector'))
@@ -208,7 +218,7 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   const detailsBox = await desktop.locator('.task-details-drawer').boundingBox()
   assert.deepEqual(detailsBox, inspectorBox)
   assert.equal(await desktop.getByText('任务操作', { exact: true }).count(), 0)
-  await desktop.getByRole('button', { name: '切换后的任务', exact: true }).click()
+  await desktop.getByRole('link', { name: '切换后的任务', exact: true }).click()
   await desktop.locator('.task-details-drawer').getByRole('heading', { name: '切换后的任务', exact: true }).waitFor()
   await desktop.getByRole('button', { name: '关闭抽屉' }).click()
   await desktop.getByRole('button', { name: '切换后的任务 的更多操作' }).click()

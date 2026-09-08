@@ -1307,12 +1307,14 @@ onBeforeUnmount(() => {
                     class="task-rename-input mx-1 h-8 min-w-0 flex-1 rounded-sm border px-2 text-xs outline-none" maxlength="120"
                     :disabled="taskRenameSaving" :aria-label="`重命名 ${task.title}`" @click.stop @blur="saveTaskRename(task)"
                     @keydown.enter.prevent="$event.currentTarget.blur()" @keydown.esc.prevent="cancelTaskRename" />
-                  <button v-else type="button" class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })">
+                  <div v-else role="link" tabindex="0" class="task-navigation flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 text-left"
+                    :aria-current="task.id === activeTaskId ? 'page' : undefined" :title="`${task.title} · ${providerLabel(task.providerId)}`"
+                    @click="selectTask(task.id, { navigate: true })" @keydown.enter.prevent="selectTask(task.id, { navigate: true })">
                     <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
-                    <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="task.title" />
+                    <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="task.title" :active="task.id === activeTaskId" />
                     <Pin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
                     <LoaderCircle v-if="task.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
-                  </button>
+                  </div>
                   <PxActionMenu class="agent-action" :label="`${task.title} 的更多操作`" :items="taskMenuItems(task)" @select="handleTaskMenu($event, task)" />
                 </div>
                 <button v-if="!tasksForProject(project.id).length" type="button" class="theme-muted-text flex h-8 w-full items-center justify-start gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</button>
@@ -1579,6 +1581,7 @@ onBeforeUnmount(() => {
 .sidebar-secondary-action:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 .workspace-heading:hover, .agent-row:hover { background: var(--theme-appPanelHover); }
 .workspace-active { color: var(--theme-text); }
+.task-navigation:focus-visible { outline: 1px solid var(--theme-focusRing); outline-offset: -1px; }
 .workspace-toggle, .workspace-action, .agent-action { color: var(--theme-textMuted); }
 .workspace-action, .agent-action { border: 0; background: transparent; }
 .workspace-agents-enter-active, .workspace-agents-leave-active {
