@@ -1,7 +1,13 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { readStableHistoryFile, textContent, toIsoTimestamp } from '../historySnapshot.js'
+import {
+  parseJsonLinesWithOffsets,
+  readStableHistoryFile,
+  readStableHistoryFileRange,
+  textContent,
+  toIsoTimestamp,
+} from '../historySnapshot.js'
 
 const PROJECT_DIR_LENGTH_CAP = 200
 
@@ -138,6 +144,10 @@ function appendAssistant(entry, turn, tools) {
     }
   })
   turn.lastStopReason = entry.message?.stop_reason || turn.lastStopReason
+  if (entry.isApiErrorMessage || entry.error) {
+    turn.providerError = true
+    turn.errorMessage = textContent(entry.message?.content).trim() || String(entry.error || 'Claude 请求失败')
+  }
   turn.finishedAt = toIsoTimestamp(entry.timestamp) || turn.finishedAt
 }
 
@@ -148,12 +158,14 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
   for (const entry of parseLines(content)) {
     if (visibleUser(entry)) {
       if (turn) {
-        turn.status = 'completed'
+        turn.status = turn.providerError ? 'failed' : 'completed'
         turns.push(turn)
       }
       const timestamp = toIsoTimestamp(entry.timestamp)
       turn = {
         sourceTurnId: entry.uuid,
+        providerPromptId: entry.uuid,
+        runtimeTurnId: entry.uuid,
         status: 'running',
         startedAt: timestamp,
         finishedAt: timestamp,
@@ -176,21 +188,35 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
     toolResult(entry, tools)
   }
   if (turn) {
-    turn.status = turn.lastStopReason === 'end_turn' ? 'completed' : 'running'
+    turn.status = turn.providerError ? 'failed'
+      : turn.lastStopReason === 'end_turn' ? 'completed' : 'running'
     turns.push(turn)
   }
   return {
     sourceId: sessionId,
     revision,
-    turns: turns.map(({ lastStopReason, ...value }) => value),
+    turns: turns.map(({ lastStopReason, providerError, ...value }) => value),
   }
 }
 
-export function readClaudeHistorySnapshot({ cwd, sessionId, knownRevision = '' }) {
+export function readClaudeHistorySnapshot({ cwd, sessionId, knownRevision = '', cursor = 0 }) {
   if (!sessionId) return { status: 'unsupported' }
   const file = resolveHistoryPath(cwd, sessionId)
   if (!file) return { status: 'unavailable' }
-  const result = readStableHistoryFile(file, knownRevision)
+  const result = readStableHistoryFileRange(file, { knownRevision, cursor })
   if (result.status !== 'ready') return result
-  return mapClaudeHistorySnapshot(sessionId, result.content, result.revision)
+  const records = parseJsonLinesWithOffsets(result.content, result.baseOffset)
+  const snapshot = mapClaudeHistorySnapshot(sessionId, result.content, result.revision)
+  let safeCursor = result.content.endsWith('\n')
+    ? result.endOffset
+    : result.baseOffset + Buffer.byteLength(result.content.slice(0, Math.max(0, result.content.lastIndexOf('\n') + 1)))
+  if (snapshot.turns.at(-1)?.status === 'running') {
+    const start = [...records].reverse().find(({ value }) => visibleUser(value))
+    if (start) safeCursor = start.offset
+  }
+  return {
+    ...snapshot,
+    completeness: result.baseOffset > 0 && !result.reset ? 'incremental' : 'full',
+    cursor: safeCursor,
+  }
 }

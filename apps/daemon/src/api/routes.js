@@ -317,7 +317,7 @@ export function registerRoutes(app, context) {
   })
   app.post('/api/v2/tasks/:taskId/timeline/sync', async (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)
-    return agent ? { sync: await agentManager.syncTimeline(agent.id) } : reply.code(404).send({ error: 'agent_not_found' })
+    return agent ? { sync: await agentManager.syncTimeline(agent.id, { force: true }) } : reply.code(404).send({ error: 'agent_not_found' })
   })
 
   app.get('/api/v2/tasks/:taskId/files', async (request, reply) => {

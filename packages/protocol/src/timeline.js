@@ -61,6 +61,7 @@ export const TimelineRowSchema = z.object({
   seq: z.number().int().positive(),
   timestamp: z.string(),
   turnId: z.string().optional(),
+  source: z.enum(['local', 'provider']).optional(),
   providerMessageId: z.string().optional(),
   item: TimelineItemSchema,
 })

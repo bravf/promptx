@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 
-export const DATABASE_VERSION = 6
+export const DATABASE_VERSION = 7
 
 export function resolveDaemonPaths() {
   const homeDir = path.resolve(process.env.PROMPTX_HOME || path.join(os.homedir(), '.promptx'))
@@ -77,21 +77,30 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
         CREATE INDEX idx_task_assets_created ON task_assets(task_id, created_at DESC);
         CREATE TABLE agent_turns (
           id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-          agent_session_id TEXT NOT NULL, client_message_id TEXT NOT NULL, native_turn_id TEXT NOT NULL DEFAULT '',
+          agent_session_id TEXT NOT NULL, client_message_id TEXT NOT NULL,
+          provider_prompt_id TEXT NOT NULL DEFAULT '', native_turn_id TEXT NOT NULL DEFAULT '',
           status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'canceled')),
+          history_state TEXT NOT NULL DEFAULT 'pending' CHECK(history_state IN ('pending', 'confirmed', 'unavailable', 'conflict')),
+          history_confirmed_at TEXT, history_last_checked_at TEXT,
           error_message TEXT NOT NULL DEFAULT '', usage_json TEXT NOT NULL DEFAULT '{}',
           created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT,
           FOREIGN KEY(agent_session_id, task_id) REFERENCES agent_sessions(id, task_id) ON DELETE CASCADE,
           UNIQUE(task_id, client_message_id), UNIQUE(id, task_id)
         );
         CREATE UNIQUE INDEX idx_turns_one_active ON agent_turns(task_id) WHERE status IN ('queued', 'running');
+        CREATE UNIQUE INDEX idx_turns_provider_prompt ON agent_turns(task_id, provider_prompt_id)
+          WHERE provider_prompt_id != '';
         CREATE INDEX idx_turns_task_created ON agent_turns(task_id, created_at DESC);
         CREATE TABLE agent_timeline_rows (
           id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
           seq INTEGER NOT NULL CHECK(seq > 0), timestamp TEXT NOT NULL, turn_id TEXT,
+          source TEXT NOT NULL DEFAULT 'local' CHECK(source IN ('local', 'provider')),
           provider_message_id TEXT, item_type TEXT NOT NULL, item_json TEXT NOT NULL,
           FOREIGN KEY(turn_id, task_id) REFERENCES agent_turns(id, task_id), UNIQUE(task_id, seq)
         );
+        CREATE UNIQUE INDEX idx_timeline_provider_item
+          ON agent_timeline_rows(task_id, turn_id, provider_message_id)
+          WHERE source = 'provider' AND provider_message_id IS NOT NULL;
         CREATE TABLE agent_timeline_sync_state (
           task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
           provider_id TEXT NOT NULL, source_id TEXT NOT NULL, manifest_json TEXT NOT NULL DEFAULT '{}', synced_at TEXT NOT NULL

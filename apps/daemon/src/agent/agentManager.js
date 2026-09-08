@@ -178,10 +178,10 @@ export class AgentManager {
     return control
   }
 
-  async syncTimeline(agentId) {
+  async syncTimeline(agentId, options = {}) {
     const agent = this.repository.getAgent(agentId)
     if (!agent) throw new Error('Agent 不存在。')
-    return this.timelineSync.sync(agent)
+    return this.timelineSync.sync(agent, options)
   }
 
   async updateSettings(agentId, input) {
@@ -285,7 +285,7 @@ export class AgentManager {
       this.runtimes.delete(agentId)
       runtime.releaseThreadWriter()
     }
-    void this.timelineSync.sync(agent, { preserveTurnId: turn.id }).catch(() => {})
+    this.timelineSync.confirm(agent, turn.id)
   }
 
   commitTimeline({ agentId, turnId, item }) {
@@ -350,12 +350,13 @@ export class AgentManager {
     return this.repository.updateAgent(agentId, { lifecycle: 'ready' })
   }
 
-  shutdown() {
+  async shutdown() {
     this.coalescer.flushAll()
     for (const runtime of this.runtimes.values()) runtime.close()
     this.runtimes.clear()
     this.preparingTurns.clear()
     this.exclusiveOperations.clear()
     this.controlStates.clear()
+    await this.timelineSync.shutdown()
   }
 }

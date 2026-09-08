@@ -15,7 +15,14 @@ function setup() {
 }
 
 function providerTurn(sourceTurnId, localTurnId = '') {
-  return { sourceTurnId, localTurnId, clientMessageId: `${sourceTurnId}:client`, status: 'completed' }
+  return {
+    sourceTurnId,
+    providerPromptId: sourceTurnId,
+    localTurnId,
+    clientMessageId: `${sourceTurnId}:client`,
+    status: 'completed',
+    historyState: 'confirmed',
+  }
 }
 
 function row(sourceTurnId, providerMessageId, text = '完成') {
@@ -46,13 +53,13 @@ test('导入 Agent 会保留原生句柄并支持按 Provider 去重', () => {
   }
 })
 
-test('同步会把已有本地 Turn 回填原生 ID，不创建重复 Turn', () => {
+test('同步会把已有本地 Turn 回填 Provider Prompt ID，不创建重复 Turn', () => {
   const { db, repository, task, agent } = setup()
   try {
     const local = repository.createTurn(task.id, 'browser-client-1')
     const before = repository.getTimelineState(task.id)
     const result = repository.applyTimelineSync(task.id, {
-      mode: 'append',
+      mode: 'merge',
       providerId: 'codex',
       sourceId: 'thread-1',
       manifest: { sourceId: 'thread-1', revision: '1', turns: [{ sourceTurnId: 'turn-1' }] },
@@ -62,7 +69,8 @@ test('同步会把已有本地 Turn 回填原生 ID，不创建重复 Turn', () 
     })
     assert.equal(result.rows.length, 1)
     assert.equal(repository.listTurns(task.id).length, 1)
-    assert.equal(repository.getTurn(local.id).nativeTurnId, 'turn-1')
+    assert.equal(repository.getTurn(local.id).providerPromptId, 'turn-1')
+    assert.equal(repository.getTurn(local.id).historyState, 'confirmed')
     assert.equal(repository.listTimelineRows(task.id).length, 1)
   } finally {
     db.close()
@@ -73,7 +81,7 @@ test('重复应用同一追加计划不会重复 Timeline 行', () => {
   const { db, repository, task } = setup()
   try {
     const input = {
-      mode: 'append', providerId: 'claude', sourceId: 'session-1',
+      mode: 'merge', providerId: 'claude', sourceId: 'session-1',
       manifest: { sourceId: 'session-1', revision: '1', turns: [] },
       turns: [], rows: [row('turn-1', 'message-1')],
     }
@@ -88,32 +96,32 @@ test('重复应用同一追加计划不会重复 Timeline 行', () => {
   }
 })
 
-test('重建会切换 epoch 并清理被 Provider rewind 移除的 Turn', () => {
+test('重建会切换 epoch，但 Provider rewind 不删除本地 Turn', () => {
   const { db, repository, task } = setup()
   try {
     const old = repository.createTurn(task.id, 'old-client')
     repository.updateTurn(old.id, { status: 'completed', nativeTurnId: 'turn-old' })
     repository.applyTimelineSync(task.id, {
-      mode: 'append', providerId: 'kimi', sourceId: 'session-1',
+      mode: 'merge', providerId: 'kimi', sourceId: 'session-1',
       manifest: { sourceId: 'session-1', revision: '1', turns: [{ sourceTurnId: 'turn-old' }] },
       turns: [providerTurn('turn-old', old.id)], rows: [row('turn-old', 'old-message')], expectedNextSeq: 1,
     })
     const before = repository.getTimelineState(task.id)
     const result = repository.applyTimelineSync(task.id, {
-      mode: 'replace', providerId: 'kimi', sourceId: 'session-1',
+      mode: 'rebuild', providerId: 'kimi', sourceId: 'session-1',
       manifest: { sourceId: 'session-1', revision: '2', turns: [{ sourceTurnId: 'turn-new' }] },
       turns: [providerTurn('turn-new')], rows: [row('turn-new', 'new-message')], expectedNextSeq: before.nextSeq,
     })
     assert.notEqual(result.epoch, before.epoch)
     assert.equal(repository.listTimelineRows(task.id).length, 1)
-    assert.equal(repository.listTurns(task.id).some((turn) => turn.nativeTurnId === 'turn-old'), false)
-    assert.equal(repository.listTurns(task.id).some((turn) => turn.nativeTurnId === 'turn-new'), true)
+    assert.equal(repository.listTurns(task.id).some((turn) => turn.providerPromptId === 'turn-old'), true)
+    assert.equal(repository.listTurns(task.id).some((turn) => turn.providerPromptId === 'turn-new'), true)
   } finally {
     db.close()
   }
 })
 
-test('canonical 重建会删除旧对账留下的本地 Turn 副本', () => {
+test('重建忽略删除提示并保留旧本地 Turn', () => {
   const { db, repository, task } = setup()
   try {
     const canonical = repository.createTurn(task.id, 'provider-client')
@@ -128,7 +136,7 @@ test('canonical 重建会删除旧对账留下的本地 Turn 副本', () => {
     const before = repository.getTimelineState(task.id)
 
     repository.applyTimelineSync(task.id, {
-      mode: 'replace',
+      mode: 'rebuild',
       providerId: 'kimi',
       sourceId: 'session-1',
       manifest: { sourceId: 'session-1', revision: '2', turns: [{ sourceTurnId: 'provider-turn' }] },
@@ -138,8 +146,8 @@ test('canonical 重建会删除旧对账留下的本地 Turn 副本', () => {
       expectedNextSeq: before.nextSeq,
     })
 
-    assert.equal(repository.getTurn(duplicate.id), null)
-    assert.deepEqual(repository.listTurns(task.id).map((turn) => turn.id), [canonical.id])
+    assert.equal(repository.getTurn(duplicate.id).id, duplicate.id)
+    assert.deepEqual(new Set(repository.listTurns(task.id).map((turn) => turn.id)), new Set([canonical.id, duplicate.id]))
   } finally {
     db.close()
   }
@@ -149,10 +157,26 @@ test('Timeline 发生并发写入时同步事务回滚并抛出 stale', () => {
   const { db, repository, task } = setup()
   try {
     assert.throws(() => repository.applyTimelineSync(task.id, {
-      mode: 'append', providerId: 'codex', sourceId: 'thread-1', manifest: {}, turns: [], rows: [], expectedNextSeq: 99,
+      mode: 'merge', providerId: 'codex', sourceId: 'thread-1', manifest: {}, turns: [], rows: [], expectedNextSeq: 99,
     }), (error) => error.code === 'TIMELINE_SYNC_STALE')
     assert.equal(repository.listTimelineRows(task.id).length, 0)
     assert.equal(repository.getTimelineState(task.id).nextSeq, 1)
+  } finally {
+    db.close()
+  }
+})
+
+test('Provider 消息 ID 只在同一 Turn 内去重', () => {
+  const { db, repository, task } = setup()
+  try {
+    const result = repository.applyTimelineSync(task.id, {
+      mode: 'merge', providerId: 'codex', sourceId: 'thread-1', manifest: {},
+      turns: [providerTurn('turn-1'), providerTurn('turn-2')],
+      rows: [row('turn-1', 'agent_message:1', '第一轮'), row('turn-2', 'agent_message:1', '第二轮')],
+      expectedNextSeq: 1,
+    })
+    assert.equal(result.rows.length, 2)
+    assert.deepEqual(repository.listTimelineRows(task.id).map((entry) => entry.item.text), ['第一轮', '第二轮'])
   } finally {
     db.close()
   }

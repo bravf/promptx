@@ -589,17 +589,35 @@ async function syncVisibleTimeline() {
       result = await v2Api.syncTaskTimeline(agentId)
     }
     if (requestVersion !== timelineRequestVersion || activeTaskId.value !== agentId) return
-    timelineSyncError.value = ''
-    const { sync } = result
-    if (sync?.turns) {
-      turns.value = sync.turns
-      cacheTimeline(agentId)
-    }
+    if (result.sync?.status === 'unavailable') timelineSyncError.value = 'Provider 历史记录暂时不可用。'
+    else if (result.sync?.status === 'unsupported') timelineSyncError.value = '当前 Provider 不支持历史同步。'
+    else timelineSyncError.value = ''
+    applyTimelineSyncResult(result.sync, agentId)
   } catch (cause) {
     if (requestVersion === timelineRequestVersion && activeTaskId.value === agentId) timelineSyncError.value = cause.message
   } finally {
     if (requestVersion === timelineRequestVersion && activeTaskId.value === agentId) timelineSyncing.value = false
   }
+}
+
+function applyTimelineSyncResult(sync, agentId) {
+  if (!sync || activeTaskId.value !== agentId) return
+  if (sync.turns) turns.value = sync.turns
+  const timeline = sync.timeline
+  if (timeline) {
+    if (!timelineEpoch.value || timeline.reset || timeline.epoch !== timelineEpoch.value) {
+      rows.value = timeline.rows
+      hasOlderHistory.value = timeline.hasOlder
+    } else {
+      const bySeq = new Map(rows.value.map((row) => [row.seq, row]))
+      for (const row of timeline.rows) bySeq.set(row.seq, row)
+      rows.value = [...bySeq.values()].sort((left, right) => left.seq - right.seq)
+      hasOlderHistory.value = Boolean(rows.value.length && rows.value[0].seq > timeline.window.minSeq)
+    }
+    timelineEpoch.value = timeline.epoch
+    displayedTaskId.value = agentId
+  }
+  cacheTimeline(agentId)
 }
 
 function openEvents(agentId, epoch, seq) {
@@ -631,9 +649,15 @@ function openEvents(agentId, epoch, seq) {
     if (activeTaskId.value !== agentId) return
     const { sync } = JSON.parse(event.data)
     timelineSyncError.value = ''
-    if (!sync?.turns) return
-    turns.value = sync.turns
-    cacheTimeline(agentId)
+    applyTimelineSyncResult(sync, agentId)
+  })
+  eventSource.addEventListener('timeline-sync-warning', (event) => {
+    if (activeTaskId.value !== agentId) return
+    const { sync } = JSON.parse(event.data)
+    timelineSyncError.value = sync?.error || (sync?.status === 'unavailable'
+      ? 'Provider 历史尚未落盘，稍后会再次同步。'
+      : 'Provider 历史确认失败。')
+    if (sync?.turn) upsertTurn(sync.turn)
   })
   eventSource.addEventListener('control', (event) => {
     if (activeTaskId.value !== agentId) return

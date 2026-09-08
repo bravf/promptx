@@ -105,7 +105,7 @@ export async function createApp(options = {}) {
   })
   app.addHook('onClose', async () => {
     relay.stop()
-    agentManager.shutdown()
+    await agentManager.shutdown()
     db.close()
   })
   return app

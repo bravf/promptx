@@ -49,7 +49,11 @@ function mapTurn(row) {
     agentSessionId: row.agent_session_id,
     taskId: row.task_id,
     clientMessageId: row.client_message_id,
+    providerPromptId: row.provider_prompt_id,
     nativeTurnId: row.native_turn_id,
+    historyState: row.history_state,
+    historyConfirmedAt: row.history_confirmed_at,
+    historyLastCheckedAt: row.history_last_checked_at,
     status: row.status,
     errorMessage: row.error_message,
     usage: parseJson(row.usage_json),
@@ -79,6 +83,7 @@ function mapTimelineRow(row) {
     seq: row.seq,
     timestamp: row.timestamp,
     ...(row.turn_id ? { turnId: row.turn_id } : {}),
+    source: row.source || 'local',
     ...(row.provider_message_id ? { providerMessageId: row.provider_message_id } : {}),
     item: parseJson(row.item_json, { type: 'error', code: 'invalid_timeline_item', message: 'Timeline 数据损坏。' }),
   }
@@ -126,8 +131,8 @@ export function createRepository(db) {
     const seq = Number(task.timeline_next_seq)
     const timestamp = options.timestamp || nowIso()
     db.prepare(`INSERT INTO agent_timeline_rows
-      (task_id, seq, timestamp, turn_id, provider_message_id, item_type, item_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      (task_id, seq, timestamp, turn_id, source, provider_message_id, item_type, item_json)
+      VALUES (?, ?, ?, ?, 'local', ?, ?, ?)`)
       .run(taskId, seq, timestamp, turnId || null, options.providerMessageId || null, item.type, JSON.stringify(item))
     db.prepare('UPDATE tasks SET timeline_next_seq = ?, updated_at = ?, last_active_at = ? WHERE id = ?')
       .run(seq + 1, timestamp, timestamp, taskId)
@@ -141,19 +146,19 @@ export function createRepository(db) {
       error.code = 'TIMELINE_SYNC_STALE'
       throw error
     }
-    const previousSync = db.prepare(
-      'SELECT manifest_json FROM agent_timeline_sync_state WHERE task_id = ?',
-    ).get(taskId)
-    const previousManifest = parseJson(previousSync?.manifest_json, { turns: [] })
-
     const turnIds = new Map()
+    let updatedTurns = 0
+    const checkedTurnIds = new Set(input.checkedTurnIds || [])
     for (const turn of input.turns || []) {
       let current = turn.localTurnId
         ? mapTurn(db.prepare('SELECT * FROM agent_turns WHERE id = ? AND task_id = ?').get(turn.localTurnId, taskId))
         : null
       if (!current) current = mapTurn(db.prepare(
+        'SELECT * FROM agent_turns WHERE task_id = ? AND provider_prompt_id = ?',
+      ).get(taskId, turn.providerPromptId || turn.sourceTurnId))
+      if (!current && turn.runtimeTurnId) current = mapTurn(db.prepare(
         'SELECT * FROM agent_turns WHERE task_id = ? AND native_turn_id = ?',
-      ).get(taskId, turn.sourceTurnId))
+      ).get(taskId, turn.runtimeTurnId))
       if (!current && turn.clientMessageId) {
         current = mapTurn(db.prepare(
           'SELECT * FROM agent_turns WHERE task_id = ? AND client_message_id = ?',
@@ -162,15 +167,20 @@ export function createRepository(db) {
       if (!current) {
         const id = randomUUID()
         db.prepare(`INSERT INTO agent_turns
-          (id, task_id, agent_session_id, client_message_id, native_turn_id, status, error_message,
+          (id, task_id, agent_session_id, client_message_id, provider_prompt_id, native_turn_id,
+           status, history_state, history_confirmed_at, history_last_checked_at, error_message,
            usage_json, created_at, started_at, finished_at)
-          VALUES (?, ?, (SELECT id FROM agent_sessions WHERE task_id = ?), ?, ?, ?, ?, '{}', ?, ?, ?)`).run(
+          VALUES (?, ?, (SELECT id FROM agent_sessions WHERE task_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?)`).run(
           id,
           taskId,
           taskId,
           turn.clientMessageId || `provider:${input.providerId}:${turn.sourceTurnId}`,
-          turn.sourceTurnId,
+          turn.providerPromptId || turn.sourceTurnId,
+          turn.runtimeTurnId || '',
           turn.status || 'completed',
+          turn.historyState || 'confirmed',
+          turn.historyConfirmedAt || nowIso(),
+          nowIso(),
           turn.errorMessage || '',
           turn.startedAt || turn.finishedAt || nowIso(),
           turn.startedAt || null,
@@ -178,50 +188,79 @@ export function createRepository(db) {
         )
         current = mapTurn(db.prepare('SELECT * FROM agent_turns WHERE id = ?').get(id))
       } else {
-        db.prepare(`UPDATE agent_turns SET native_turn_id = ?, status = ?, error_message = ?,
-          started_at = COALESCE(?, started_at), finished_at = COALESCE(?, finished_at)
-          WHERE id = ?`).run(
-          turn.sourceTurnId,
-          turn.status || current.status,
-          turn.errorMessage || '',
-          turn.startedAt || null,
-          turn.finishedAt || null,
-          current.id,
-        )
+        const terminalStatus = ['completed', 'failed', 'canceled'].includes(turn.status) ? turn.status : current.status
+        const providerPromptId = turn.providerPromptId || turn.sourceTurnId || current.providerPromptId
+        const runtimeTurnId = turn.runtimeTurnId || current.nativeTurnId
+        const historyState = turn.historyState || current.historyState
+        const confirming = historyState === 'confirmed' && current.historyState !== 'confirmed'
+        const confirmedAt = confirming ? (turn.historyConfirmedAt || nowIso()) : current.historyConfirmedAt
+        const historyLastCheckedAt = checkedTurnIds.has(current.id) || confirming ? nowIso() : current.historyLastCheckedAt
+        const errorMessage = turn.errorMessage || ''
+        const shouldUpdate = providerPromptId !== current.providerPromptId
+          || runtimeTurnId !== current.nativeTurnId
+          || terminalStatus !== current.status
+          || historyState !== current.historyState
+          || errorMessage !== current.errorMessage
+          || (!current.startedAt && turn.startedAt)
+          || (!current.finishedAt && turn.finishedAt)
+        if (shouldUpdate) {
+          db.prepare(`UPDATE agent_turns SET provider_prompt_id = ?, native_turn_id = ?, status = ?,
+            history_state = ?, history_confirmed_at = ?, history_last_checked_at = ?, error_message = ?,
+            started_at = COALESCE(?, started_at), finished_at = COALESCE(?, finished_at)
+            WHERE id = ?`).run(
+            providerPromptId,
+            runtimeTurnId,
+            terminalStatus,
+            historyState,
+            confirmedAt,
+            historyLastCheckedAt,
+            errorMessage,
+            turn.startedAt || null,
+            turn.finishedAt || null,
+            current.id,
+          )
+          updatedTurns += 1
+        }
       }
       turnIds.set(turn.sourceTurnId, current.id)
     }
 
     let epoch = agent.timeline_epoch
     let nextSeq = Number(agent.timeline_next_seq)
-    if (input.mode === 'replace') {
+    if (input.mode === 'rebuild') {
       db.prepare('DELETE FROM agent_timeline_rows WHERE task_id = ?').run(taskId)
-      const nextSourceTurnIds = new Set((input.turns || []).map((turn) => turn.sourceTurnId))
-      for (const previous of previousManifest.turns || []) {
-        if (!previous.sourceTurnId || nextSourceTurnIds.has(previous.sourceTurnId)) continue
-        db.prepare(`DELETE FROM agent_turns WHERE task_id = ? AND native_turn_id = ?
-          AND status NOT IN ('queued', 'running')`).run(taskId, previous.sourceTurnId)
-      }
       epoch = randomUUID()
       nextSeq = 1
     }
 
     const inserted = []
+    let updatedRows = 0
     for (const entry of input.rows || []) {
       const turnId = entry.localTurnId || turnIds.get(entry.sourceTurnId) || null
-      if (entry.providerMessageId) {
-        const existing = db.prepare(`SELECT seq FROM agent_timeline_rows
-          WHERE task_id = ? AND provider_message_id = ?`).get(taskId, entry.providerMessageId)
-        if (existing) continue
+      const source = entry.source === 'local' ? 'local' : 'provider'
+      if (source === 'provider' && entry.providerMessageId) {
+        const existing = db.prepare(`SELECT * FROM agent_timeline_rows
+          WHERE task_id = ? AND turn_id IS ? AND provider_message_id = ? AND source = 'provider'`)
+          .get(taskId, turnId, entry.providerMessageId)
+        if (existing) {
+          const itemJson = JSON.stringify(entry.item)
+          if (existing.item_json !== itemJson || existing.timestamp !== (entry.timestamp || existing.timestamp)) {
+            db.prepare(`UPDATE agent_timeline_rows SET timestamp = ?, item_type = ?, item_json = ? WHERE id = ?`)
+              .run(entry.timestamp || existing.timestamp, entry.item.type, itemJson, existing.id)
+            updatedRows += 1
+          }
+          continue
+        }
       }
       const timestamp = entry.timestamp || nowIso()
       db.prepare(`INSERT INTO agent_timeline_rows
-        (task_id, seq, timestamp, turn_id, provider_message_id, item_type, item_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+        (task_id, seq, timestamp, turn_id, source, provider_message_id, item_type, item_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
         taskId,
         nextSeq,
         timestamp,
         turnId,
+        source,
         entry.providerMessageId || null,
         entry.item.type,
         JSON.stringify(entry.item),
@@ -230,17 +269,17 @@ export function createRepository(db) {
         seq: nextSeq,
         timestamp,
         ...(turnId ? { turnId } : {}),
+        source,
         ...(entry.providerMessageId ? { providerMessageId: entry.providerMessageId } : {}),
         item: entry.item,
       })
       nextSeq += 1
     }
 
-    if (input.mode === 'replace') {
-      for (const turnId of input.dropLocalTurnIds || []) {
-        db.prepare(`DELETE FROM agent_turns
-          WHERE id = ? AND task_id = ? AND status NOT IN ('queued', 'running')`).run(turnId, taskId)
-      }
+    for (const turnId of checkedTurnIds) {
+      if ((input.turns || []).some((turn) => turn.localTurnId === turnId && turn.historyState === 'confirmed')) continue
+      db.prepare(`UPDATE agent_turns SET history_state = 'pending', history_last_checked_at = ?
+        WHERE id = ? AND task_id = ? AND history_state != 'confirmed'`).run(nowIso(), turnId, taskId)
     }
 
     const syncedAt = nowIso()
@@ -258,7 +297,7 @@ export function createRepository(db) {
     )
     db.prepare(`UPDATE tasks SET timeline_epoch = ?, timeline_next_seq = ?,
       updated_at = ?, last_active_at = ? WHERE id = ?`).run(epoch, nextSeq, syncedAt, syncedAt, taskId)
-    return { mode: input.mode, epoch, rows: inserted, syncedAt }
+    return { mode: input.mode, epoch, rows: inserted, updatedRows, updatedTurns, syncedAt }
   })
 
   return {
@@ -472,10 +511,19 @@ export function createRepository(db) {
       const current = this.getTurn(id)
       if (!current) return null
       const next = { ...current, ...patch }
-      db.prepare(`UPDATE agent_turns SET native_turn_id = ?, status = ?, error_message = ?,
+      db.prepare(`UPDATE agent_turns SET provider_prompt_id = ?, native_turn_id = ?, status = ?,
+        history_state = ?, history_confirmed_at = ?, history_last_checked_at = ?, error_message = ?,
         usage_json = ?, started_at = ?, finished_at = ? WHERE id = ?`)
-        .run(next.nativeTurnId || '', next.status, next.errorMessage || '', JSON.stringify(next.usage || {}),
-          next.startedAt || null, next.finishedAt || null, id)
+        .run(next.providerPromptId || '', next.nativeTurnId || '', next.status, next.historyState || 'pending',
+          next.historyConfirmedAt || null, next.historyLastCheckedAt || null, next.errorMessage || '',
+          JSON.stringify(next.usage || {}), next.startedAt || null, next.finishedAt || null, id)
+      return this.getTurn(id)
+    },
+    updateTurnHistoryState(id, historyState) {
+      const checkedAt = nowIso()
+      const confirmedAt = historyState === 'confirmed' ? checkedAt : null
+      db.prepare(`UPDATE agent_turns SET history_state = ?, history_confirmed_at = COALESCE(?, history_confirmed_at),
+        history_last_checked_at = ? WHERE id = ?`).run(historyState, confirmedAt, checkedAt, id)
       return this.getTurn(id)
     },
     failActiveTurnsOnStartup() {

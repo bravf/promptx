@@ -146,7 +146,13 @@ export class SessionImportService {
         nativeHandle,
       }, provider.capabilities)
       agent = this.repository.updateAgent(agent.id, { lifecycle: 'ready' })
-      if (environment.status !== 'unavailable') await this.agentManager.syncTimeline(agent.id)
+      if (environment.status !== 'unavailable') {
+        const sync = await this.agentManager.syncTimeline(agent.id, { force: true })
+        if (sync.status !== 'synced') {
+          throw new Error(sync.status === 'unsupported' ? '该 Provider 不支持导入历史记录。' : 'Provider 历史记录暂时不可用。')
+        }
+        if (!this.repository.hasTurns(task.id)) throw new Error('Provider 会话中没有可导入的完整 Turn。')
+      }
       return { agent: this.repository.getAgent(agent.id), imported: true, project, task: this.repository.getTask(task.id), environment }
     } catch (error) {
       if (agent) this.agentManager.close(agent.id)

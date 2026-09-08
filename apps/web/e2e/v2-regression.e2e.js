@@ -38,8 +38,10 @@ function providerRegistry(runtimeRecords) {
     const provider = {
       ...definition,
       capabilities: { models: true, reasoningEffort: true, contextUsage: true },
-      createRuntime() {
+      createRuntime(options = {}) {
         const runtime = new EventEmitter()
+        runtime.threadId = options.nativeHandle?.threadId
+        runtime.sessionId = options.nativeHandle?.sessionId
         let currentModelId = 'regression-model'
         let currentReasoningEffort = 'medium'
         const control = () => ({
@@ -61,7 +63,24 @@ function providerRegistry(runtimeRecords) {
           runtimeRecords.settings.push({ ...input })
           return control()
         }
-        runtime.readHistorySnapshot = async () => ({ status: 'unsupported' })
+        runtime.readHistorySnapshot = async () => {
+          const sourceId = runtime.threadId || runtime.sessionId
+          if (!sourceId) return { status: 'unsupported' }
+          return {
+            sourceId,
+            revision: 'regression-history-1',
+            turns: [{
+              sourceTurnId: `${sourceId}:turn-1`,
+              status: 'completed',
+              startedAt: '2026-09-06T08:00:00.000Z',
+              finishedAt: '2026-09-06T08:00:01.000Z',
+              items: [
+                { providerMessageId: `${sourceId}:user-1`, item: { type: 'user_message', clientMessageId: `${sourceId}:client-1`, content: [{ type: 'text', text: '导入回归首条消息' }] } },
+                { providerMessageId: `${sourceId}:answer-1`, item: { type: 'assistant_message', messageId: `${sourceId}:answer-1`, phase: 'final_answer', text: '导入完成。' } },
+              ],
+            }],
+          }
+        }
         runtime.startTurn = async (content) => {
           const text = content.filter((item) => item.type === 'text').map((item) => item.text).join('\n')
           runtimeRecords.turns.push(content)

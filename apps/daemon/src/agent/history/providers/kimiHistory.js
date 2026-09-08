@@ -2,7 +2,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { readStableHistoryFile, textContent, toIsoTimestamp } from '../historySnapshot.js'
+import {
+  parseJsonLinesWithOffsets,
+  readStableHistoryFile,
+  readStableHistoryFileRange,
+  textContent,
+  toIsoTimestamp,
+} from '../historySnapshot.js'
 
 function resolveWirePath(sessionId) {
   for (const base of kimiRoots()) {
@@ -14,6 +20,8 @@ function resolveWirePath(sessionId) {
       if (fs.existsSync(file)) return file
       const sessionDir = path.join(root, directory.name, sessionId, 'agents')
       if (!fs.existsSync(sessionDir)) continue
+      const mainWire = path.join(sessionDir, 'main', 'wire.jsonl')
+      if (fs.existsSync(mainWire)) return mainWire
       for (const agent of fs.readdirSync(sessionDir, { withFileTypes: true })) {
         const agentWire = path.join(sessionDir, agent.name, 'wire.jsonl')
         if (agent.isDirectory() && fs.existsSync(agentWire)) return agentWire
@@ -99,6 +107,8 @@ function findSessionWire(sessionDir) {
   if (fs.existsSync(legacy)) return legacy
   const agentsDir = path.join(sessionDir, 'agents')
   if (!fs.existsSync(agentsDir)) return null
+  const mainWire = path.join(agentsDir, 'main', 'wire.jsonl')
+  if (fs.existsSync(mainWire)) return mainWire
   for (const agent of fs.readdirSync(agentsDir, { withFileTypes: true })) {
     const file = path.join(agentsDir, agent.name, 'wire.jsonl')
     if (agent.isDirectory() && fs.existsSync(file)) return file
@@ -137,6 +147,7 @@ export function mapKimiHistorySnapshot(sessionId, content, revision = '') {
       const text = kimiUserText(message.payload?.user_input)
       turn = {
         sourceTurnId,
+        providerPromptId: sourceTurnId,
         status: 'running',
         startedAt: timestamp,
         finishedAt: timestamp,
@@ -209,18 +220,36 @@ export function mapKimiHistorySnapshot(sessionId, content, revision = '') {
 function mapKimiCodeHistorySnapshot(sessionId, records, revision) {
   const turns = []
   const byTurnId = new Map()
+  const tools = new Map()
   let current = null
   for (const record of records) {
     const timestamp = toIsoTimestamp(record.time || record.finishedAt || record.timestamp)
     if (record.type === 'turn.prompt') {
       const sourceTurnId = record.promptId || `kimi-turn:${record.time}`
       const text = kimiUserText(record.input).trim()
-      current = { sourceTurnId, status: 'running', startedAt: timestamp, finishedAt: timestamp, items: text ? [{
+      current = { sourceTurnId, providerPromptId: sourceTurnId, runtimeTurnId: '', status: 'running', startedAt: timestamp, finishedAt: timestamp, items: text ? [{
         providerMessageId: record.promptId || `${sourceTurnId}:user`, timestamp,
         item: { type: 'user_message', clientMessageId: record.promptId || `${sourceTurnId}:user`, content: [{ type: 'text', text }] },
       }] : [] }
       turns.push(current)
       byTurnId.set(String(record.promptId || record.turnId || sourceTurnId), current)
+      continue
+    }
+    if (record.type === 'turn.ended') {
+      const runtimeTurnId = record.turnId
+      const turn = runtimeTurnId === undefined || runtimeTurnId === null
+        ? current
+        : byTurnId.get(String(runtimeTurnId)) || current
+      if (turn) {
+        if (runtimeTurnId !== undefined && runtimeTurnId !== null) {
+          turn.runtimeTurnId = String(runtimeTurnId)
+          byTurnId.set(String(runtimeTurnId), turn)
+        }
+        const failed = record.reason === 'failed' || Boolean(record.error)
+        turn.status = failed ? 'failed' : record.reason === 'canceled' ? 'canceled' : 'completed'
+        turn.errorMessage = failed ? (record.error?.message || 'Kimi Turn 失败') : ''
+        turn.finishedAt = timestamp || turn.finishedAt
+      }
       continue
     }
     if (record.type !== 'context.append_loop_event') continue
@@ -230,7 +259,10 @@ function mapKimiCodeHistorySnapshot(sessionId, records, revision) {
       ? current
       : byTurnId.get(String(runtimeTurnId)) || current
     if (!turn) continue
-    if (runtimeTurnId !== undefined && runtimeTurnId !== null) byTurnId.set(String(runtimeTurnId), turn)
+    if (runtimeTurnId !== undefined && runtimeTurnId !== null) {
+      turn.runtimeTurnId = String(runtimeTurnId)
+      byTurnId.set(String(runtimeTurnId), turn)
+    }
     if (event.type === 'content.part') {
       const part = event.part || {}
       const text = part.type === 'think' ? part.think : part.type === 'text' ? part.text : ''
@@ -239,6 +271,33 @@ function mapKimiCodeHistorySnapshot(sessionId, records, revision) {
         turn.items.push({ providerMessageId: id, timestamp, item: part.type === 'think'
           ? { type: 'reasoning', messageId: id, text }
           : { type: 'assistant_message', messageId: id, phase: 'final_answer', text } })
+      }
+    } else if (event.type === 'tool.call') {
+      const id = event.toolCallId || event.uuid || `${turn.sourceTurnId}:tool:${turn.items.length}`
+      const entry = {
+        providerMessageId: id,
+        timestamp,
+        item: {
+          type: 'tool_call',
+          callId: id,
+          name: event.name || '工具调用',
+          status: 'running',
+          detail: { type: 'kimi_tool', arguments: event.args },
+        },
+      }
+      turn.items.push(entry)
+      tools.set(id, entry)
+    } else if (event.type === 'tool.result') {
+      const id = event.toolCallId || event.parentUuid
+      const target = tools.get(id)
+      if (target) {
+        const failed = Boolean(event.result?.isError || event.result?.is_error || event.error)
+        target.item = {
+          ...target.item,
+          status: failed ? 'failed' : 'completed',
+          detail: { ...target.item.detail, output: event.result?.output ?? event.result },
+          ...(failed ? { error: { message: event.error?.message || event.result?.message || '工具调用失败' } } : {}),
+        }
       }
     }
     turn.finishedAt = timestamp || turn.finishedAt
@@ -249,16 +308,34 @@ function mapKimiCodeHistorySnapshot(sessionId, records, revision) {
     const turn = sourceTurnId === undefined || sourceTurnId === null
       ? null
       : byTurnId.get(String(sourceTurnId))
-    if (turn) { turn.status = 'completed'; turn.finishedAt = toIsoTimestamp(record.finishedAt || record.time) || turn.finishedAt }
+    if (turn) {
+      const failed = record.reason === 'failed' || Boolean(record.error)
+      turn.status = failed ? 'failed' : record.reason === 'canceled' ? 'canceled' : 'completed'
+      turn.errorMessage = failed ? (record.error?.message || turn.errorMessage || 'Kimi Turn 失败') : ''
+      turn.finishedAt = toIsoTimestamp(record.finishedAt || record.time) || turn.finishedAt
+    }
   }
   return { sourceId: sessionId, revision, turns }
 }
 
-export function readKimiHistorySnapshot(sessionId, { knownRevision = '' } = {}) {
+export function readKimiHistorySnapshot(sessionId, { knownRevision = '', cursor = 0 } = {}) {
   if (!sessionId) return { status: 'unsupported' }
   const file = resolveWirePath(sessionId)
   if (!file) return { status: 'unavailable' }
-  const result = readStableHistoryFile(file, knownRevision)
+  const result = readStableHistoryFileRange(file, { knownRevision, cursor })
   if (result.status !== 'ready') return result
-  return mapKimiHistorySnapshot(sessionId, result.content, result.revision)
+  const records = parseJsonLinesWithOffsets(result.content, result.baseOffset)
+  const snapshot = mapKimiHistorySnapshot(sessionId, result.content, result.revision)
+  let safeCursor = result.content.endsWith('\n')
+    ? result.endOffset
+    : result.baseOffset + Buffer.byteLength(result.content.slice(0, Math.max(0, result.content.lastIndexOf('\n') + 1)))
+  if (snapshot.turns.at(-1)?.status === 'running') {
+    const start = [...records].reverse().find(({ value }) => value.type === 'turn.prompt' || value.message?.type === 'TurnBegin')
+    if (start) safeCursor = start.offset
+  }
+  return {
+    ...snapshot,
+    completeness: result.baseOffset > 0 && !result.reset ? 'incremental' : 'full',
+    cursor: safeCursor,
+  }
 }

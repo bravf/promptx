@@ -1,4 +1,4 @@
-import { readStableHistoryFile, toIsoTimestamp } from '../historySnapshot.js'
+import { parseJsonLinesWithOffsets, readStableHistoryFileRange, toIsoTimestamp } from '../historySnapshot.js'
 
 function threadRevision(thread) {
   return [thread?.recencyAt, thread?.updatedAt]
@@ -97,6 +97,8 @@ export function mapCodexHistorySnapshot(thread, revision = '') {
           : turn.status
       return {
         sourceTurnId: turn.id || turn.sourceTurnId,
+        providerPromptId: turn.id || turn.sourceTurnId,
+        runtimeTurnId: turn.id || turn.sourceTurnId,
         status,
         startedAt,
         finishedAt,
@@ -220,14 +222,14 @@ export function mapCodexRolloutSnapshot(thread, content, revision = '') {
     if (eventType === 'user_message' || eventType === 'agent_message') {
       const turn = getTurn(payload.turn_id, timestamp)
       const message = payload.message
-      addRolloutMessage(turn, `${eventType}:${turn.items.length}`, eventType === 'user_message' ? 'user' : 'assistant',
+      addRolloutMessage(turn, `${turn.sourceTurnId}:${eventType}:${turn.items.length}`, eventType === 'user_message' ? 'user' : 'assistant',
         message, payload.phase, timestamp)
       continue
     }
     if (eventType === 'agent_reasoning') {
       const turn = getTurn(payload.turn_id, timestamp)
       const text = rolloutText(payload.text)
-      if (text) addRolloutItem(turn, { id: `reasoning:${turn.items.length}`, type: 'reasoning', content: [{ type: 'text', text }] }, timestamp)
+      if (text) addRolloutItem(turn, { id: `${turn.sourceTurnId}:reasoning:${turn.items.length}`, type: 'reasoning', content: [{ type: 'text', text }] }, timestamp)
       continue
     }
 
@@ -259,7 +261,7 @@ function isPaginatedThreadsError(error) {
   return /paginated_threads/i.test(error?.message || '')
 }
 
-export async function readCodexHistorySnapshot(runtime, { knownRevision = '' } = {}) {
+export async function readCodexHistorySnapshot(runtime, { knownRevision = '', cursor = 0 } = {}) {
   await runtime.connect()
   const metadata = await runtime.rpc.request('thread/read', { threadId: runtime.threadId, includeTurns: false })
   try {
@@ -269,11 +271,24 @@ export async function readCodexHistorySnapshot(runtime, { knownRevision = '' } =
     if (!isPaginatedThreadsError(error)) throw error
     const file = metadata.thread?.path
     if (!file) throw error
-    const persisted = readStableHistoryFile(file, knownRevision)
+    const persisted = readStableHistoryFileRange(file, { knownRevision, cursor })
     if (persisted.status === 'unchanged') return persisted
     if (persisted.status !== 'ready') {
       return { status: 'unavailable', revision: persisted.revision || threadRevision(metadata.thread) }
     }
-    return mapCodexRolloutSnapshot(metadata.thread, persisted.content, persisted.revision)
+    const snapshot = mapCodexRolloutSnapshot(metadata.thread, persisted.content, persisted.revision)
+    const records = parseJsonLinesWithOffsets(persisted.content, persisted.baseOffset)
+    let safeCursor = persisted.content.endsWith('\n')
+      ? persisted.endOffset
+      : persisted.baseOffset + Buffer.byteLength(persisted.content.slice(0, Math.max(0, persisted.content.lastIndexOf('\n') + 1)))
+    if (snapshot.turns.at(-1)?.status === 'running') {
+      const start = [...records].reverse().find(({ value }) => value.type === 'event_msg' && value.payload?.type === 'task_started')
+      if (start) safeCursor = start.offset
+    }
+    return {
+      ...snapshot,
+      completeness: persisted.baseOffset > 0 && !persisted.reset ? 'incremental' : 'full',
+      cursor: safeCursor,
+    }
   }
 }

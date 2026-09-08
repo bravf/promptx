@@ -8,14 +8,22 @@ import { openDatabase } from '../db/database.js'
 import { createRepository } from '../db/repository.js'
 import { SessionImportService } from './sessionImport.js'
 
-function setup({ loader, syncTimeline = async () => {} } = {}) {
+function setup({ loader, syncTimeline } = {}) {
   const db = openDatabase(':memory:')
   const repository = createRepository(db)
   const provider = { id: 'codex', label: 'Codex', capabilities: {} }
   const service = new SessionImportService({
     repository,
     providerRegistry: { list: () => [provider], get: () => provider },
-    agentManager: { syncTimeline, close() {} },
+    agentManager: {
+      syncTimeline: syncTimeline || (async (agentId) => {
+        const agent = repository.getAgent(agentId)
+        const turn = repository.createTurn(agent.taskId, 'imported-client')
+        repository.updateTurn(turn.id, { status: 'completed', historyState: 'confirmed' })
+        return { status: 'synced' }
+      }),
+      close() {},
+    },
     historyLoaders: { codex: loader },
     cacheTtlMs: 10_000,
   })

@@ -59,7 +59,7 @@ test('只追加 Provider 尾部新增 Turn', () => {
     localRows: localRows(local, '一', '本地详细答复'),
     syncState: { sourceId: 'thread-1', manifest: createHistoryManifest({ sourceId: 'thread-1', turns: [first] }) },
   })
-  assert.equal(result.mode, 'append')
+  assert.equal(result.mode, 'merge')
   assert.deepEqual(result.rows.map((row) => row.sourceTurnId).filter((id, index, values) => values.indexOf(id) === index), ['t2'])
   assert.deepEqual(result.rows.map((row) => row.item.type), ['user_message', 'assistant_message'])
 })
@@ -91,8 +91,8 @@ test('本地已有用户占位但 Provider Turn 后续完成时补齐回复', ()
     // t2 不在上一次 Manifest 中，因为本地客户端创建它时 Provider 仍在运行。
     syncState: { sourceId: 'thread-1', manifest: createHistoryManifest({ sourceId: 'thread-1', turns: [first] }) },
   })
-  assert.equal(result.mode, 'replace')
-  assert.equal(result.rows.find((row) => row.sourceTurnId === 't2')?.item.type, 'user_message')
+  assert.equal(result.mode, 'merge')
+  assert.equal(result.rows.some((row) => row.sourceTurnId === 't2' && row.item.type === 'user_message'), false)
   assert.equal(result.rows.find((row) => row.sourceTurnId === 't2' && row.item.type === 'assistant_message')?.item.text, '完整答复 二')
 })
 
@@ -117,7 +117,7 @@ test('Provider 中间插入 Turn 时重建顺序并保留未变化 Turn 的详�
     ],
     syncState: { sourceId: 'thread-1', manifest: createHistoryManifest({ sourceId: 'thread-1', turns: [first, third] }) },
   })
-  assert.equal(result.mode, 'replace')
+  assert.equal(result.mode, 'rebuild')
   assert.deepEqual(result.rows.filter((row) => row.item.type === 'user_message').map((row) => row.item.content[0].text), ['一', '二', '三'])
   assert.ok(result.rows.some((row) => row.item.type === 'tool_call' && row.item.callId === 'rich'))
 })
@@ -131,7 +131,7 @@ test('首次同步可按唯一用户文本绑定没有原生 Turn ID 的旧数�
     localTurns: [local],
     localRows: localRows(local, '同一问题', '更丰富的本地答复'),
   })
-  assert.equal(result.mode, 'append')
+  assert.equal(result.mode, 'merge')
   assert.equal(result.rows.length, 0)
 })
 
@@ -156,12 +156,12 @@ test('相同文本按提交时间分别绑定，不会把本地 Turn 倒序追�
     ],
   })
 
-  assert.equal(result.mode, 'append')
+  assert.equal(result.mode, 'merge')
   assert.equal(result.rows.length, 0)
   assert.deepEqual(result.turns.map((turn) => turn.localTurnId), ['local-1', 'local-2'])
 })
 
-test('旧版对账产生的本地副本会触发 canonical 重建并被标记清理', () => {
+test('旧版对账产生的本地副本不会被 Provider 快照推断删除', () => {
   const remote = providerTurn('kimi-prompt-1', '你好', 'Provider 回复')
   remote.startedAt = '2026-09-04T10:00:01.000Z'
   remote.finishedAt = '2026-09-04T10:00:02.000Z'
@@ -181,12 +181,11 @@ test('旧版对账产生的本地副本会触发 canonical 重建并被标记清
     syncState: { sourceId: 'kimi-session', manifest: previousManifest },
   })
 
-  assert.equal(result.mode, 'replace')
-  assert.deepEqual(result.rows.filter((row) => row.item.type === 'user_message').map((row) => row.item.content[0].text), ['你好'])
-  assert.deepEqual(result.dropLocalTurnIds, ['local-turn'])
+  assert.equal(result.mode, 'merge')
+  assert.equal('dropLocalTurnIds' in result, false)
 })
 
-test('Provider rewind 后替换历史，不保留已移除的旧 Provider Turn', () => {
+test('Provider 尾部暂时缩短时不删除或重建本地 Turn', () => {
   const first = providerTurn('t1', '一')
   const removed = providerTurn('t2', '二')
   const localFirst = localTurn('local-1', 't1', 't1:client', '2026-09-04T10:00:00.000Z')
@@ -200,8 +199,9 @@ test('Provider rewind 后替换历史，不保留已移除的旧 Provider Turn',
     ],
     syncState: { sourceId: 'thread-1', manifest: createHistoryManifest({ sourceId: 'thread-1', turns: [first, removed] }) },
   })
-  assert.equal(result.mode, 'replace')
-  assert.deepEqual(result.rows.filter((row) => row.item.type === 'user_message').map((row) => row.item.content[0].text), ['一'])
+  assert.equal(result.mode, 'merge')
+  assert.equal(result.rows.length, 0)
+  assert.equal('dropLocalTurnIds' in result, false)
 })
 
 test('结束同步期间 Provider 快照暂缺当前 Turn 时保留本地完整输出', () => {
@@ -220,13 +220,50 @@ test('结束同步期间 Provider 快照暂缺当前 Turn 时保留本地完整�
       sourceId: 'thread-1',
       manifest: createHistoryManifest({ sourceId: 'thread-1', turns: [first, pendingProviderEcho] }),
     },
-    preserveTurnIds: [justCompleted.id],
+    checkedTurnIds: [justCompleted.id],
   })
 
-  assert.equal(result.mode, 'replace')
-  assert.deepEqual(
-    result.rows.filter((row) => row.item.type === 'user_message').map((row) => row.item.content[0].text),
-    ['一', '继续'],
-  )
-  assert.equal(result.rows.find((row) => row.localTurnId === justCompleted.id && row.item.type === 'assistant_message')?.item.text, '本地流式答复')
+  assert.equal(result.mode, 'merge')
+  assert.equal(result.rows.length, 0)
+  assert.equal(result.confirmedTurnIds.includes(justCompleted.id), false)
+  assert.equal('dropLocalTurnIds' in result, false)
+})
+
+test('快速连续发送相同内容时按时间一一绑定且不产生删除计划', () => {
+  const first = providerTurn('provider-1', '继续', '第一条回复')
+  const second = providerTurn('provider-2', '继续', '第二条回复')
+  first.startedAt = '2026-09-04T10:00:01.000Z'
+  second.startedAt = '2026-09-04T10:00:04.000Z'
+  const localFirst = localTurn('local-1', '', 'browser-1', '2026-09-04T10:00:00.000Z')
+  const localSecond = localTurn('local-2', '', 'browser-2', '2026-09-04T10:00:03.000Z')
+  const result = reconcileHistory({
+    snapshot: { sourceId: 'kimi-session', turns: [first, second] },
+    localTurns: [localSecond, localFirst],
+    localRows: [
+      ...localRows(localFirst, '继续', '第一条回复'),
+      ...localRows(localSecond, '继续', '第二条回复').map((row, index) => ({ ...row, seq: index + 10 })),
+    ],
+  })
+  assert.deepEqual(result.turns.map((turn) => turn.localTurnId), ['local-1', 'local-2'])
+  assert.equal(result.rows.length, 0)
+  assert.equal('dropLocalTurnIds' in result, false)
+})
+
+test('匹配本地 Turn 时保留含附件的用户消息，只补 Provider 输出', () => {
+  const remote = providerTurn('turn-1', '看图', '图片说明')
+  const local = localTurn('local-1', 'turn-1', 'browser-1', '2026-09-04T10:00:00.000Z')
+  const result = reconcileHistory({
+    snapshot: { sourceId: 'thread-1', turns: [remote] },
+    localTurns: [local],
+    localRows: [{
+      seq: 1,
+      turnId: local.id,
+      timestamp: local.createdAt,
+      item: { type: 'user_message', clientMessageId: 'browser-1', content: [
+        { type: 'text', text: '看图' },
+        { type: 'image', assetId: 'asset-1', mimeType: 'image/png', name: 'a.png', size: 10 },
+      ] },
+    }],
+  })
+  assert.deepEqual(result.rows.map((row) => row.item.type), ['assistant_message'])
 })

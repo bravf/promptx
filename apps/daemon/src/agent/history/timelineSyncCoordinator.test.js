@@ -19,7 +19,7 @@ function snapshot() {
   }
 }
 
-test('多个页面同时同步同一 Agent 时合并读取并最多补跑一次', async () => {
+test('多个页面同时同步同一 Agent 时共享同一次读取', async () => {
   const firstRead = deferred()
   let reads = 0
   let applies = 0
@@ -53,8 +53,8 @@ test('多个页面同时同步同一 Agent 时合并读取并最多补跑一次'
   const calls = Array.from({ length: 10 }, () => coordinator.sync(agent))
   firstRead.resolve()
   await Promise.all(calls)
-  assert.equal(reads, 2)
-  assert.equal(applies, 2)
+  assert.equal(reads, 1)
+  assert.equal(applies, 1)
 })
 test('同步读取期间 Timeline 变化时丢弃旧计划并重新读取', async () => {
   let reads = 0
@@ -87,7 +87,7 @@ test('同步读取期间 Timeline 变化时丢弃旧计划并重新读取', asyn
   assert.deepEqual(expectedSeqs, [1, 2])
 })
 
-test('并发同步会把刚完成 Turn 的保护边界带入补跑', async () => {
+test('并发同步会把刚完成 Turn 的确认目标带入补跑', async () => {
   const firstRead = deferred()
   const first = snapshot().turns[0]
   const previousFirst = structuredClone(first)
@@ -113,7 +113,6 @@ test('并发同步会把刚完成 Turn 的保护边界带入补跑', async () =>
   ]
   const appliedPlans = []
   let reads = 0
-  let now = 1_000
   const coordinator = new TimelineSyncCoordinator({
     repository: {
       getTimelineState: () => ({ epoch: 'epoch-1', nextSeq: 5 }),
@@ -139,26 +138,22 @@ test('并发同步会把刚完成 Turn 的保护边界带入补跑', async () =>
       },
     }),
     getActiveTurnId: () => '',
-    now: () => now,
-    preserveTurnMs: 5_000,
+    confirmRetryDelays: [],
   })
   const agent = { id: 'agent-1', taskId: 'task-1', providerId: 'codex', nativeHandle: { threadId: 'thread-1' } }
 
   const initial = coordinator.sync(agent)
-  const completed = coordinator.sync(agent, { preserveTurnId: 'local-2' })
+  const completed = coordinator.sync(agent, { confirmTurnId: 'local-2' })
   firstRead.resolve()
   await Promise.all([initial, completed])
 
   assert.equal(reads, 2)
   assert.equal(appliedPlans.length, 2)
   for (const plan of appliedPlans) {
-    assert.ok(plan.rows.some((row) => row.localTurnId === 'local-2' && row.item.text === '刚刚流式完成的答复'))
+    assert.ok(plan.checkedTurnIds.includes('local-2'))
+    assert.equal(plan.rows.some((row) => row.localTurnId === 'local-2'), false)
   }
 
-  await coordinator.sync(agent)
-  assert.ok(appliedPlans.at(-1).rows.some((row) => row.localTurnId === 'local-2'))
-
-  now = 6_000
   await coordinator.sync(agent)
   assert.equal(appliedPlans.at(-1).rows.some((row) => row.localTurnId === 'local-2'), false)
 })
@@ -187,6 +182,8 @@ test('历史没有变化时仍广播同步成功以清理前端旧错误', async
     status: 'synced',
     changed: false,
     syncedAt: '2026-09-04T12:00:00.000Z',
+    epoch: 'epoch-1',
+    revision: 'epoch-1:1',
     turns,
   })
   assert.deepEqual(events, [{
@@ -195,7 +192,7 @@ test('历史没有变化时仍广播同步成功以清理前端旧错误', async
   }])
 })
 
-test('旧版对账状态忽略已知 revision 并强制重建 canonical Timeline', async () => {
+test('旧版对账状态忽略已知 revision 并升级为 merge 契约', async () => {
   let requestedRevision = null
   let appliedMode = null
   const oldManifest = {
@@ -229,5 +226,65 @@ test('旧版对账状态忽略已知 revision 并强制重建 canonical Timeline
   await coordinator.sync({ id: 'agent-1', taskId: 'task-1', providerId: 'codex', nativeHandle: { threadId: 'thread-1' } })
 
   assert.equal(requestedRevision, '')
-  assert.equal(appliedMode, 'replace')
+  assert.equal(appliedMode, 'merge')
+})
+
+test('Turn 完成后未落盘会退避重试，Provider 确认后停止', async () => {
+  let reads = 0
+  let syncState = null
+  let localTurn = {
+    id: 'local-1',
+    nativeTurnId: 'provider-turn-1',
+    providerPromptId: '',
+    clientMessageId: 'browser-1',
+    status: 'completed',
+    historyState: 'pending',
+    createdAt: '2026-09-04T10:00:00.000Z',
+  }
+  const repository = {
+    getTurn: () => localTurn,
+    updateTurnHistoryState: (_id, historyState) => { localTurn = { ...localTurn, historyState }; return localTurn },
+    getTimelineState: () => ({ epoch: 'epoch-1', nextSeq: 2 }),
+    getTimelineSyncState: () => syncState,
+    listTimelineRows: () => [{
+      seq: 1, turnId: 'local-1', timestamp: localTurn.createdAt,
+      item: { type: 'user_message', clientMessageId: 'browser-1', content: [{ type: 'text', text: '继续' }] },
+    }],
+    listTurns: () => [localTurn],
+    applyTimelineSync: (_taskId, input) => {
+      syncState = { sourceId: input.sourceId, manifest: input.manifest, syncedAt: 'now' }
+      if (input.turns.some((turn) => turn.localTurnId === localTurn.id && turn.historyState === 'confirmed')) {
+        localTurn = { ...localTurn, historyState: 'confirmed' }
+      }
+      return { mode: input.mode, epoch: 'epoch-1', rows: [], updatedRows: 0, updatedTurns: 1, syncedAt: 'now' }
+    },
+  }
+  const coordinator = new TimelineSyncCoordinator({
+    repository,
+    timelineStore: { fetch: () => ({ epoch: 'epoch-1', rows: [] }) },
+    eventHub: { publish: () => {} },
+    getRuntime: () => ({
+      threadId: 'thread-1',
+      readHistorySnapshot: async () => {
+        reads += 1
+        return reads === 1
+          ? { sourceId: 'thread-1', revision: '1', turns: [] }
+          : { sourceId: 'thread-1', revision: '2', turns: [{
+              sourceTurnId: 'provider-turn-1',
+              status: 'completed',
+              items: [{ providerMessageId: 'provider-user-1', item: {
+                type: 'user_message', clientMessageId: 'browser-1', content: [{ type: 'text', text: '继续' }],
+              } }],
+            }] }
+      },
+    }),
+    getActiveTurnId: () => '',
+    confirmRetryDelays: [1, 1],
+  })
+
+  coordinator.confirm({ id: 'agent-1', taskId: 'task-1', providerId: 'codex', nativeHandle: { threadId: 'thread-1' } }, localTurn.id)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(reads, 2)
+  assert.equal(localTurn.historyState, 'confirmed')
+  await coordinator.shutdown()
 })
