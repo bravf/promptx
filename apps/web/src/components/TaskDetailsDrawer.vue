@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { GitBranch, Info, RefreshCw, X } from 'lucide-vue-next'
+import { FolderOpen, GitBranch, Info, RefreshCw, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
 import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
@@ -11,6 +11,7 @@ const loading = ref(true)
 const error = ref('')
 const data = ref(null)
 const git = ref(null)
+const rebinding = ref(false)
 const task = computed(() => data.value?.task)
 const environment = computed(() => data.value?.environment)
 let loadVersion = 0
@@ -23,13 +24,15 @@ async function load() {
   data.value = null
   git.value = null
   try {
-    const [taskDetails, gitStatus] = await Promise.all([
-      v2Api.getTask(taskId),
-      v2Api.getTaskGitStatus(taskId),
-    ])
+    const taskDetails = await v2Api.getTask(taskId)
     if (requestVersion !== loadVersion || props.taskId !== taskId) return
     data.value = taskDetails
-    git.value = gitStatus.git
+    try {
+      const gitStatus = await v2Api.getTaskGitStatus(taskId)
+      if (requestVersion === loadVersion && props.taskId === taskId) git.value = gitStatus.git
+    } catch {
+      git.value = null
+    }
   } catch (err) {
     if (requestVersion === loadVersion && props.taskId === taskId) error.value = err.message || '读取任务详情失败'
   } finally {
@@ -44,6 +47,21 @@ async function reconcile() {
     emit('changed')
   } catch (cause) {
     error.value = cause.message || '重新检查目录失败'
+  }
+}
+async function rebind() {
+  rebinding.value = true
+  error.value = ''
+  try {
+    const selection = await v2Api.pickDirectory(environment.value?.cwd || '')
+    if (selection.canceled || !selection.path) return
+    await v2Api.rebindTaskEnvironment(props.taskId, { cwd: selection.path })
+    await load()
+    emit('changed')
+  } catch (cause) {
+    error.value = cause.message || '重新绑定目录失败'
+  } finally {
+    rebinding.value = false
   }
 }
 watch(() => props.taskId, load, { immediate: true })
@@ -73,7 +91,10 @@ watch(() => props.taskId, load, { immediate: true })
         <div class="details-label">执行环境</div>
         <div class="mt-2 flex items-center gap-2"><span>{{ environment.kind }}</span><span class="theme-muted-text">{{ environment.status }}</span></div>
         <div class="theme-muted-text mt-2 break-all font-mono text-[10px] leading-5">{{ environment.cwd }}</div>
-        <PxButton v-if="['missing', 'orphaned', 'unavailable'].includes(environment.status)" variant="secondary" size="sm" class="mt-3" @click="reconcile"><RefreshCw class="h-3.5 w-3.5" />重新检查目录</PxButton>
+        <div v-if="['missing', 'unavailable'].includes(environment.status)" class="mt-3 flex flex-wrap gap-2">
+          <PxButton variant="secondary" size="sm" @click="reconcile"><RefreshCw class="h-3.5 w-3.5" />重新检查</PxButton>
+          <PxButton variant="secondary" size="sm" :loading="rebinding" @click="rebind"><FolderOpen class="h-3.5 w-3.5" />重新绑定目录</PxButton>
+        </div>
       </section>
       <section v-if="environment.kind === 'worktree'" class="details-section border-b p-3">
         <div class="details-label flex items-center gap-1.5"><GitBranch class="h-3.5 w-3.5" />分支</div>

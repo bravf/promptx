@@ -171,14 +171,28 @@ export function formatElapsedTime(milliseconds) {
   return `${seconds}秒`
 }
 
-export function formatMessageTime(timestamp) {
+function localDateKey(date) {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+}
+
+function messageClock(date) {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+export function formatMessageTime(timestamp, now = Date.now()) {
   const time = validTime(timestamp)
   if (time === null) return ''
-  return new Intl.DateTimeFormat('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(time)
+  const date = new Date(time)
+  const reference = new Date(now instanceof Date ? now.getTime() : now)
+  if (!Number.isFinite(reference.getTime())) return messageClock(date)
+  const clock = messageClock(date)
+  if (localDateKey(date) === localDateKey(reference)) return clock
+  const yesterday = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate() - 1)
+  if (localDateKey(date) === localDateKey(yesterday)) return `昨天 ${clock}`
+  const dateLabel = `${date.getMonth() + 1}月${date.getDate()}日`
+  return date.getFullYear() === reference.getFullYear()
+    ? `${dateLabel} ${clock}`
+    : `${date.getFullYear()}年${dateLabel} ${clock}`
 }
 
 export function formatMessageDateTime(timestamp) {

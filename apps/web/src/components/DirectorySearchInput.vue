@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { FolderOpen, LoaderCircle, Search } from 'lucide-vue-next'
+import PxIconButton from './PxIconButton.vue'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -10,8 +11,9 @@ const props = defineProps({
   error: { type: String, default: '' },
   selectedIndex: { type: Number, default: -1 },
   disabled: { type: Boolean, default: false },
+  picking: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:modelValue', 'input', 'keydown', 'select', 'mouseenter'])
+const emit = defineEmits(['update:modelValue', 'input', 'keydown', 'select', 'mouseenter', 'browse'])
 const input = ref(null)
 
 defineExpose({ focus: () => input.value?.focus() })
@@ -24,7 +26,7 @@ defineExpose({ focus: () => input.value?.focus() })
       id="workspace-path"
       ref="input"
       :value="props.modelValue"
-      class="tool-input w-full pl-9 pr-9 font-mono"
+      class="tool-input w-full pl-9 pr-16 font-mono"
       placeholder="搜索目录名称或输入绝对路径"
       autocomplete="off"
       role="combobox"
@@ -35,7 +37,16 @@ defineExpose({ focus: () => input.value?.focus() })
       @input="emit('update:modelValue', $event.target.value); emit('input', $event)"
       @keydown="emit('keydown', $event)"
     />
-    <LoaderCircle v-if="props.loading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" />
+    <LoaderCircle v-if="props.loading && !props.picking" class="theme-muted-text pointer-events-none absolute right-11 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" />
+    <PxIconButton
+      class="directory-picker-button absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2"
+      label="选择目录"
+      :loading="props.picking"
+      :disabled="props.disabled"
+      @click="emit('browse')"
+    >
+      <FolderOpen class="h-4 w-4" />
+    </PxIconButton>
     <div v-if="props.open" id="directory-suggestions" class="directory-suggestions theme-popover overflow-y-auto rounded-sm border shadow-sm" role="listbox">
       <button
         v-for="(directory, index) in props.suggestions"

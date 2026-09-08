@@ -47,6 +47,7 @@ export async function request(path, options = {}) {
     const error = new Error(resolveRequestErrorMessage(payload))
     error.code = payload?.error || ''
     error.statusCode = response.status
+    error.details = payload
     throw error
   }
 

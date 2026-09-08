@@ -67,7 +67,7 @@ async function assertDrawerTransition(locator) {
 }
 
 test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v2-web-e2e-'))
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v2-web-e2e-')))
   const assetsDir = path.join(root, 'uploads')
   const port = await availablePort()
   const baseUrl = `http://127.0.0.1:${port}`
@@ -76,6 +76,7 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
     assetsDir,
     logger: false,
     relay: false,
+    directoryPicker: async () => ({ canceled: false, path: root }),
     relayOptions: {
       configPath: path.join(root, 'relay-config.json'),
       identityPath: path.join(root, 'relay-identity.json'),
@@ -140,13 +141,32 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
     assert.equal(themeState.width, themeState.clientWidth)
   }
 
-  await desktop.getByRole('button', { name: '在 移动端回归工作区 中新建会话' }).click()
+  await desktop.getByRole('button', { name: '移动端回归工作区 的更多操作' }).click()
+  await desktop.getByRole('menuitem', { name: '置顶', exact: true }).click()
+  await desktop.getByRole('button', { name: '移动端回归工作区 的更多操作' }).click()
+  await desktop.getByRole('menuitem', { name: '取消置顶', exact: true }).click()
+  await desktop.getByRole('button', { name: '移动端回归工作区 的更多操作' }).click()
+  await desktop.getByRole('menuitem', { name: '新建会话', exact: true }).click()
+  await desktop.getByLabel('路径').fill('')
+  await desktop.getByRole('button', { name: '选择目录' }).click()
+  await desktop.waitForFunction((expected) => document.getElementById('workspace-path')?.value === expected, root)
+  assert.equal(await desktop.getByLabel('路径').inputValue(), root)
   await desktop.getByLabel('任务标题').fill('界面创建会话')
   assert.equal((await desktop.getByLabel('执行位置').textContent()).trim(), '当前目录')
   await desktop.getByRole('button', { name: '创建会话', exact: true }).click()
   await desktop.getByRole('button', { name: '界面创建会话', exact: true }).waitFor()
-  await desktop.getByRole('button', { name: '删除 界面创建会话' }).click()
-  await desktop.getByRole('button', { name: '删除', exact: true }).click()
+  await desktop.getByRole('button', { name: '界面创建会话 的更多操作' }).click()
+  await desktop.getByRole('menuitem', { name: '重命名', exact: true }).click()
+  await desktop.getByLabel('重命名 界面创建会话').fill('已重命名会话')
+  await desktop.getByLabel('重命名 界面创建会话').press('Enter')
+  await desktop.getByRole('button', { name: '已重命名会话', exact: true }).waitFor()
+  await desktop.getByRole('button', { name: '已重命名会话 的更多操作' }).click()
+  await desktop.getByRole('menuitem', { name: '置顶', exact: true }).click()
+  await desktop.getByRole('button', { name: '已重命名会话 的更多操作' }).click()
+  await desktop.getByRole('menuitem', { name: '取消置顶', exact: true }).click()
+  await desktop.getByRole('button', { name: '已重命名会话 的更多操作' }).click()
+  await desktop.getByRole('menuitem', { name: '归档会话', exact: true }).click()
+  await desktop.getByRole('button', { name: '归档', exact: true }).click()
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   await mobile.goto(baseUrl, { waitUntil: 'domcontentloaded' })
@@ -161,6 +181,14 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   await mobile.getByRole('button', { name: '新会话' }).waitFor()
   await mobile.getByRole('button', { name: '设置' }).click()
   await mobile.getByRole('heading', { name: '设置' }).waitFor()
+  await mobile.getByRole('button', { name: '归档', exact: true }).click()
+  await mobile.getByText('已重命名会话', { exact: true }).waitFor()
+  assert.deepEqual(await mobile.evaluate(() => ({
+    width: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  })), { width: 390, clientWidth: 390 })
+  await mobile.getByRole('button', { name: '恢复', exact: true }).click()
+  await mobile.getByText('没有符合条件的归档记录').waitFor()
   await mobile.goBack()
   await mobile.getByRole('button', { name: '新会话' }).waitFor()
 
@@ -183,10 +211,23 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   await desktop.getByRole('button', { name: '切换后的任务', exact: true }).click()
   await desktop.locator('.task-details-drawer').getByRole('heading', { name: '切换后的任务', exact: true }).waitFor()
   await desktop.getByRole('button', { name: '关闭抽屉' }).click()
-  await desktop.getByRole('button', { name: '删除 切换后的任务' }).click()
-  await desktop.getByRole('button', { name: '删除', exact: true }).click()
-  await desktop.getByRole('button', { name: '删除 移动端回归项目' }).click()
-  await desktop.getByRole('button', { name: '删除', exact: true }).click()
+  await desktop.getByRole('button', { name: '切换后的任务 的更多操作' }).click()
+  await desktop.getByRole('menuitem', { name: '归档会话', exact: true }).click()
+  await desktop.getByRole('button', { name: '归档', exact: true }).click()
+  await desktop.getByRole('button', { name: '移动端回归项目 的更多操作' }).click()
+  await desktop.getByRole('menuitem', { name: '归档会话', exact: true }).click()
+  await desktop.getByRole('button', { name: '归档', exact: true }).click()
   await desktop.getByText('新建一条会话', { exact: true }).waitFor({ timeout: 5_000 })
-  assert.equal(app.sqliteRepository.getTask(task.id), null)
+  assert.equal(app.sqliteRepository.getTask(task.id).lifecycle, 'archived')
+
+  await desktop.getByRole('button', { name: '移动端回归工作区 的更多操作' }).click()
+  await desktop.getByRole('menuitem', { name: '归档工作区', exact: true }).click()
+  await desktop.getByRole('button', { name: '归档', exact: true }).click()
+  await desktop.getByRole('button', { name: '设置' }).click()
+  await desktop.getByRole('button', { name: '归档', exact: true }).click()
+  const archivedProject = desktop.locator('article').filter({ hasText: '1 个活动会话' }).filter({ hasText: '移动端回归工作区' })
+  await archivedProject.waitFor()
+  await archivedProject.getByRole('button', { name: '恢复', exact: true }).click()
+  await desktop.getByRole('button', { name: '关闭设置' }).click()
+  await desktop.getByRole('button', { name: '移动端回归工作区 的更多操作' }).waitFor()
 })

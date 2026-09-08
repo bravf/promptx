@@ -262,6 +262,94 @@ test('Project、Task 和 Timeline API 形成完整基础链路', async () => {
   await app.close()
 })
 
+test('本机目录选择 API 返回路径并拒绝 Relay 远程触发', async () => {
+  const calls = []
+  const app = await createApp({
+    databasePath: ':memory:',
+    logger: false,
+    webRoot: false,
+    relay: false,
+    directoryPicker: async (input) => {
+      calls.push(input)
+      return { canceled: false, path: process.cwd() }
+    },
+  })
+  try {
+    const selected = await app.inject({
+      method: 'POST',
+      url: '/api/v2/directories/pick',
+      payload: { initialPath: process.cwd() },
+    })
+    assert.equal(selected.statusCode, 200)
+    assert.deepEqual(selected.json(), { canceled: false, path: process.cwd() })
+    assert.deepEqual(calls, [{ initialPath: process.cwd() }])
+
+    const relayed = await app.inject({
+      method: 'POST',
+      url: '/api/v2/directories/pick',
+      headers: { 'x-promptx-relay-request': '1' },
+      payload: {},
+    })
+    assert.equal(relayed.statusCode, 403)
+    assert.equal(relayed.json().error, 'directory_picker_local_only')
+    assert.equal(calls.length, 1)
+  } finally {
+    await app.close()
+  }
+})
+
+test('工作区和会话 API 支持置顶、重命名，工作区归档保留会话置顶', async () => {
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false })
+  try {
+    const conversation = await createLocalTask(app, { cwd: process.cwd(), providerId: 'codex', title: '原会话名' })
+    assert.equal(conversation.statusCode, 201)
+    const { project, task } = conversation.json()
+
+    const projectPin = await app.inject({
+      method: 'POST',
+      url: `/api/v2/projects/${project.id}/pin`,
+      payload: { pinned: true },
+    })
+    assert.equal(projectPin.statusCode, 200)
+    assert.ok(projectPin.json().project.pinnedAt)
+
+    const taskPin = await app.inject({
+      method: 'POST',
+      url: `/api/v2/tasks/${task.id}/pin`,
+      payload: { pinned: true },
+    })
+    assert.equal(taskPin.statusCode, 200)
+    assert.ok(taskPin.json().task.pinnedAt)
+
+    const rename = await app.inject({
+      method: 'PATCH',
+      url: `/api/v2/tasks/${task.id}`,
+      payload: { title: '  新会话名  ' },
+    })
+    assert.equal(rename.statusCode, 200)
+    assert.equal(rename.json().task.title, '新会话名')
+
+    for (const title of ['   ', 'x'.repeat(121)]) {
+      const invalid = await app.inject({ method: 'PATCH', url: `/api/v2/tasks/${task.id}`, payload: { title } })
+      assert.equal(invalid.statusCode, 400)
+    }
+    assert.equal(app.sqliteRepository.getTask(task.id).title, '新会话名')
+
+    const archive = await app.inject({ method: 'POST', url: `/api/v2/projects/${project.id}/archive` })
+    assert.equal(archive.statusCode, 200)
+    assert.equal(archive.json().project.pinnedAt, null)
+    assert.ok(app.sqliteRepository.getTask(task.id).pinnedAt)
+    const hiddenTurn = await app.inject({
+      method: 'POST', url: `/api/v2/tasks/${task.id}/turns`,
+      payload: { clientMessageId: 'archived-project-turn', input: { content: [{ type: 'text', text: '不应执行' }] } },
+    })
+    assert.equal(hiddenTurn.statusCode, 409)
+    assert.equal(hiddenTurn.json().error, 'task_archived')
+  } finally {
+    await app.close()
+  }
+})
+
 test('Task inspection API 提供文件、Git 状态并拒绝路径逃逸', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v2-inspection-api-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
@@ -346,6 +434,12 @@ test('同一 Project 可以创建独立 Worktree Task', async (t) => {
   assert.notEqual(second.agent.id, first.agent.id)
   assert.equal(second.agent.providerId, 'claude')
 
+  const prematureDelete = await app.inject({ method: 'DELETE', url: `/api/v2/tasks/${first.task.id}` })
+  assert.equal(prematureDelete.statusCode, 409)
+  const archiveResponse = await app.inject({ method: 'POST', url: `/api/v2/tasks/${first.task.id}/archive` })
+  assert.equal(archiveResponse.statusCode, 200)
+  const archivedResponse = await app.inject({ method: 'GET', url: '/api/v2/tasks/archived' })
+  assert.equal(archivedResponse.json().tasks.some((task) => task.id === first.task.id), true)
   const deleteResponse = await app.inject({ method: 'DELETE', url: `/api/v2/tasks/${first.task.id}` })
   assert.equal(deleteResponse.statusCode, 204)
   const tasksResponse = await app.inject({ method: 'GET', url: `/api/v2/projects/${first.project.id}/tasks` })
@@ -607,6 +701,43 @@ test('运行中的 Agent 拒绝新的 Turn，重复请求保持幂等', async ()
       payload: { clientMessageId: 'running-second', input: { content: [{ type: 'text', text: '不应发送' }] } },
     })
     assert.equal(rejected.statusCode, 409)
+  } finally {
+    await app.close()
+  }
+})
+
+test('运行中的 Agent 拒绝 Git 合并操作', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-running-merge-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  for (const args of [
+    ['init', '-b', 'main'],
+    ['config', 'user.email', 'promptx@example.com'],
+    ['config', 'user.name', 'PromptX Test'],
+  ]) assert.equal(spawnSync('git', args, { cwd: root }).status, 0)
+  fs.writeFileSync(path.join(root, 'README.md'), 'initial\n')
+  for (const args of [['add', '.'], ['commit', '-m', 'initial']]) {
+    assert.equal(spawnSync('git', args, { cwd: root }).status, 0)
+  }
+
+  const { registry } = createControlTestRegistry()
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
+  try {
+    const project = app.sqliteRepository.createProject({ repositoryRoot: root, displayName: '运行中合并' })
+    const environment = app.sqliteRepository.createEnvironment({
+      cwd: root, repositoryRoot: root, kind: 'worktree', branchName: 'feature', ownership: 'external',
+    })
+    const task = app.sqliteRepository.createTask({ projectId: project.id, environmentId: environment.id, title: '运行中会话' })
+    app.sqliteRepository.createAgent(task.id, { providerId: 'codex' })
+    const started = await app.inject({
+      method: 'POST', url: `/api/v2/tasks/${task.id}/turns`,
+      payload: { clientMessageId: 'running-merge', input: { content: [{ type: 'text', text: '保持运行' }] } },
+    })
+    assert.equal(started.statusCode, 202)
+    const merge = await app.inject({
+      method: 'POST', url: `/api/v2/tasks/${task.id}/git/merge`, payload: { targetBranch: 'main' },
+    })
+    assert.equal(merge.statusCode, 409)
+    assert.equal(merge.json().error, 'task_running')
   } finally {
     await app.close()
   }

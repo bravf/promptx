@@ -1,7 +1,7 @@
-import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_AGENT_TITLE } from '../agent/sessionTitle.js'
+import { canonicalPath, canonicalPathKey, resolveExistingDirectory } from '../paths/canonicalPath.js'
 
 function parseJson(value, fallback = {}) {
   try {
@@ -85,19 +85,16 @@ function mapTimelineRow(row) {
 }
 
 export function normalizeDirectory(input) {
-  const resolved = fs.realpathSync(path.resolve(String(input || '').trim()))
-  if (!fs.statSync(resolved).isDirectory()) throw new Error('工作区路径不是目录。')
-  const normalized = path.parse(resolved).root === resolved ? resolved : resolved.replace(/[\\/]+$/, '')
+  const normalized = resolveExistingDirectory(input)
   return {
     cwd: normalized,
-    pathKey: process.platform === 'win32' ? normalized.toLowerCase() : normalized,
+    pathKey: canonicalPathKey(normalized),
   }
 }
 
 
 export function directoryKey(value) {
-  const normalized = path.resolve(value)
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+  return canonicalPathKey(value)
 }
 
 const AGENT_SELECT = `SELECT a.*, t.project_id, t.title, t.last_active_at, t.archived_at,
@@ -105,12 +102,13 @@ const AGENT_SELECT = `SELECT a.*, t.project_id, t.title, t.last_active_at, t.arc
 
 function mapProject(row) {
   return row ? { id: row.id, repositoryRoot: row.repository_root, displayName: row.display_name,
-    defaultBranch: row.default_branch, createdAt: row.created_at, updatedAt: row.updated_at, lastOpenedAt: row.last_opened_at } : null
+    defaultBranch: row.default_branch, lifecycle: row.lifecycle, createdAt: row.created_at, updatedAt: row.updated_at,
+    lastOpenedAt: row.last_opened_at, archivedAt: row.archived_at, pinnedAt: row.pinned_at } : null
 }
 
 function mapEnvironment(row) {
   return row ? { id: row.id, kind: row.kind, cwd: row.cwd, repositoryRoot: row.repository_root,
-    branchName: row.branch_name, baseRef: row.base_ref, worktreePath: row.worktree_path,
+    branchName: row.branch_name, baseRef: row.base_ref, baseCommit: row.base_commit, worktreePath: row.worktree_path,
     ownership: row.ownership, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at } : null
 }
 
@@ -118,7 +116,7 @@ function mapTask(row) {
   return row ? { id: row.id, projectId: row.project_id, title: row.title, lifecycle: row.lifecycle,
     providerId: row.provider_id || '',
     environmentId: row.environment_id, createdAt: row.created_at, updatedAt: row.updated_at,
-    lastActiveAt: row.last_active_at, archivedAt: row.archived_at } : null
+    lastActiveAt: row.last_active_at, archivedAt: row.archived_at, pinnedAt: row.pinned_at } : null
 }
 
 export function createRepository(db) {
@@ -258,19 +256,34 @@ export function createRepository(db) {
 
   return {
     transaction(callback) { return db.transaction(callback)() },
-    listProjects() {
-      return db.prepare('SELECT * FROM projects ORDER BY last_opened_at DESC').all().map(mapProject)
+    listProjects(includeArchived = false) {
+      return db.prepare(`SELECT * FROM projects ${includeArchived ? '' : "WHERE lifecycle = 'active'"}
+        ORDER BY pinned_at IS NULL, pinned_at DESC, last_opened_at DESC`).all().map(mapProject)
+    },
+    listArchivedProjects(query = '') {
+      const pattern = `%${String(query || '').trim().toLowerCase()}%`
+      return db.prepare(`SELECT p.*,
+        (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.lifecycle = 'active') AS active_task_count,
+        (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.lifecycle = 'archived') AS archived_task_count
+        FROM projects p
+        WHERE p.lifecycle = 'archived' AND (? = '%%' OR lower(p.display_name) LIKE ? OR lower(p.repository_root) LIKE ?)
+        ORDER BY p.archived_at DESC, p.last_opened_at DESC`).all(pattern, pattern, pattern).map((row) => ({
+          ...mapProject(row),
+          activeTaskCount: Number(row.active_task_count || 0),
+          archivedTaskCount: Number(row.archived_task_count || 0),
+        }))
     },
     getProject(id) { return mapProject(db.prepare('SELECT * FROM projects WHERE id = ?').get(id)) },
     getProjectByRoot(root) { return mapProject(db.prepare('SELECT * FROM projects WHERE path_key = ?').get(directoryKey(root))) },
     createProject(input) {
       const id = randomUUID()
       const now = nowIso()
-      const root = path.resolve(input.repositoryRoot)
+      const root = canonicalPath(input.repositoryRoot)
       db.prepare(`INSERT INTO projects
-        (id, repository_root, path_key, display_name, default_branch, created_at, updated_at, last_opened_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(path_key) DO UPDATE SET last_opened_at = excluded.last_opened_at`)
+        (id, repository_root, path_key, display_name, default_branch, lifecycle, created_at, updated_at, last_opened_at)
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
+        ON CONFLICT(path_key) DO UPDATE SET lifecycle = 'active', archived_at = NULL,
+          updated_at = excluded.updated_at, last_opened_at = excluded.last_opened_at`)
         .run(id, root, directoryKey(root), input.displayName || path.basename(root) || root, input.defaultBranch || '', now, now, now)
       return this.getProjectByRoot(root)
     },
@@ -282,15 +295,31 @@ export function createRepository(db) {
         .run(input.displayName ?? current.displayName, input.defaultBranch ?? current.defaultBranch, now, now, id)
       return this.getProject(id)
     },
+    setProjectPinned(id, pinned) {
+      const now = nowIso()
+      db.prepare('UPDATE projects SET pinned_at = ?, updated_at = ? WHERE id = ? AND lifecycle = ?')
+        .run(pinned ? now : null, now, id, 'active')
+      return this.getProject(id)
+    },
     deleteProject(id) { return db.prepare('DELETE FROM projects WHERE id = ?').run(id).changes > 0 },
+    archiveProject(id) {
+      const now = nowIso()
+      db.prepare("UPDATE projects SET lifecycle = 'archived', archived_at = ?, pinned_at = NULL, updated_at = ? WHERE id = ?").run(now, now, id)
+      return this.getProject(id)
+    },
+    restoreProject(id) {
+      const now = nowIso()
+      db.prepare("UPDATE projects SET lifecycle = 'active', archived_at = NULL, updated_at = ?, last_opened_at = ? WHERE id = ?").run(now, now, id)
+      return this.getProject(id)
+    },
     createEnvironment(input) {
       const id = input.id || randomUUID()
       const now = nowIso()
       db.prepare(`INSERT INTO execution_environments
-        (id, kind, cwd, path_key, repository_root, branch_name, base_ref, worktree_path, ownership, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, input.kind || 'local', input.cwd, directoryKey(input.cwd), input.repositoryRoot,
-          input.branchName || '', input.baseRef || '', input.worktreePath || null, input.ownership || 'external', input.status || 'ready', now, now)
+        (id, kind, cwd, path_key, repository_root, branch_name, base_ref, base_commit, worktree_path, ownership, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, input.kind || 'local', canonicalPath(input.cwd), directoryKey(input.cwd), canonicalPath(input.repositoryRoot),
+          input.branchName || '', input.baseRef || '', input.baseCommit || '', input.worktreePath ? canonicalPath(input.worktreePath) : null, input.ownership || 'external', input.status || 'ready', now, now)
       return this.getEnvironment(id)
     },
     getEnvironment(id) { return mapEnvironment(db.prepare('SELECT * FROM execution_environments WHERE id = ?').get(id)) },
@@ -298,17 +327,19 @@ export function createRepository(db) {
     updateEnvironment(id, patch = {}) {
       const current = this.getEnvironment(id)
       if (!current) return null
-      db.prepare('UPDATE execution_environments SET status = ?, updated_at = ? WHERE id = ?')
-        .run(patch.status ?? current.status, nowIso(), id)
+      db.prepare(`UPDATE execution_environments SET status = ?, branch_name = ?, base_ref = ?, base_commit = ?,
+        updated_at = ? WHERE id = ?`)
+        .run(patch.status ?? current.status, patch.branchName ?? current.branchName, patch.baseRef ?? current.baseRef,
+          patch.baseCommit ?? current.baseCommit, nowIso(), id)
       return this.getEnvironment(id)
     },
     rebindEnvironment(id, input) {
       const current = this.getEnvironment(id)
       if (!current) return null
       db.prepare(`UPDATE execution_environments SET cwd = ?, path_key = ?, repository_root = ?, kind = ?,
-        worktree_path = ?, branch_name = ?, base_ref = ?, ownership = ?, status = ?, updated_at = ? WHERE id = ?`)
-        .run(input.cwd, directoryKey(input.cwd), input.repositoryRoot || current.repositoryRoot, input.kind || 'local',
-          input.worktreePath || null, input.branchName || '', input.baseRef || '', input.ownership || 'external', input.status || 'ready', nowIso(), id)
+        worktree_path = ?, branch_name = ?, base_ref = ?, base_commit = ?, ownership = ?, status = ?, updated_at = ? WHERE id = ?`)
+        .run(canonicalPath(input.cwd), directoryKey(input.cwd), canonicalPath(input.repositoryRoot || current.repositoryRoot), input.kind || 'local',
+          input.worktreePath ? canonicalPath(input.worktreePath) : null, input.branchName || '', input.baseRef || '', input.baseCommit || '', input.ownership || 'external', input.status || 'ready', nowIso(), id)
       return this.getEnvironment(id)
     },
     deleteEnvironment(id) { return db.prepare('DELETE FROM execution_environments WHERE id = ?').run(id).changes > 0 },
@@ -327,8 +358,18 @@ export function createRepository(db) {
     },
     listTasks(projectId, includeArchived = false) {
       return db.prepare(`SELECT t.*, a.provider_id FROM tasks t LEFT JOIN agent_sessions a ON a.task_id = t.id
-        WHERE t.project_id = ? ${includeArchived ? '' : 'AND t.archived_at IS NULL'}
-        ORDER BY last_active_at DESC`).all(projectId).map(mapTask)
+        WHERE t.project_id = ? ${includeArchived ? '' : "AND t.lifecycle = 'active'"}
+        ORDER BY t.pinned_at IS NULL, t.pinned_at DESC, t.last_active_at DESC`).all(projectId).map(mapTask)
+    },
+    listArchivedTasks(query = '') {
+      const pattern = `%${String(query || '').trim().toLowerCase()}%`
+      return db.prepare(`SELECT t.*, a.provider_id FROM tasks t
+        LEFT JOIN agent_sessions a ON a.task_id = t.id
+        JOIN projects p ON p.id = t.project_id
+        JOIN execution_environments e ON e.id = t.environment_id
+        WHERE t.lifecycle = 'archived' AND (? = '%%' OR lower(t.title) LIKE ? OR lower(p.display_name) LIKE ?
+          OR lower(a.provider_id) LIKE ? OR lower(e.branch_name) LIKE ?)
+        ORDER BY t.archived_at DESC, t.last_active_at DESC`).all(pattern, pattern, pattern, pattern, pattern).map(mapTask)
     },
     updateTask(id, patch = {}) {
       const task = this.getTask(id)
@@ -337,9 +378,22 @@ export function createRepository(db) {
         .run(patch.title ?? task.title, patch.lastActiveAt ?? task.lastActiveAt, nowIso(), id)
       return this.getTask(id)
     },
+    setTaskPinned(id, pinned) {
+      const now = nowIso()
+      db.prepare('UPDATE tasks SET pinned_at = ?, updated_at = ? WHERE id = ? AND lifecycle = ?')
+        .run(pinned ? now : null, now, id, 'active')
+      return this.getTask(id)
+    },
     archiveTask(id) {
       const now = nowIso()
-      db.prepare("UPDATE tasks SET lifecycle = 'archived', archived_at = ?, updated_at = ? WHERE id = ?").run(now, now, id)
+      db.prepare("UPDATE tasks SET lifecycle = 'archived', archived_at = ?, pinned_at = NULL, updated_at = ? WHERE id = ?").run(now, now, id)
+      return this.getTask(id)
+    },
+    restoreTask(id) {
+      const task = this.getTask(id)
+      if (!task) return null
+      const now = nowIso()
+      db.prepare("UPDATE tasks SET lifecycle = 'active', archived_at = NULL, updated_at = ?, last_active_at = ? WHERE id = ?").run(now, now, id)
       return this.getTask(id)
     },
     deleteTask(id) { return db.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0 },

@@ -16,6 +16,10 @@ import { registerRelayRoutes, RelayService } from './relay/relayService.js'
 import { SessionImportService } from './agent/sessionImport.js'
 import { createCorsPolicy } from './security/corsPolicy.js'
 import { reconcileEnvironment } from './environments/environmentReconcile.js'
+import { pickDirectory } from './workspaces/directoryPicker.js'
+import { TaskLifecycleService } from './tasks/taskLifecycleService.js'
+import { EnvironmentService } from './environments/environmentService.js'
+import { GitDeliveryService } from './git/gitDeliveryService.js'
 
 export async function createApp(options = {}) {
   const app = Fastify({ logger: options.logger ?? true })
@@ -47,6 +51,9 @@ export async function createApp(options = {}) {
   const eventHub = new EventHub()
   const providerRegistry = options.providerRegistry || new ProviderRegistry()
   const agentManager = new AgentManager({ repository, timelineStore, providerRegistry, eventHub })
+  const taskLifecycle = new TaskLifecycleService({ repository, agentManager, assetsDir })
+  const environmentService = new EnvironmentService({ repository, agentManager })
+  const gitDelivery = new GitDeliveryService({ repository, agentManager, taskLifecycle })
   const sessionImport = new SessionImportService({
     ...(options.sessionImportOptions || {}),
     repository,
@@ -55,7 +62,20 @@ export async function createApp(options = {}) {
   })
   app.decorate('sqliteRepository', repository)
   repository.failActiveTurnsOnStartup()
-  registerRoutes(app, { repository, timelineStore, eventHub, providerRegistry, agentManager, sessionImport, assetsDir, corsPolicy })
+  registerRoutes(app, {
+    repository,
+    timelineStore,
+    eventHub,
+    providerRegistry,
+    agentManager,
+    sessionImport,
+    assetsDir,
+    corsPolicy,
+    directoryPicker: options.directoryPicker || pickDirectory,
+    taskLifecycle,
+    environmentService,
+    gitDelivery,
+  })
   const relay = new RelayService({
     localBaseUrl: options.localBaseUrl || `http://127.0.0.1:${process.env.PORT || process.env.PROMPTX_DAEMON_PORT || 3001}`,
     logger: app.log,
@@ -79,6 +99,8 @@ export async function createApp(options = {}) {
     reply.code(statusCode).send({
       error: error.code || (statusCode === 400 ? 'invalid_request' : 'internal_error'),
       message: error.message,
+      ...(error.risk ? { risk: error.risk } : {}),
+      ...(error.git ? { git: error.git } : {}),
     })
   })
   app.addHook('onClose', async () => {

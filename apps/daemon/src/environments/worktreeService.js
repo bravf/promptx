@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { canonicalPath, canonicalPathKey } from '../paths/canonicalPath.js'
 
 export function runGit(cwd, args) {
   return new Promise((resolve, reject) => {
@@ -32,24 +33,24 @@ export function worktreesRoot() {
 }
 
 export function worktreeRepositoryDirectory(root) {
-  const resolvedRoot = path.resolve(root)
-  const repositoryName = Array.from(path.basename(resolvedRoot).normalize('NFKC')
+  const resolvedRoot = canonicalPath(root)
+  const baseName = resolvedRoot.split(/[\\/]/).filter(Boolean).at(-1) || 'repository'
+  const repositoryName = Array.from(baseName.normalize('NFKC')
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
     .replace(/[. ]+$/g, '') || 'repository')
     .slice(0, 40)
     .join('')
-  const hashKey = process.platform === 'win32' ? resolvedRoot.toLowerCase() : resolvedRoot
+  const hashKey = canonicalPathKey(resolvedRoot)
   const hash = crypto.createHash('sha256').update(hashKey).digest('hex').slice(0, 12)
   return `${repositoryName}-${hash}`
 }
 
 function normalizeGitPath(value) {
-  return path.resolve(String(value || '').replace(/[\\/]+$/, ''))
+  return canonicalPath(value)
 }
 
 function samePath(left, right) {
-  const normalize = (value) => process.platform === 'win32' ? normalizeGitPath(value).toLowerCase() : normalizeGitPath(value)
-  return normalize(left) === normalize(right)
+  return canonicalPathKey(left) === canonicalPathKey(right)
 }
 
 export async function repositoryContext(cwd) {
@@ -90,6 +91,7 @@ export async function addWorktree({ repositoryRoot: root, baseRef, branchName, s
     throw error
   }
   const parent = path.join(worktreesRoot(), worktreeRepositoryDirectory(root))
+  const baseCommit = await runGit(root, ['rev-parse', '--verify', `${baseRef}^{commit}`])
   fs.mkdirSync(parent, { recursive: true })
   const branches = new Set((await runGit(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])).split(/\r?\n/).filter(Boolean))
   for (let ordinal = 1; ordinal <= 10_000; ordinal += 1) {
@@ -98,7 +100,7 @@ export async function addWorktree({ repositoryRoot: root, baseRef, branchName, s
     const target = path.join(parent, candidateSlug)
     if (fs.existsSync(target) || branches.has(candidateBranchName)) continue
     await runGit(root, ['worktree', 'add', '-b', candidateBranchName, target, baseRef])
-    return { path: target, branchName: candidateBranchName, baseRef, slug: candidateSlug }
+    return { path: target, branchName: candidateBranchName, baseRef, baseCommit, slug: candidateSlug }
   }
   throw new Error('无法分配可用的 Worktree 名称')
 }
@@ -113,4 +115,24 @@ export async function addExistingBranch({ repositoryRoot: root, branchName, slug
 
 export const listWorktrees = (root) => runGit(root, ['worktree', 'list', '--porcelain'])
 export const removeWorktree = (root, target, force = false) => runGit(root, ['worktree', 'remove', ...(force ? ['--force'] : []), target])
+export async function worktreeRemovalRisk(environment) {
+  const porcelain = await runGit(environment.cwd, ['status', '--porcelain'])
+  let unpushedCommits = 0
+  try {
+    unpushedCommits = Number(await runGit(environment.cwd, ['rev-list', '--count', '@{upstream}..HEAD'])) || 0
+  } catch {
+    if (environment.baseCommit) {
+      try {
+        unpushedCommits = Number(await runGit(environment.cwd, ['rev-list', '--count', `${environment.baseCommit}..HEAD`])) || 0
+      } catch {
+        unpushedCommits = 0
+      }
+    }
+  }
+  return {
+    dirty: Boolean(porcelain),
+    files: porcelain ? porcelain.split(/\r?\n/).filter(Boolean) : [],
+    unpushedCommits,
+  }
+}
 export const listCommits = (cwd, limit = 50) => runGit(cwd, ['log', `-${Math.max(1, Math.min(200, Number(limit) || 50))}`, '--pretty=format:%H%x09%an%x09%ad%x09%s', '--date=iso']).then((text) => text ? text.split(/\r?\n/).map((line) => { const [id, author, date, ...subject] = line.split('\t'); return { id, author, date, subject: subject.join('\t') } }) : [])

@@ -6,7 +6,6 @@ import { workspaceLinksForTool } from '../lib/timelineWorkspaceLinks.js'
 import TimelineMarkdown from './TimelineMarkdown.vue'
 import TimelineMessageMeta from './TimelineMessageMeta.vue'
 import TimelineUserMessage from './TimelineUserMessage.vue'
-import PxButton from './PxButton.vue'
 
 const props = defineProps({
   turn: { type: Object, required: true },
@@ -73,10 +72,11 @@ onBeforeUnmount(() => clearInterval(clockTimer))
     </article>
 
     <section v-if="showProcess" class="process-group mb-5 ml-7">
-      <PxButton variant="ghost" size="sm" class="theme-muted-text h-auto w-full justify-start gap-1.5 py-1 text-left text-xs disabled:cursor-default" :disabled="!hasProcessEntries" :aria-expanded="hasProcessEntries ? expanded : undefined" @click="expanded = !expanded">
+      <button v-if="hasProcessEntries" type="button" class="process-toggle theme-muted-text inline-flex items-center gap-1.5 py-1 text-left text-xs" :aria-expanded="expanded" @click="expanded = !expanded">
         <span>{{ heading }}</span>
-        <ChevronRight v-if="hasProcessEntries" class="h-3.5 w-3.5 shrink-0 transition-transform" :class="expanded ? 'rotate-90' : ''" />
-      </PxButton>
+        <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform" :class="expanded ? 'rotate-90' : ''" />
+      </button>
+      <div v-else class="theme-muted-text py-1 text-xs">{{ heading }}</div>
       <div v-if="expanded && hasProcessEntries" class="process-content pb-1 pl-5 pt-1">
         <div v-for="entry in visibleProcessEntries" :key="`${entry.seqStart}-${entry.item.callId || entry.item.type}`" class="process-entry py-1.5 text-xs">
           <TimelineMarkdown v-if="entry.item.type === 'assistant_message'" class="theme-secondary-text" :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
@@ -128,6 +128,8 @@ onBeforeUnmount(() => clearInterval(clockTimer))
 </template>
 
 <style scoped>
+.process-toggle { border: 0; background: transparent; }
+.process-toggle:hover { color: var(--theme-textPrimary); }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .workspace-path-link { color: var(--theme-accentText); }
 .workspace-path-link:hover { text-decoration: underline; }

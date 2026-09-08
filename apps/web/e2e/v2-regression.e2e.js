@@ -164,7 +164,7 @@ function seedWorkspace(root, repository) {
 }
 
 async function createFixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-full-regression-'))
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-full-regression-')))
   const runtimeRecords = { settings: [], turns: [], canceled: 0 }
   const port = await availablePort()
   const baseUrl = `http://127.0.0.1:${port}`
@@ -364,7 +364,8 @@ test('V2 全面桌面交互回归', async (t) => {
   await page.getByTitle('发送').waitFor()
   assert.equal(fixture.runtimeRecords.canceled, 1)
 
-  await page.getByRole('button', { name: '在 全面回归工作区 中新建会话' }).click()
+  await page.getByRole('button', { name: '全面回归工作区 的更多操作' }).click()
+  await page.getByRole('menuitem', { name: '新建会话', exact: true }).click()
   assert.equal(await page.getByLabel('路径').inputValue(), fixture.workspace)
   assert.equal((await page.getByLabel('执行位置').textContent()).trim(), '当前目录')
   await page.getByLabel('执行位置').click()
@@ -379,15 +380,18 @@ test('V2 全面桌面交互回归', async (t) => {
   consumeExpectedResourceError(failures)
   await page.getByLabel('关闭').click()
 
-  await page.getByRole('button', { name: '在 全面回归工作区 中新建会话' }).click()
+  await page.getByRole('button', { name: '全面回归工作区 的更多操作' }).click()
+  await page.getByRole('menuitem', { name: '新建会话', exact: true }).click()
   await page.getByLabel('任务标题').fill('界面新增会话')
   await page.getByRole('button', { name: '创建会话', exact: true }).click()
   await page.getByRole('button', { name: '界面新增会话', exact: true }).waitFor()
-  await page.getByRole('button', { name: '删除 界面新增会话' }).click()
+  await page.getByRole('button', { name: '界面新增会话 的更多操作' }).click()
+  await page.getByRole('menuitem', { name: '归档会话', exact: true }).click()
   await page.getByRole('button', { name: '取消', exact: true }).click()
   await page.getByRole('button', { name: '界面新增会话', exact: true }).waitFor()
-  await page.getByRole('button', { name: '删除 界面新增会话' }).click()
-  await page.getByRole('button', { name: '删除', exact: true }).click()
+  await page.getByRole('button', { name: '界面新增会话 的更多操作' }).click()
+  await page.getByRole('menuitem', { name: '归档会话', exact: true }).click()
+  await page.getByRole('button', { name: '归档', exact: true }).click()
   await page.getByRole('button', { name: '界面新增会话', exact: true }).waitFor({ state: 'detached' })
 
   await page.getByRole('button', { name: '导入会话' }).click()

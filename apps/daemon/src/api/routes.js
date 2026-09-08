@@ -2,11 +2,17 @@ import {
   CreateProjectInputSchema,
   CreateTaskInputSchema,
   CreateTurnInputSchema,
+  GitCommitInputSchema,
+  GitMergeInputSchema,
+  PinInputSchema,
+  RebindEnvironmentInputSchema,
+  RemoveWorktreeInputSchema,
+  UpdateTaskInputSchema,
   UpdateAgentSettingsInputSchema,
   UpdateProjectInputSchema,
 } from '../../../../packages/protocol/src/index.js'
+import { DATABASE_VERSION } from '../db/database.js'
 import fs from 'node:fs'
-import path from 'node:path'
 import { searchDirectories } from '../workspaces/directorySearch.js'
 import {
   getWorkspaceGitDiff,
@@ -15,10 +21,10 @@ import {
   openWorkspaceFileStream,
   readWorkspaceFile,
 } from '../workspaces/workspaceInspection.js'
-import { publicAsset, removeStoredAssets, storeAsset } from '../assets/assetStorage.js'
+import { publicAsset, storeAsset } from '../assets/assetStorage.js'
 import { DEFAULT_AGENT_TITLE } from '../agent/sessionTitle.js'
-import { repositoryRoot, defaultBranch, addWorktree, removeWorktree, listCommits, runGit } from '../environments/worktreeService.js'
-import { reconcileEnvironment } from '../environments/environmentReconcile.js'
+import { repositoryRoot, defaultBranch, addWorktree, removeWorktree, listCommits } from '../environments/worktreeService.js'
+import { resolveExistingDirectory } from '../paths/canonicalPath.js'
 
 function parseCursor(value) {
   if (!value) return null
@@ -72,17 +78,11 @@ function publicTask(repository, task) {
 }
 
 function resolveDirectoryPath(value) {
-  if (typeof value !== 'string' || !value.trim()) throw badRequest('请提供有效的目录路径。')
-  let requested
-  let stat
   try {
-    requested = fs.realpathSync(path.resolve(value.trim()))
-    stat = fs.statSync(requested)
-  } catch {
-    throw badRequest('工作区路径不存在或无法访问。')
+    return resolveExistingDirectory(value)
+  } catch (error) {
+    throw badRequest(error.message)
   }
-  if (!stat.isDirectory()) throw badRequest('工作区路径不是目录。')
-  return requested
 }
 
 async function resolveProjectInput(input) {
@@ -96,7 +96,9 @@ async function resolveProjectInput(input) {
 }
 
 export function registerRoutes(app, context) {
-  const { repository, timelineStore, providerRegistry, agentManager, sessionImport, eventHub, assetsDir, corsPolicy } = context
+  const { repository, timelineStore, providerRegistry, agentManager, sessionImport, eventHub, assetsDir, corsPolicy,
+    directoryPicker, taskLifecycle, environmentService, gitDelivery } = context
+  let directoryPickerOpen = false
 
   async function createTask(project, rawInput) {
     const input = CreateTaskInputSchema.parse(rawInput)
@@ -124,6 +126,7 @@ export function registerRoutes(app, context) {
           repositoryRoot: project.repositoryRoot,
           branchName: createdWorktree?.branchName || '',
           baseRef: createdWorktree?.baseRef || '',
+          baseCommit: createdWorktree?.baseCommit || '',
           worktreePath: createdWorktree?.path || null,
           ownership: input.executionKind === 'worktree' ? 'promptx' : 'external',
         })
@@ -143,12 +146,32 @@ export function registerRoutes(app, context) {
     }
   }
 
-  app.get('/api/v2/health', async () => ({ ok: true, version: 3 }))
+  app.get('/api/v2/health', async () => ({ ok: true, version: DATABASE_VERSION }))
   app.get('/api/v2/providers', async () => ({ providers: providerRegistry.list() }))
   app.get('/api/v2/directories/search', async (request) => searchDirectories({
     query: request.query.q,
     limit: request.query.limit,
   }))
+  app.post('/api/v2/directories/pick', async (request, reply) => {
+    if (request.headers['x-promptx-relay-request'] === '1') {
+      return reply.code(403).send({
+        error: 'directory_picker_local_only',
+        message: '远程访问时不能打开主机的目录选择器，请手动输入路径。',
+      })
+    }
+    if (directoryPickerOpen) {
+      return reply.code(409).send({ error: 'directory_picker_busy', message: '目录选择器已经打开。' })
+    }
+    const initialPath = request.body?.initialPath
+    if (initialPath !== undefined && typeof initialPath !== 'string') throw badRequest('初始目录必须是文本。')
+    if (String(initialPath || '').length > 4096) throw badRequest('初始目录过长。')
+    directoryPickerOpen = true
+    try {
+      return await directoryPicker({ initialPath })
+    } finally {
+      directoryPickerOpen = false
+    }
+  })
   app.get('/api/v2/import/sessions', async (request) => sessionImport.list({
     providerId: request.query.providerId,
     query: request.query.q,
@@ -177,25 +200,33 @@ export function registerRoutes(app, context) {
     const project = repository.updateProject(request.params.projectId, input)
     return project ? { project } : reply.code(404).send({ error: 'project_not_found', message: '工作区不存在。' })
   })
+  app.post('/api/v2/projects/:projectId/pin', async (request, reply) => {
+    const project = repository.getProject(request.params.projectId)
+    if (!project) return reply.code(404).send({ error: 'project_not_found', message: '工作区不存在。' })
+    const input = PinInputSchema.parse(request.body ?? {})
+    return { project: repository.setProjectPinned(project.id, input.pinned) }
+  })
   app.delete('/api/v2/projects/:projectId', async (request, reply) => {
     const project = repository.getProject(request.params.projectId)
     if (!project) return reply.code(404).send({ error: 'project_not_found', message: '工作区不存在。' })
-    for (const task of repository.listTasks(project.id, true)) {
-      const agent = repository.getTaskAgent(task.id)
-      if (agent) {
-        await agentManager.cancel(agent.id).catch(() => {})
-        agentManager.close(agent.id)
-      }
-      const assets = repository.listTaskAssets(task.id)
-      const environment = repository.getEnvironment(task.environmentId)
-      repository.deleteTask(task.id)
-      repository.deleteEnvironment(environment?.id)
-      removeStoredAssets(assets)
-      fs.rmSync(path.join(assetsDir, task.id), { recursive: true, force: true })
+    if (project.lifecycle !== 'archived') {
+      return reply.code(409).send({ error: 'project_not_archived', message: '只能永久删除已归档的工作区。' })
+    }
+    if (repository.listTasks(project.id, true).length) {
+      return reply.code(409).send({ error: 'project_has_tasks', message: '请先在归档管理中永久删除该工作区的会话。' })
     }
     repository.deleteProject(project.id)
     return reply.code(204).send()
   })
+  app.post('/api/v2/projects/:projectId/archive', async (request, reply) => {
+    return { project: await taskLifecycle.archiveProject(request.params.projectId) }
+  })
+  app.post('/api/v2/projects/:projectId/restore', async (request, reply) => {
+    return { project: taskLifecycle.restoreProject(request.params.projectId) }
+  })
+  app.get('/api/v2/projects/archived', async (request) => ({
+    projects: repository.listArchivedProjects(request.query.q),
+  }))
   app.get('/api/v2/projects/:projectId/tasks', async (request, reply) => {
     if (!repository.getProject(request.params.projectId)) {
       return reply.code(404).send({ error: 'project_not_found', message: '工作区不存在。' })
@@ -205,6 +236,7 @@ export function registerRoutes(app, context) {
   app.post('/api/v2/projects/:projectId/tasks', async (request, reply) => {
     const project = repository.getProject(request.params.projectId)
     if (!project) return reply.code(404).send({ error: 'project_not_found', message: '工作区不存在。' })
+    if (project.lifecycle !== 'active') return reply.code(409).send({ error: 'project_archived', message: '请先恢复工作区。' })
     const result = await createTask(project, request.body || {})
     reply.code(201)
     return result
@@ -213,6 +245,20 @@ export function registerRoutes(app, context) {
   app.get('/api/v2/tasks/:taskId', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)
     return current || reply.code(404).send({ error: 'task_not_found', message: '会话不存在。' })
+  })
+  app.patch('/api/v2/tasks/:taskId', async (request, reply) => {
+    const current = taskContext(repository, request.params.taskId)
+    if (!current) return reply.code(404).send({ error: 'task_not_found', message: '会话不存在。' })
+    const input = UpdateTaskInputSchema.parse(request.body ?? {})
+    const task = repository.updateTask(current.task.id, input)
+    return { task: publicTask(repository, task) }
+  })
+  app.post('/api/v2/tasks/:taskId/pin', async (request, reply) => {
+    const current = taskContext(repository, request.params.taskId)
+    if (!current) return reply.code(404).send({ error: 'task_not_found', message: '会话不存在。' })
+    const input = PinInputSchema.parse(request.body ?? {})
+    const task = repository.setTaskPinned(current.task.id, input.pinned)
+    return { task: publicTask(repository, task) }
   })
   app.get('/api/v2/tasks/:taskId/environment', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)
@@ -310,40 +356,21 @@ export function registerRoutes(app, context) {
       : reply.code(404).send({ error: 'task_not_found' })
   })
   app.post('/api/v2/tasks/:taskId/git/commit', async (request, reply) => {
-    const current = taskContext(repository, request.params.taskId)
-    if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    const message = String(request.body?.message || '').trim()
-    if (!message || message.length > 200) return reply.code(400).send({ error: 'invalid_commit_message' })
-    const status = await getWorkspaceGitStatus(current.environment.cwd)
-    if (!status.files?.length) return reply.code(409).send({ error: 'worktree_clean' })
-    await runGit(current.environment.cwd, ['add', '--all'])
-    await runGit(current.environment.cwd, ['commit', '-m', message])
-    return { commits: await listCommits(current.environment.cwd, 1) }
+    const input = GitCommitInputSchema.parse(request.body ?? {})
+    return { commits: await gitDelivery.commit(request.params.taskId, input.message) }
   })
   app.post('/api/v2/tasks/:taskId/git/push', async (request, reply) => {
-    const current = taskContext(repository, request.params.taskId)
-    if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    const branchName = await defaultBranch(current.environment.cwd)
-    if (branchName === 'HEAD') return reply.code(409).send({ error: 'branch_required', message: '请先切换到要推送的分支。' })
-    await runGit(current.environment.cwd, ['push', '-u', 'origin', `refs/heads/${branchName}:refs/heads/${branchName}`])
+    const branchName = await gitDelivery.push(request.params.taskId)
     return { pushed: true, branchName }
   })
   app.post('/api/v2/tasks/:taskId/git/merge', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)
     if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    if (current.environment.kind !== 'worktree' || !current.environment.branchName) {
-      return reply.code(409).send({ error: 'worktree_required' })
-    }
-    const target = String(request.body?.targetBranch || current.project.defaultBranch || '').trim()
+    const input = GitMergeInputSchema.parse(request.body ?? {})
+    const target = input.targetBranch || current.project.defaultBranch
     if (!target) return reply.code(400).send({ error: 'target_branch_required' })
-    const sourceStatus = await getWorkspaceGitStatus(current.environment.cwd)
-    if (sourceStatus.files?.length) return reply.code(409).send({ error: 'worktree_dirty', message: '请先提交会话工作区中的修改，再执行合并。', git: sourceStatus })
-    const rootStatus = await getWorkspaceGitStatus(current.project.repositoryRoot)
-    if (rootStatus.files?.length) return reply.code(409).send({ error: 'project_dirty', git: rootStatus })
-    await runGit(current.project.repositoryRoot, ['checkout', target])
-    await runGit(current.project.repositoryRoot, ['merge', '--no-ff', current.environment.branchName, '-m', request.body?.message || `Merge ${current.environment.branchName}`])
-    if (request.body?.archive !== false) repository.archiveTask(current.task.id)
-    return { merged: true, targetBranch: target, task: repository.getTask(current.task.id) }
+    const result = await gitDelivery.merge(current.task.id, { ...input, targetBranch: target })
+    return { merged: true, ...result }
   })
 
   app.post('/api/v2/tasks/:taskId/assets', async (request, reply) => {
@@ -368,30 +395,28 @@ export function registerRoutes(app, context) {
   })
 
   app.post('/api/v2/tasks/:taskId/archive', async (request, reply) => {
-    const current = taskContext(repository, request.params.taskId)
-    if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    await agentManager.cancel(current.agent.id).catch(() => {})
-    agentManager.close(current.agent.id)
-    return { task: repository.archiveTask(current.task.id) }
+    return { task: await taskLifecycle.archiveTask(request.params.taskId) }
+  })
+  app.get('/api/v2/tasks/archived', async (request) => ({
+    tasks: repository.listArchivedTasks(request.query.q).map((task) => ({
+      ...publicTask(repository, task),
+      project: repository.getProject(task.projectId),
+    })),
+  }))
+  app.post('/api/v2/tasks/:taskId/restore', async (request, reply) => {
+    const task = await taskLifecycle.restoreTask(request.params.taskId)
+    return { task: publicTask(repository, task), project: repository.getProject(task.projectId) }
+  })
+  app.post('/api/v2/tasks/:taskId/environment/remove-worktree', async (request, reply) => {
+    const input = RemoveWorktreeInputSchema.parse(request.body ?? {})
+    return { environment: await environmentService.removeManagedWorktree(request.params.taskId, input) }
   })
   app.post('/api/v2/tasks/:taskId/environment/reconcile', async (request, reply) => {
-    const current = taskContext(repository, request.params.taskId)
-    if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    const updated = await reconcileEnvironment(current.environment)
-    return { environment: repository.updateEnvironment(current.environment.id, { status: updated.status }) }
+    return { environment: await environmentService.reconcile(request.params.taskId) }
   })
   app.post('/api/v2/tasks/:taskId/environment/rebind', async (request, reply) => {
-    const current = taskContext(repository, request.params.taskId)
-    if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    const cwd = resolveDirectoryPath(request.body?.cwd)
-    return { environment: repository.rebindEnvironment(current.environment.id, {
-      cwd,
-      repositoryRoot: request.body?.repositoryRoot === undefined
-        ? current.environment.repositoryRoot
-        : resolveDirectoryPath(request.body.repositoryRoot),
-      kind: 'local',
-      ownership: 'external',
-    }) }
+    const input = RebindEnvironmentInputSchema.parse(request.body ?? {})
+    return { environment: await environmentService.rebind(request.params.taskId, input) }
   })
   app.post('/api/v2/tasks/:taskId/copy', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)
@@ -402,7 +427,7 @@ export function registerRoutes(app, context) {
       providerId: current.agent.providerId,
       title: raw.title || current.task.title,
       executionKind: 'worktree',
-      baseRef: raw.baseRef || current.environment.baseRef || current.project.defaultBranch || 'HEAD',
+      baseRef: raw.baseRef || current.project.defaultBranch || 'HEAD',
       branchName: raw.branchName || `codex/${slug}`,
       slug,
     })
@@ -410,24 +435,7 @@ export function registerRoutes(app, context) {
     return result
   })
   app.delete('/api/v2/tasks/:taskId', async (request, reply) => {
-    const current = taskContext(repository, request.params.taskId)
-    if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    if (['running', 'stopping'].includes(current.agent.lifecycle)) return reply.code(409).send({ error: 'task_running' })
-    const options = request.body || {}
-    if (options.deleteWorktree) {
-      if (current.environment.kind !== 'worktree' || current.environment.ownership !== 'promptx') {
-        return reply.code(409).send({ error: 'worktree_not_owned' })
-      }
-      const git = await getWorkspaceGitStatus(current.environment.cwd)
-      if ((git.files?.length || git.ahead || 0) && !options.force) return reply.code(409).send({ error: 'worktree_dirty', git })
-      await removeWorktree(current.environment.repositoryRoot, current.environment.worktreePath || current.environment.cwd, Boolean(options.force))
-    }
-    agentManager.close(current.agent.id)
-    const assets = repository.listTaskAssets(current.task.id)
-    repository.deleteTask(current.task.id)
-    repository.deleteEnvironment(current.environment.id)
-    removeStoredAssets(assets)
-    fs.rmSync(path.join(assetsDir, current.task.id), { recursive: true, force: true })
+    await taskLifecycle.deleteTask(request.params.taskId)
     return reply.code(204).send()
   })
 

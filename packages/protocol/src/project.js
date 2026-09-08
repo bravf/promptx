@@ -2,7 +2,8 @@ import { z } from 'zod'
 
 export const ProjectSchema = z.object({
   id: z.string().min(1), repositoryRoot: z.string().min(1), displayName: z.string(), defaultBranch: z.string(),
-  createdAt: z.string(), updatedAt: z.string(), lastOpenedAt: z.string(),
+  lifecycle: z.enum(['active', 'archived']), createdAt: z.string(), updatedAt: z.string(), lastOpenedAt: z.string(),
+  archivedAt: z.string().nullable(), pinnedAt: z.string().nullable(),
 })
 
 export const CreateProjectInputSchema = z.object({
@@ -11,3 +12,7 @@ export const CreateProjectInputSchema = z.object({
   defaultBranch: z.string({ error: '默认分支必须是文本。' }).trim().optional(),
 })
 export const UpdateProjectInputSchema = CreateProjectInputSchema.pick({ displayName: true, defaultBranch: true })
+
+export const PinInputSchema = z.object({
+  pinned: z.boolean(),
+})

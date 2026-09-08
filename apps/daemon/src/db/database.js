@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 
-export const DATABASE_VERSION = 3
+export const DATABASE_VERSION = 6
 
 export function resolveDaemonPaths() {
   const homeDir = path.resolve(process.env.PROMPTX_HOME || path.join(os.homedir(), '.promptx'))
@@ -35,14 +35,16 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
         CREATE TABLE projects (
           id TEXT PRIMARY KEY, repository_root TEXT NOT NULL, path_key TEXT NOT NULL UNIQUE,
           display_name TEXT NOT NULL, default_branch TEXT NOT NULL DEFAULT '',
-          created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_opened_at TEXT NOT NULL
+          lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active', 'archived')),
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_opened_at TEXT NOT NULL,
+          archived_at TEXT, pinned_at TEXT
         );
         CREATE TABLE execution_environments (
           id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('local', 'worktree')),
           cwd TEXT NOT NULL, repository_root TEXT NOT NULL, branch_name TEXT NOT NULL DEFAULT '',
-          base_ref TEXT NOT NULL DEFAULT '', worktree_path TEXT, path_key TEXT NOT NULL,
+          base_ref TEXT NOT NULL DEFAULT '', base_commit TEXT NOT NULL DEFAULT '', worktree_path TEXT, path_key TEXT NOT NULL,
           ownership TEXT NOT NULL CHECK(ownership IN ('promptx', 'external')),
-          status TEXT NOT NULL CHECK(status IN ('creating', 'ready', 'running', 'dirty', 'clean', 'missing', 'orphaned', 'archiving', 'archived', 'unavailable')),
+          status TEXT NOT NULL CHECK(status IN ('ready', 'dirty', 'clean', 'missing', 'removed', 'unavailable')),
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
         CREATE UNIQUE INDEX idx_managed_worktree_path ON execution_environments(path_key)
@@ -52,9 +54,11 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
           environment_id TEXT NOT NULL UNIQUE REFERENCES execution_environments(id), title TEXT NOT NULL,
           lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active', 'archived')),
           timeline_epoch TEXT NOT NULL, timeline_next_seq INTEGER NOT NULL DEFAULT 1 CHECK(timeline_next_seq > 0),
-          created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_active_at TEXT NOT NULL, archived_at TEXT
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_active_at TEXT NOT NULL,
+          archived_at TEXT, pinned_at TEXT
         );
-        CREATE INDEX idx_tasks_project_activity ON tasks(project_id, archived_at, last_active_at DESC);
+        CREATE INDEX idx_projects_activity ON projects(lifecycle, pinned_at DESC, last_opened_at DESC);
+        CREATE INDEX idx_tasks_project_activity ON tasks(project_id, archived_at, pinned_at DESC, last_active_at DESC);
         CREATE TABLE agent_sessions (
           id TEXT PRIMARY KEY, task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
           provider_id TEXT NOT NULL, lifecycle TEXT NOT NULL,

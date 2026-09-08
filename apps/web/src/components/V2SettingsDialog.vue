@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Check, Copy, Info, LoaderCircle, Palette, RadioTower, RefreshCw, RotateCcw, Settings2, X } from 'lucide-vue-next'
+import { Archive, Check, Copy, Info, LoaderCircle, Palette, RadioTower, RefreshCw, RotateCcw, Settings2, X } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import DialogShell from './DialogShell.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -9,6 +9,7 @@ import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
 import { v2Api } from '../lib/v2Api.js'
 import { writeClipboardText } from '../lib/clipboard.js'
+import ArchivedTasksSettings from './ArchivedTasksSettings.vue'
 
 const props = defineProps({
   open: {
@@ -17,7 +18,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'changed'])
 const activeSection = ref('appearance')
 const relayLoading = ref(false)
 const relaySaving = ref(false)
@@ -30,6 +31,7 @@ const confirmReset = ref(false)
 
 const sections = [
   { id: 'appearance', label: '外观', icon: Palette },
+  { id: 'archive', label: '归档', icon: Archive },
   { id: 'remote', label: '远程访问', icon: RadioTower },
   { id: 'about', label: '关于', icon: Info },
 ]
@@ -169,6 +171,8 @@ watch(
         </div>
         <ThemeToggle />
       </section>
+
+      <ArchivedTasksSettings v-else-if="activeSection === 'archive'" @changed="emit('changed')" />
 
       <section v-else-if="activeSection === 'remote'" class="mx-auto w-full max-w-2xl">
         <div class="mb-6 flex items-start justify-between gap-4">

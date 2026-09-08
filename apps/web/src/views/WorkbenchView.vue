@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, ArrowLeft, Bot, CircleAlert, FileDiff, Files, Folder, FolderOpen, Info, LoaderCircle, Plus, Settings, TerminalSquare, Trash2, X } from 'lucide-vue-next'
+import { Archive, ArrowDown, ArrowLeft, Bot, CircleAlert, FileDiff, Files, Folder, FolderOpen, Info, LoaderCircle, Pencil, Pin, PinOff, Plus, Settings, TerminalSquare, X } from 'lucide-vue-next'
 import { v2Api, taskEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
 import { createEventSource } from '../lib/eventSource.js'
 import { createMobileDialogHistoryState, getMobileDialogHistoryState } from '../lib/mobileDialogHistory.js'
@@ -13,6 +13,7 @@ import AgentComposer from '../components/AgentComposer.vue'
 import DirectorySearchInput from '../components/DirectorySearchInput.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import PxAlert from '../components/PxAlert.vue'
+import PxActionMenu from '../components/PxActionMenu.vue'
 import PxButton from '../components/PxButton.vue'
 import PxDialog from '../components/PxDialog.vue'
 import PxField from '../components/PxField.vue'
@@ -60,6 +61,7 @@ const projectPath = ref('')
 const projectPathInput = ref(null)
 const directorySuggestions = ref([])
 const directorySearchLoading = ref(false)
+const directoryPicking = ref(false)
 const directorySearchError = ref('')
 const directorySuggestionsOpen = ref(false)
 const selectedDirectoryIndex = ref(-1)
@@ -71,6 +73,10 @@ const taskBranchName = ref('')
 const taskSlug = ref('')
 const creating = ref(false)
 const conversationError = ref('')
+const renamingTaskId = ref('')
+const taskRenameDraft = ref('')
+const taskRenameSaving = ref(false)
+let taskRenameInput = null
 const providerOptions = computed(() => providers.value.map((provider) => ({ value: provider.id, label: provider.label })))
 const executionOptions = [
   { value: 'worktree', label: '新建 Worktree' },
@@ -138,6 +144,7 @@ function taskView(task, projectId = task?.projectId) {
     agentSessionId: task.agent.id,
     projectId,
     taskLifecycle: task.lifecycle,
+    pinnedAt: task.pinnedAt,
     environment: task.environment,
   }
 }
@@ -180,6 +187,24 @@ function handleProjectRowClick(project) {
 
 function providerLabel(providerId) {
   return providers.value.find((provider) => provider.id === providerId)?.label || providerId
+}
+
+function projectMenuItems(project) {
+  return [
+    { id: 'new', label: '新建会话', icon: Plus },
+    { id: 'pin', label: project.pinnedAt ? '取消置顶' : '置顶', icon: project.pinnedAt ? PinOff : Pin },
+    { separator: true },
+    { id: 'archive', label: '归档工作区', icon: Archive },
+  ]
+}
+
+function taskMenuItems(task) {
+  return [
+    { id: 'rename', label: '重命名', icon: Pencil },
+    { id: 'pin', label: task.pinnedAt ? '取消置顶' : '置顶', icon: task.pinnedAt ? PinOff : Pin },
+    { separator: true },
+    { id: 'archive', label: '归档会话', icon: Archive },
+  ]
 }
 
 function formatImportActivity(value) {
@@ -909,6 +934,23 @@ function selectDirectory(directory) {
   projectPathInput.value?.focus()
 }
 
+async function browseDirectory() {
+  cancelDirectorySearch()
+  directorySuggestionsOpen.value = false
+  directorySearchError.value = ''
+  conversationError.value = ''
+  directoryPicking.value = true
+  try {
+    const result = await v2Api.pickDirectory(projectPath.value)
+    if (!result.canceled && result.path) projectPath.value = result.path
+  } catch (cause) {
+    directorySearchError.value = cause.message
+  } finally {
+    directoryPicking.value = false
+    projectPathInput.value?.focus()
+  }
+}
+
 async function revealSelectedDirectory() {
   await nextTick()
   document.getElementById(`directory-suggestion-${selectedDirectoryIndex.value}`)?.scrollIntoView({ block: 'nearest' })
@@ -954,9 +996,7 @@ async function createConversation() {
   creating.value = true
   conversationError.value = ''
   try {
-    const availableProjects = (await v2Api.listProjects()).projects || []
-    let project = availableProjects.find((item) => item.repositoryRoot.toLowerCase() === projectPath.value.trim().toLowerCase())
-    if (!project) project = (await v2Api.createProject({ repositoryRoot: projectPath.value })).project
+    const project = (await v2Api.createProject({ repositoryRoot: projectPath.value })).project
     const slug = taskSlug.value || taskTitle.value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'task'
     const result = await v2Api.createTask(project.id, { title: taskTitle.value, providerId: taskProvider.value, executionKind: executionKind.value, baseRef: taskBaseRef.value, branchName: taskBranchName.value || `codex/${slug}`, slug })
     const task = taskView({ ...result.task, environment: result.environment, agent: result.agent }, project.id)
@@ -991,17 +1031,93 @@ function acceptConfirmation() {
   resolve?.(true)
 }
 
-async function removeTask(task) {
+async function handleProjectMenu(action, project) {
+  if (action === 'new') {
+    openConversationDialog(project)
+    return
+  }
+  if (action === 'archive') {
+    await archiveProject(project)
+    return
+  }
+  if (action === 'pin') {
+    try {
+      await v2Api.setProjectPinned(project.id, !project.pinnedAt)
+      await refreshProjects()
+    } catch (cause) {
+      error.value = cause.message
+    }
+  }
+}
+
+function beginTaskRename(task) {
+  renamingTaskId.value = task.id
+  taskRenameDraft.value = task.title
+  nextTick(() => taskRenameInput?.select())
+}
+
+function cancelTaskRename() {
+  renamingTaskId.value = ''
+  taskRenameDraft.value = ''
+  taskRenameInput = null
+}
+
+async function saveTaskRename(task) {
+  if (renamingTaskId.value !== task.id || taskRenameSaving.value) return
+  const title = taskRenameDraft.value.trim()
+  if (!title) {
+    error.value = '会话名称不能为空。'
+    nextTick(() => taskRenameInput?.focus())
+    return
+  }
+  if (title === task.title) {
+    cancelTaskRename()
+    return
+  }
+  taskRenameSaving.value = true
+  try {
+    const result = await v2Api.updateTask(task.id, { title })
+    const updated = taskView(result.task, task.projectId)
+    setProjectTasks(task.projectId, tasksForProject(task.projectId).map((item) => item.id === task.id ? updated : item))
+    cancelTaskRename()
+  } catch (cause) {
+    error.value = cause.message
+    nextTick(() => taskRenameInput?.focus())
+  } finally {
+    taskRenameSaving.value = false
+  }
+}
+
+async function handleTaskMenu(action, task) {
+  if (action === 'rename') {
+    beginTaskRename(task)
+    return
+  }
+  if (action === 'archive') {
+    await archiveTask(task)
+    return
+  }
+  if (action === 'pin') {
+    try {
+      await v2Api.setTaskPinned(task.id, !task.pinnedAt)
+      await refreshProjects()
+    } catch (cause) {
+      error.value = cause.message
+    }
+  }
+}
+
+async function archiveTask(task) {
   if (!await requestConfirmation({
-    title: `删除会话“${task.title}”？`,
-    description: '它的 Timeline 数据也会一并删除。',
-    confirmText: '删除',
-    danger: true,
+    title: `归档会话“${task.title}”？`,
+    description: '会话将从左栏隐藏，Timeline 和 Worktree 会继续保留。',
+    confirmText: '归档',
+    danger: false,
   })) return
   const projectTasks = tasksForProject(task.projectId)
   const removedIndex = projectTasks.findIndex((item) => item.id === task.id)
   try {
-    await v2Api.deleteTask(task.id)
+    await v2Api.archiveTask(task.id)
     clearTimelineCache(task.id)
     draftsByTask.delete(task.id)
     const remainingTasks = projectTasks.filter((item) => item.id !== task.id)
@@ -1016,14 +1132,14 @@ async function removeTask(task) {
   }
 }
 
-async function removeProject(project) {
+async function archiveProject(project) {
   if (!await requestConfirmation({
-    title: `移除工作区“${project.displayName}”？`,
-    description: '会话和 Timeline 数据会一并删除，磁盘中的 Worktree 会保留。',
-    confirmText: '移除',
-    danger: true,
+    title: `归档工作区“${project.displayName}”？`,
+    description: '工作区及其活动会话将从左栏隐藏，可在设置的归档页恢复。',
+    confirmText: '归档',
+    danger: false,
   })) return
-  await v2Api.deleteProject(project.id)
+  await v2Api.archiveProject(project.id)
   tasksForProject(project.id).forEach((task) => {
     clearTimelineCache(task.id)
     draftsByTask.delete(task.id)
@@ -1179,20 +1295,25 @@ onBeforeUnmount(() => {
             </PxIconButton>
             <button type="button" class="flex min-w-0 flex-1 items-center gap-2 py-1 text-left" :title="project.repositoryRoot" @click.stop="handleProjectRowClick(project)">
               <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ project.displayName }}</span>
+              <Pin v-if="project.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
             </button>
-            <PxIconButton class="workspace-action h-7 w-7 shrink-0" :label="`在 ${project.displayName} 中新建会话`" @click.stop="openConversationDialog(project)"><Plus class="h-3.5 w-3.5" /></PxIconButton>
-            <PxIconButton class="workspace-action workspace-delete h-7 w-7 shrink-0" :label="`移除 ${project.displayName}`" @click.stop="removeProject(project)"><Trash2 class="h-3.5 w-3.5" /></PxIconButton>
+            <PxActionMenu class="workspace-action" :label="`${project.displayName} 的更多操作`" :items="projectMenuItems(project)" @select="handleProjectMenu($event, project)" />
           </div>
           <Transition name="workspace-agents">
             <div v-if="expandedProjectIds.has(project.id)" class="workspace-agents-wrapper">
               <div class="agent-list ml-6">
-                <div v-for="task in tasksForProject(project.id)" :key="task.id" class="agent-row group flex min-w-0 items-center rounded-sm" :class="task.id === activeTaskId ? 'row-active' : ''">
-                  <button type="button" class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })">
+                <div v-for="task in tasksForProject(project.id)" :key="task.id" class="agent-row group flex h-8 min-w-0 items-center rounded-sm" :class="task.id === activeTaskId ? 'row-active' : ''">
+                  <input v-if="renamingTaskId === task.id" :ref="(element) => { if (element) taskRenameInput = element }" v-model="taskRenameDraft"
+                    class="task-rename-input mx-1 h-8 min-w-0 flex-1 rounded-sm border px-2 text-xs outline-none" maxlength="120"
+                    :disabled="taskRenameSaving" :aria-label="`重命名 ${task.title}`" @click.stop @blur="saveTaskRename(task)"
+                    @keydown.enter.prevent="$event.currentTarget.blur()" @keydown.esc.prevent="cancelTaskRename" />
+                  <button v-else type="button" class="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })">
                     <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
                     <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="task.title" />
+                    <Pin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
                     <LoaderCircle v-if="task.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
                   </button>
-                  <PxIconButton class="agent-delete h-7 w-7 shrink-0" :label="`删除 ${task.title}`" @click="removeTask(task)"><X class="h-3 w-3" /></PxIconButton>
+                  <PxActionMenu class="agent-action" :label="`${task.title} 的更多操作`" :items="taskMenuItems(task)" @select="handleTaskMenu($event, task)" />
                 </div>
                 <button v-if="!tasksForProject(project.id).length" type="button" class="theme-muted-text flex h-8 w-full items-center justify-start gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</button>
               </div>
@@ -1328,7 +1449,7 @@ onBeforeUnmount(() => {
       />
     </Transition>
 
-    <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" />
+    <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" @changed="refreshProjects" />
 
     <PxDialog
       :open="dialog === 'conversation'"
@@ -1349,11 +1470,13 @@ onBeforeUnmount(() => {
             :suggestions="directorySuggestions"
             :error="directorySearchError"
             :selected-index="selectedDirectoryIndex"
-            :disabled="creating"
+            :disabled="creating || directoryPicking"
+            :picking="directoryPicking"
             @input="scheduleDirectorySearch"
             @keydown="handleDirectoryKeydown"
             @mouseenter="selectedDirectoryIndex = $event"
             @select="selectDirectory"
+            @browse="browseDirectory"
           />
         </PxField>
         <PxAlert v-if="conversationError" class="mt-3 shrink-0">{{ conversationError }}</PxAlert>
@@ -1456,8 +1579,8 @@ onBeforeUnmount(() => {
 .sidebar-secondary-action:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 .workspace-heading:hover, .agent-row:hover { background: var(--theme-appPanelHover); }
 .workspace-active { color: var(--theme-text); }
-.workspace-toggle, .workspace-action, .agent-delete { color: var(--theme-textMuted); }
-.workspace-action, .agent-delete { border: 0; background: transparent; }
+.workspace-toggle, .workspace-action, .agent-action { color: var(--theme-textMuted); }
+.workspace-action, .agent-action { border: 0; background: transparent; }
 .workspace-agents-enter-active, .workspace-agents-leave-active {
   display: grid;
   grid-template-rows: 1fr;
@@ -1469,13 +1592,14 @@ onBeforeUnmount(() => {
 .workspace-agents-wrapper > .agent-list { min-height: 0; overflow: hidden; }
 .settings-entry { justify-content: flex-start; color: var(--theme-textMuted); }
 .settings-entry:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
-.workspace-toggle:hover, .workspace-action:hover, .agent-delete:hover { color: var(--theme-text); }
-.workspace-delete:hover, .agent-delete:hover { color: var(--theme-dangerText); }
-.workspace-action, .agent-delete { opacity: 0; }
+.workspace-toggle:hover, .workspace-action:hover, .agent-action:hover { color: var(--theme-text); }
+.workspace-action, .agent-action { opacity: 0; }
 .workspace-heading:hover .workspace-action,
 .workspace-heading:focus-within .workspace-action,
-.agent-row:hover .agent-delete,
-.agent-row:focus-within .agent-delete { opacity: 1; }
+.agent-row:hover .agent-action,
+.agent-row:focus-within .agent-action { opacity: 1; }
+.task-rename-input { border-color: var(--theme-inputBorder); background: var(--theme-inputBg); color: var(--theme-textPrimary); }
+.task-rename-input:focus { border-color: var(--theme-borderStrong); box-shadow: 0 0 0 1px var(--theme-focusRing); }
 .agent-dot-finished { background: var(--theme-success); }
 .agent-dot-failed { background: var(--theme-danger); }
 .row-active { background: var(--theme-appPanelActive); }
@@ -1492,7 +1616,7 @@ onBeforeUnmount(() => {
 @keyframes timeline-generating-pulse { 0%, 55%, 100% { opacity: 0.28; } 25% { opacity: 1; } }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .writer-blocked-row { border-color: var(--theme-warning); background: var(--theme-warningSoft); color: var(--theme-warningText); }
-.sidebar-primary-action, .sidebar-secondary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .settings-entry, .import-session-row, .import-provider-filter, .import-query-clear {
+.sidebar-primary-action, .sidebar-secondary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-action, .settings-entry, .import-session-row, .import-provider-filter, .import-query-clear {
   transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease, transform 140ms ease;
 }
 .import-session-row { border-color: var(--theme-borderDefault); }
@@ -1509,14 +1633,14 @@ onBeforeUnmount(() => {
 .import-session-enter-active, .import-session-leave-active { transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1); }
 .import-session-enter-from, .import-session-leave-to { opacity: 0; transform: translateY(5px); }
 .import-session-move { transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1); }
-.workspace-toggle:active, .workspace-action:active, .agent-delete:active { transform: scale(0.9); }
+.workspace-toggle:active, .workspace-action:active, .agent-action:active { transform: scale(0.9); }
 .mobile-workspace-path { display: none; }
 .drawer-trigger.is-active { background: var(--theme-accentSoft); color: var(--theme-accentText); }
 .workspace-drawer-enter-active { transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease; }
 .workspace-drawer-leave-active { transition: transform 180ms ease-in, opacity 150ms ease; }
 .workspace-drawer-enter-from, .workspace-drawer-leave-to { transform: translateX(100%); opacity: 0.35; }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-delete, .drawer-trigger,
+  .sidebar-primary-action, .workspace-heading, .agent-row, .workspace-toggle, .workspace-action, .agent-action, .drawer-trigger,
   .workspace-sidebar, .timeline-pane, .workspace-drawer-enter-active, .workspace-drawer-leave-active,
   .workspace-agents-enter-active, .workspace-agents-leave-active,
   .import-session-row, .import-provider-filter, .import-query-clear,
@@ -1549,8 +1673,7 @@ onBeforeUnmount(() => {
   .mobile-back-button { display: inline-flex; }
   .mobile-workspace-path { display: block; }
   .v2-shell :deep(.workspace-inspector), .v2-shell :deep(.task-details-drawer) { left: 0; }
-  .workspace-action, .agent-delete { opacity: 1; }
-  .workspace-delete { display: none; }
+  .workspace-action, .agent-action { opacity: 1; }
   .status-text { display: none; }
 }
 

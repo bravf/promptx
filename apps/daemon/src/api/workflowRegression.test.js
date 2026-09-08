@@ -11,7 +11,7 @@ function git(cwd, ...args) {
 }
 
 async function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-qa-boundary-'))
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-qa-boundary-')))
   const workspace = path.join(root, 'workspace')
   const remote = path.join(root, 'remote.git')
   fs.mkdirSync(workspace)
@@ -37,7 +37,7 @@ async function fixture(t) {
     if (previousWorktrees === undefined) delete process.env.PROMPTX_WORKTREES_DIR
     else process.env.PROMPTX_WORKTREES_DIR = previousWorktrees
     const resolved = path.resolve(root)
-    assert.ok(resolved.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`))
+    assert.ok(resolved.startsWith(`${fs.realpathSync.native(os.tmpdir())}${path.sep}`))
     await fs.promises.rm(resolved, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   })
   const projectResponse = await app.inject({ method: 'POST', url: '/api/v2/projects', payload: { repositoryRoot: workspace } })
@@ -109,6 +109,58 @@ test('QA-GIT-05 空提交和非法提交说明被拒绝', async (t) => {
   for (const message of ['', ' ', 'a'.repeat(201)]) {
     assert.equal((await f.app.inject({ method: 'POST', url, payload: { message } })).statusCode, 400)
   }
+})
+
+test('归档保留历史，PromptX Worktree 清理后才允许永久删除', async (t) => {
+  const f = await fixture(t)
+  const created = await f.createTask({ executionKind: 'worktree', slug: 'archive-cleanup' })
+  assert.equal(created.statusCode, 201, created.body)
+  const { task, environment } = created.json()
+  f.app.sqliteRepository.appendTimeline(task.id, null, { type: 'assistant_message', messageId: 'archive-message', phase: 'final_answer', text: '保留我' })
+
+  assert.equal((await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/archive` })).statusCode, 200)
+  assert.equal(f.app.sqliteRepository.listTimelineRows(task.id).length, 1)
+  assert.equal((await f.app.inject({ method: 'DELETE', url: `/api/v2/tasks/${task.id}` })).statusCode, 409)
+
+  fs.writeFileSync(path.join(environment.cwd, 'pending.txt'), '尚未提交\n')
+  const guarded = await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/environment/remove-worktree`, payload: {} })
+  assert.equal(guarded.statusCode, 409, guarded.body)
+  assert.equal(guarded.json().error, 'worktree_has_changes')
+  assert.equal(guarded.json().risk.dirty, true)
+
+  git(environment.cwd, 'add', 'pending.txt')
+  git(environment.cwd, 'commit', '-m', 'local only')
+  const unpushed = await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/environment/remove-worktree`, payload: {} })
+  assert.equal(unpushed.statusCode, 409, unpushed.body)
+  assert.equal(unpushed.json().risk.dirty, false)
+  assert.equal(unpushed.json().risk.unpushedCommits, 1)
+
+  const removed = await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/environment/remove-worktree`, payload: { force: true } })
+  assert.equal(removed.statusCode, 200, removed.body)
+  assert.equal(removed.json().environment.status, 'removed')
+  assert.equal(fs.existsSync(environment.cwd), false)
+  assert.equal(f.app.sqliteRepository.getTask(task.id).lifecycle, 'archived')
+  assert.equal(f.app.sqliteRepository.listTimelineRows(task.id).length, 1)
+  assert.equal((await f.app.inject({ method: 'DELETE', url: `/api/v2/tasks/${task.id}` })).statusCode, 204)
+})
+
+test('归档工作区只隐藏工作区，恢复后保留会话原生命周期', async (t) => {
+  const f = await fixture(t)
+  const second = await f.createTask()
+  assert.equal(second.statusCode, 201)
+  const archived = await f.app.inject({ method: 'POST', url: `/api/v2/projects/${f.project.id}/archive` })
+  assert.equal(archived.statusCode, 200, archived.body)
+  assert.equal(archived.json().project.lifecycle, 'archived')
+  assert.equal((await f.app.inject({ method: 'GET', url: '/api/v2/projects' })).json().projects.length, 0)
+  assert.equal((await f.app.inject({ method: 'GET', url: '/api/v2/tasks/archived' })).json().tasks.length, 0)
+  const archivedProjects = await f.app.inject({ method: 'GET', url: '/api/v2/projects/archived' })
+  assert.equal(archivedProjects.json().projects[0].activeTaskCount, 2)
+
+  const restored = await f.app.inject({ method: 'POST', url: `/api/v2/projects/${f.project.id}/restore` })
+  assert.equal(restored.statusCode, 200, restored.body)
+  assert.equal(restored.json().project.lifecycle, 'active')
+  assert.equal((await f.app.inject({ method: 'GET', url: '/api/v2/projects' })).json().projects.length, 1)
+  assert.equal((await f.app.inject({ method: 'GET', url: `/api/v2/projects/${f.project.id}/tasks` })).json().tasks.length, 2)
 })
 
 test('QA-INPUT-01 非法 Worktree 名称应返回 400 且不创建记录', async (t) => {
@@ -272,4 +324,101 @@ test('工作区部分更新保留未提供字段，非法字段不写入数据�
     assert.equal(response.statusCode, 400)
     assert.deepEqual(f.app.sqliteRepository.getProject(f.project.id), updated.json().project)
   }
+})
+
+test('布尔参数拒绝字符串，不能绕过强制清理保护', async (t) => {
+  const f = await fixture(t)
+  assert.equal((await f.app.inject({
+    method: 'POST', url: `/api/v2/projects/${f.project.id}/pin`, payload: { pinned: 'false' },
+  })).statusCode, 400)
+
+  const created = await f.createTask({ executionKind: 'worktree', slug: 'strict-force' })
+  const { task, environment } = created.json()
+  await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/archive` })
+  fs.writeFileSync(path.join(environment.cwd, 'pending.txt'), '不能丢失\n')
+  const response = await f.app.inject({
+    method: 'POST', url: `/api/v2/tasks/${task.id}/environment/remove-worktree`, payload: { force: 'false' },
+  })
+  assert.equal(response.statusCode, 400, response.body)
+  assert.equal(fs.existsSync(path.join(environment.cwd, 'pending.txt')), true)
+})
+
+test('HEAD 基线保存固定提交并检测后续未推送提交', async (t) => {
+  const f = await fixture(t)
+  const baseCommit = git(f.workspace, 'rev-parse', 'HEAD')
+  const created = await f.createTask({ executionKind: 'worktree', baseRef: 'HEAD', slug: 'head-baseline' })
+  const { task, environment } = created.json()
+  assert.equal(environment.baseRef, 'HEAD')
+  assert.equal(environment.baseCommit, baseCommit)
+  fs.writeFileSync(path.join(environment.cwd, 'committed.txt'), 'local commit\n')
+  git(environment.cwd, 'add', 'committed.txt')
+  git(environment.cwd, 'commit', '-m', 'not pushed')
+  await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/archive` })
+  const response = await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/environment/remove-worktree`, payload: {} })
+  assert.equal(response.statusCode, 409, response.body)
+  assert.equal(response.json().risk.unpushedCommits, 1)
+})
+
+test('已清理 Worktree 不能直接恢复，但可以复制到新 Worktree', async (t) => {
+  const f = await fixture(t)
+  const created = await f.createTask({ executionKind: 'worktree', title: '可复制会话', slug: 'removed-copy' })
+  const { task } = created.json()
+  await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/archive` })
+  const removed = await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/environment/remove-worktree`, payload: {} })
+  assert.equal(removed.statusCode, 200, removed.body)
+  const restored = await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/restore` })
+  assert.equal(restored.statusCode, 409, restored.body)
+  assert.equal(restored.json().error, 'environment_removed')
+  const copied = await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/copy`, payload: {} })
+  assert.equal(copied.statusCode, 201, copied.body)
+  assert.equal(copied.json().task.lifecycle, 'active')
+  assert.equal(copied.json().environment.kind, 'worktree')
+  assert.equal(copied.json().environment.status, 'ready')
+})
+
+test('Worktree 分支改名后按当前提交合并并更新环境分支', async (t) => {
+  const f = await fixture(t)
+  const created = await f.createTask({ executionKind: 'worktree', slug: 'renamed-before-merge' })
+  const { task, environment } = created.json()
+  git(environment.cwd, 'branch', '-m', 'renamed-before-delivery')
+  fs.writeFileSync(path.join(environment.cwd, 'renamed.txt'), 'renamed branch\n')
+  git(environment.cwd, 'add', 'renamed.txt')
+  git(environment.cwd, 'commit', '-m', 'renamed delivery')
+  const response = await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/git/merge`, payload: { targetBranch: 'main' } })
+  assert.equal(response.statusCode, 200, response.body)
+  assert.equal(response.json().sourceBranch, 'renamed-before-delivery')
+  assert.equal(f.app.sqliteRepository.getEnvironment(environment.id).branchName, 'renamed-before-delivery')
+  assert.equal(fs.readFileSync(path.join(f.workspace, 'renamed.txt'), 'utf8'), 'renamed branch\n')
+})
+
+test('合并冲突会自动中止并保持会话活动', async (t) => {
+  const f = await fixture(t)
+  const created = await f.createTask({ executionKind: 'worktree', slug: 'merge-conflict' })
+  const { task, environment } = created.json()
+  fs.writeFileSync(path.join(environment.cwd, 'note.txt'), 'worktree version\n')
+  git(environment.cwd, 'add', 'note.txt')
+  git(environment.cwd, 'commit', '-m', 'worktree change')
+  fs.writeFileSync(path.join(f.workspace, 'note.txt'), 'main version\n')
+  git(f.workspace, 'add', 'note.txt')
+  git(f.workspace, 'commit', '-m', 'main change')
+  const before = git(f.workspace, 'rev-parse', 'HEAD')
+  const response = await f.app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/git/merge`, payload: { targetBranch: 'main' } })
+  assert.equal(response.statusCode, 409, response.body)
+  assert.equal(response.json().error, 'merge_failed')
+  assert.equal(git(f.workspace, 'rev-parse', 'HEAD'), before)
+  assert.equal(git(f.workspace, 'status', '--porcelain'), '')
+  assert.equal(f.app.sqliteRepository.getTask(task.id).lifecycle, 'active')
+})
+
+test('空工作区可独立归档、恢复和永久删除', async (t) => {
+  const f = await fixture(t)
+  const emptyRoot = path.join(f.root, 'empty-project')
+  fs.mkdirSync(emptyRoot)
+  const created = await f.app.inject({ method: 'POST', url: '/api/v2/projects', payload: { repositoryRoot: emptyRoot } })
+  const project = created.json().project
+  await f.app.inject({ method: 'POST', url: `/api/v2/projects/${project.id}/archive` })
+  const archived = await f.app.inject({ method: 'GET', url: '/api/v2/projects/archived' })
+  assert.equal(archived.json().projects.some((item) => item.id === project.id), true)
+  assert.equal((await f.app.inject({ method: 'DELETE', url: `/api/v2/projects/${project.id}` })).statusCode, 204)
+  assert.equal(f.app.sqliteRepository.getProject(project.id), null)
 })

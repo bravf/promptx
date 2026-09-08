@@ -16,6 +16,7 @@ export class AgentManager {
     this.runtimes = new Map()
     this.activeTurns = new Map()
     this.preparingTurns = new Set()
+    this.exclusiveOperations = new Set()
     this.controlStates = new Map()
     this.coalescer = new TimelineCoalescer((payload) => this.commitTimeline(payload))
     this.timelineSync = new TimelineSyncCoordinator({
@@ -32,7 +33,7 @@ export class AgentManager {
     if (runtime) return runtime
     const task = this.repository.getTask(agent.taskId)
     const environment = task && this.repository.getEnvironment(task.environmentId)
-    if (!environment || ['missing', 'orphaned', 'archived', 'unavailable'].includes(environment.status)) {
+    if (!environment || ['missing', 'removed', 'unavailable'].includes(environment.status)) {
       throw new Error('当前会话的执行目录不可用。')
     }
     runtime = this.providerRegistry.get(agent.providerId).createRuntime({
@@ -74,9 +75,17 @@ export class AgentManager {
     let agent = this.repository.getAgent(agentId)
     if (!agent) throw new Error('Agent 不存在。')
     if (agent.archivedAt) throw new Error('已归档的 Agent 不能发送消息。')
+    const task = this.repository.getTask(agent.taskId)
+    const project = task && this.repository.getProject(task.projectId)
+    if (!task || task.lifecycle !== 'active' || project?.lifecycle !== 'active') {
+      const error = new Error('请先恢复工作区和会话。')
+      error.statusCode = 409
+      error.code = 'task_archived'
+      throw error
+    }
     const existing = this.repository.getTurnByClientMessage(agent.taskId, input.clientMessageId)
     if (existing) return existing
-    if (this.activeTurns.has(agentId) || this.preparingTurns.has(agentId)) {
+    if (this.isBusy(agentId)) {
       const error = new Error('Agent 正在运行，请等待当前任务完成后再发送。')
       error.statusCode = 409
       throw error
@@ -178,7 +187,7 @@ export class AgentManager {
   async updateSettings(agentId, input) {
     const agent = this.repository.getAgent(agentId)
     if (!agent) throw new Error('Agent 不存在。')
-    if (this.activeTurns.has(agentId) || this.preparingTurns.has(agentId)) {
+    if (this.isBusy(agentId)) {
       const error = new Error('Agent 运行期间不能切换模型或思考强度。')
       error.statusCode = 409
       throw error
@@ -294,6 +303,46 @@ export class AgentManager {
     return true
   }
 
+  isBusy(agentId) {
+    return this.activeTurns.has(agentId) || this.preparingTurns.has(agentId) || this.exclusiveOperations.has(agentId)
+  }
+
+  async runExclusive(agentId, callback) {
+    if (this.isBusy(agentId)) {
+      const error = new Error('Agent 正在运行，请等待当前任务完成后再操作。')
+      error.statusCode = 409
+      error.code = 'task_running'
+      throw error
+    }
+    this.exclusiveOperations.add(agentId)
+    try {
+      return await callback()
+    } finally {
+      this.exclusiveOperations.delete(agentId)
+    }
+  }
+
+  async interruptAndRunExclusive(agentIds, callback) {
+    const ids = [...new Set([agentIds].flat().filter(Boolean))]
+    if (ids.some((id) => this.exclusiveOperations.has(id))) {
+      const error = new Error('会话正在执行其他操作，请稍后再试。')
+      error.statusCode = 409
+      error.code = 'task_busy'
+      throw error
+    }
+    ids.forEach((id) => this.exclusiveOperations.add(id))
+    try {
+      for (const id of ids) {
+        await this.cancel(id).catch(() => {})
+        if (this.activeTurns.has(id)) this.finish(id, 'canceled')
+        this.close(id)
+      }
+      return await callback()
+    } finally {
+      ids.forEach((id) => this.exclusiveOperations.delete(id))
+    }
+  }
+
   close(agentId) {
     this.runtimes.get(agentId)?.close()
     this.runtimes.delete(agentId)
@@ -306,6 +355,7 @@ export class AgentManager {
     for (const runtime of this.runtimes.values()) runtime.close()
     this.runtimes.clear()
     this.preparingTurns.clear()
+    this.exclusiveOperations.clear()
     this.controlStates.clear()
   }
 }

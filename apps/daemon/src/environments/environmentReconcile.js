@@ -1,14 +1,9 @@
 import fs from 'node:fs'
-import path from 'node:path'
 import { listWorktrees, runGit } from './worktreeService.js'
+import { canonicalPathKey } from '../paths/canonicalPath.js'
 
 export function environmentPathKey(value) {
-  const raw = String(value || '').trim()
-  const isWindowsPath = /^[A-Za-z]:[\\/]/.test(raw) || /^[\\/]{2}/.test(raw)
-  const resolved = isWindowsPath ? path.win32.resolve(raw) : path.resolve(raw)
-  return (isWindowsPath || process.platform === 'win32')
-    ? resolved.replace(/\\/g, '/').toLowerCase()
-    : resolved
+  return canonicalPathKey(value)
 }
 
 export function includesWorktree(porcelain, expectedPath) {
@@ -24,6 +19,7 @@ export function includesWorktree(porcelain, expectedPath) {
 
 export async function reconcileEnvironment(environment) {
   if (!environment) return null
+  if (environment.status === 'removed') return environment
   if (!fs.existsSync(environment.cwd)) return { ...environment, status: 'missing' }
   if (environment.kind !== 'worktree') {
     try {

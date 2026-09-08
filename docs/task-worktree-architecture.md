@@ -227,6 +227,7 @@ repositoryRoot
 worktreePath
 branchName
 baseRef
+baseCommit
 slug
 ownership
 status
@@ -244,49 +245,54 @@ status
 ```sql
 projects (
   id TEXT PRIMARY KEY,
-  repository_root TEXT NOT NULL UNIQUE,
+  repository_root TEXT NOT NULL,
+  path_key TEXT NOT NULL UNIQUE,
   display_name TEXT NOT NULL,
   default_branch TEXT NOT NULL DEFAULT '',
+  lifecycle TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  last_opened_at TEXT NOT NULL
+  last_opened_at TEXT NOT NULL,
+  archived_at TEXT,
+  pinned_at TEXT
 );
 
 tasks (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
   title TEXT NOT NULL,
-  provider_id TEXT NOT NULL,
   lifecycle TEXT NOT NULL,
   environment_id TEXT NOT NULL UNIQUE,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   last_active_at TEXT NOT NULL,
   archived_at TEXT,
+  pinned_at TEXT,
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
 execution_environments (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
-  cwd TEXT NOT NULL UNIQUE,
+  cwd TEXT NOT NULL,
+  path_key TEXT NOT NULL,
   repository_root TEXT NOT NULL,
   branch_name TEXT NOT NULL DEFAULT '',
   base_ref TEXT NOT NULL DEFAULT '',
+  base_commit TEXT NOT NULL DEFAULT '',
   worktree_path TEXT,
   ownership TEXT NOT NULL DEFAULT 'external',
   status TEXT NOT NULL DEFAULT 'ready',
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  archived_at TEXT
+  updated_at TEXT NOT NULL
 );
 ```
 
 约束：
 
 - `tasks.environment_id` 唯一，保证一个任务一个执行环境。
-- `execution_environments.cwd` 唯一，防止两个任务共享目录。
-- PromptX 创建的 `worktree_path` 唯一。
+- 只有 PromptX 创建的 Worktree `path_key` 唯一；当前目录会话允许共享同一个项目目录。
+- `base_ref` 用于展示创建来源，`base_commit` 保存创建时解析出的固定提交，用于可靠判断未交付提交。
 - `kind` 取 `local` 或 `worktree`。
 
 其他表改为使用 `task_id`：
@@ -327,25 +333,18 @@ task -> environment -> cwd
 
 删除会话、归档任务和删除 Worktree 是三个独立动作。
 
-### 删除会话
+### 归档工作区
 
-默认行为：
-
-```text
-停止 Agent
-归档或删除 Task
-保留 Worktree
-Environment 标记为 orphaned
-```
-
-确认文案：
+工作区归档只控制左栏可见性，不改变会话生命周期：
 
 ```text
-删除此任务？
-任务记录会被移除，Worktree 默认保留。
+停止工作区中正在运行的 Agent
+project.lifecycle = archived
+Task 保持原来的 active / archived 状态
+Environment 和 Worktree 保持不变
 ```
 
-删除会话不会静默删除代码。
+空工作区也会显示在设置的归档管理中，可恢复或永久删除。恢复工作区后，原本活动的会话重新出现在左栏。
 
 ### 归档任务
 
@@ -353,13 +352,19 @@ Environment 标记为 orphaned
 
 ```text
 task.lifecycle = archived
-environment.status = orphaned
+environment.status 保持不变
 Worktree 保留
 ```
 
+会话只有在所属工作区为活动状态、执行目录可用时才能恢复。已清理 Worktree 的历史会话不能直接恢复，应复制到新 Worktree；缺失的外部目录应先重新绑定。
+
+### 永久删除会话
+
+永久删除只在归档管理中提供，并删除 Task、Timeline、附件和 Environment 记录。PromptX 管理的 Worktree 必须先显式清理；本地目录和外部 Worktree 永远不会被删除。
+
 ### 删除 Worktree
 
-只有用户明确选择“删除任务并删除 Worktree”时执行。执行前检查：
+只有用户在归档管理中明确选择“清理 Worktree”时执行。执行前检查：
 
 - 没有运行中的 Turn。
 - 没有未提交修改，或用户明确强制确认。
@@ -367,7 +372,7 @@ Worktree 保留
 - `ownership` 为 `promptx`。
 - 没有其他记录引用该目录。
 
-外部 Worktree 只解除 PromptX 关联，不删除磁盘目录。
+外部 Worktree 不提供磁盘清理操作。
 
 ## 9. Git 交付流程
 
@@ -385,15 +390,15 @@ Agent 修改代码
   -> 按需删除 Worktree
 ```
 
-第一阶段只提供：
+当前提供：
 
 - 当前未提交 Diff。
-- 相对 `baseRef` 的完整 Diff。
 - 提交列表。
-- 复制分支名。
-- 打开目录。
+- 提交和推送。
+- 使用当前真实分支提交进行本地合并。
+- 合并成功后默认归档；合并冲突自动中止并恢复主工作区。
 
-后续再增加提交、推送、Pull Request、合并和合并后自动归档。
+Git 交付与 Agent Turn 使用互斥操作锁。运行中不能提交、推送或合并，Git 操作进行中也不能启动新 Turn、归档或重绑目录。
 
 ## 10. 导入会话
 
@@ -449,15 +454,12 @@ cwd 是 Git Worktree
 Environment 状态：
 
 ```text
-creating
 ready
-running
 dirty
 clean
-orphaned
 missing
-archiving
-archived
+removed
+unavailable
 ```
 
 Daemon 启动时执行 reconcile：
@@ -467,7 +469,7 @@ Daemon 启动时执行 reconcile：
   -> 检查 cwd 是否存在
   -> git worktree list --porcelain
   -> 检查分支
-  -> 更新 missing / orphaned / ready
+  -> 更新 missing / dirty / clean / ready
 ```
 
 Worktree 被用户从终端删除时，任务历史保留，详情显示“Worktree 不可用”，并提供重新绑定或复制到新 Worktree。
@@ -480,9 +482,13 @@ Worktree 被用户从终端删除时，任务历史保留，详情显示“Workt
 
 ```http
 GET    /api/v2/projects
+GET    /api/v2/projects/archived
 POST   /api/v2/projects
 GET    /api/v2/projects/:projectId
 PATCH  /api/v2/projects/:projectId
+POST   /api/v2/projects/:projectId/pin
+POST   /api/v2/projects/:projectId/archive
+POST   /api/v2/projects/:projectId/restore
 DELETE /api/v2/projects/:projectId
 ```
 
@@ -493,7 +499,10 @@ GET    /api/v2/projects/:projectId/tasks
 POST   /api/v2/projects/:projectId/tasks
 GET    /api/v2/tasks/:taskId
 PATCH  /api/v2/tasks/:taskId
+POST   /api/v2/tasks/:taskId/pin
 POST   /api/v2/tasks/:taskId/archive
+POST   /api/v2/tasks/:taskId/restore
+POST   /api/v2/tasks/:taskId/copy
 DELETE /api/v2/tasks/:taskId
 ```
 
@@ -506,8 +515,12 @@ GET    /api/v2/tasks/:taskId/file
 GET    /api/v2/tasks/:taskId/git/status
 GET    /api/v2/tasks/:taskId/git/diff
 GET    /api/v2/tasks/:taskId/git/commits
-POST   /api/v2/tasks/:taskId/environment/archive
+POST   /api/v2/tasks/:taskId/environment/remove-worktree
 POST   /api/v2/tasks/:taskId/environment/reconcile
+POST   /api/v2/tasks/:taskId/environment/rebind
+POST   /api/v2/tasks/:taskId/git/commit
+POST   /api/v2/tasks/:taskId/git/push
+POST   /api/v2/tasks/:taskId/git/merge
 ```
 
 不再继续扩展以 `workspaceId` 为中心的新 API，直接切换到 Project、Task 和 Environment。
@@ -522,9 +535,7 @@ apps/daemon/src/projects/
   projectInspection.js
 
 apps/daemon/src/tasks/
-  taskRepository.js
-  taskService.js
-  taskLifecycle.js
+  taskLifecycleService.js
 
 apps/daemon/src/environments/
   environmentRepository.js
@@ -532,9 +543,12 @@ apps/daemon/src/environments/
   worktreeService.js
   environmentInspection.js
   environmentReconcile.js
+
+apps/daemon/src/git/
+  gitDeliveryService.js
 ```
 
-`worktreeService` 只负责 Git Worktree add/remove/list；`environmentService` 负责 local/worktree 两种执行环境；`taskService` 负责任务创建、归档和删除；`agentManager` 只接受 `taskId`，由服务层解析到 Environment cwd。
+`worktreeService` 只负责 Git Worktree add/remove/list；`environmentService` 负责 local/worktree 两种执行环境；`taskLifecycleService` 负责任务和工作区的归档、恢复与删除；`gitDeliveryService` 负责提交、推送、合并和仓库互斥；`agentManager` 负责 Runtime 与 Turn 的互斥。
 
 协议包重建为：
 
@@ -628,4 +642,3 @@ Worktree = 任务的独立执行目录
 复制 = 创建新的隔离任务
 归档 = 结束任务，不默认删除代码
 ```
-

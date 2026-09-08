@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import path from 'node:path'
 import { test } from 'node:test'
 import { openDatabase } from './database.js'
 import { createRepository } from './repository.js'
@@ -120,6 +121,87 @@ test('Timeline 发生并发写入时同步事务回滚并抛出 stale', () => {
     }), (error) => error.code === 'TIMELINE_SYNC_STALE')
     assert.equal(repository.listTimelineRows(task.id).length, 0)
     assert.equal(repository.getTimelineState(task.id).nextSeq, 1)
+  } finally {
+    db.close()
+  }
+})
+
+test('工作区归档不改会话状态，会话归档和恢复保留 Timeline、Agent 与执行环境', () => {
+  const { db, repository, task, agent } = setup()
+  try {
+    repository.appendTimeline(task.id, null, { type: 'assistant_message', messageId: 'm1', phase: 'final_answer', text: '完成' })
+    const environment = repository.getEnvironment(task.environmentId)
+    repository.archiveProject(task.projectId)
+    assert.equal(repository.listProjects().length, 0)
+    assert.equal(repository.listTasks(task.projectId).length, 1)
+    assert.equal(repository.listArchivedTasks().length, 0)
+    assert.equal(repository.getAgent(agent.id).taskId, task.id)
+    assert.equal(repository.getEnvironment(environment.id).id, environment.id)
+    assert.equal(repository.listTimelineRows(task.id).length, 1)
+
+    repository.archiveTask(task.id)
+    assert.equal(repository.listArchivedTasks()[0].id, task.id)
+    repository.restoreProject(task.projectId)
+    const restored = repository.restoreTask(task.id)
+    assert.equal(restored.lifecycle, 'active')
+    assert.equal(repository.getProject(task.projectId).lifecycle, 'active')
+    assert.equal(repository.listProjects()[0].id, task.projectId)
+  } finally {
+    db.close()
+  }
+})
+
+test('工作区和会话按最近置顶时间优先排序，取消置顶后恢复活跃时间排序', () => {
+  const db = openDatabase(':memory:')
+  const repository = createRepository(db)
+  try {
+    const firstProject = repository.createProject({ repositoryRoot: process.cwd(), displayName: '较早工作区' })
+    const secondProject = repository.createProject({ repositoryRoot: path.join(process.cwd(), 'second-project'), displayName: '较新工作区' })
+    db.prepare('UPDATE projects SET last_opened_at = ? WHERE id = ?').run('2026-09-08T09:00:00.000Z', firstProject.id)
+    db.prepare('UPDATE projects SET last_opened_at = ? WHERE id = ?').run('2026-09-08T10:00:00.000Z', secondProject.id)
+    db.prepare('UPDATE projects SET pinned_at = ? WHERE id = ?').run('2026-09-08T11:00:00.000Z', firstProject.id)
+    db.prepare('UPDATE projects SET pinned_at = ? WHERE id = ?').run('2026-09-08T12:00:00.000Z', secondProject.id)
+    assert.deepEqual(repository.listProjects().map((project) => project.id), [secondProject.id, firstProject.id])
+
+    repository.setProjectPinned(secondProject.id, false)
+    assert.deepEqual(repository.listProjects().map((project) => project.id), [firstProject.id, secondProject.id])
+    repository.setProjectPinned(firstProject.id, false)
+    assert.deepEqual(repository.listProjects().map((project) => project.id), [secondProject.id, firstProject.id])
+
+    const firstEnvironment = repository.createEnvironment({ cwd: process.cwd(), repositoryRoot: process.cwd(), kind: 'local' })
+    const secondEnvironment = repository.createEnvironment({ cwd: process.cwd(), repositoryRoot: process.cwd(), kind: 'local' })
+    const firstTask = repository.createTask({ projectId: firstProject.id, environmentId: firstEnvironment.id, title: '较早会话' })
+    const secondTask = repository.createTask({ projectId: firstProject.id, environmentId: secondEnvironment.id, title: '较新会话' })
+    db.prepare('UPDATE tasks SET last_active_at = ? WHERE id = ?').run('2026-09-08T09:00:00.000Z', firstTask.id)
+    db.prepare('UPDATE tasks SET last_active_at = ? WHERE id = ?').run('2026-09-08T10:00:00.000Z', secondTask.id)
+    db.prepare('UPDATE tasks SET pinned_at = ? WHERE id = ?').run('2026-09-08T11:00:00.000Z', firstTask.id)
+    db.prepare('UPDATE tasks SET pinned_at = ? WHERE id = ?').run('2026-09-08T12:00:00.000Z', secondTask.id)
+    assert.deepEqual(repository.listTasks(firstProject.id).map((task) => task.id), [secondTask.id, firstTask.id])
+
+    repository.setTaskPinned(secondTask.id, false)
+    assert.deepEqual(repository.listTasks(firstProject.id).map((task) => task.id), [firstTask.id, secondTask.id])
+    repository.setTaskPinned(firstTask.id, false)
+    assert.deepEqual(repository.listTasks(firstProject.id).map((task) => task.id), [secondTask.id, firstTask.id])
+  } finally {
+    db.close()
+  }
+})
+
+test('归档会话清除会话置顶，归档工作区只清除工作区置顶', () => {
+  const { db, repository, task } = setup()
+  try {
+    repository.setProjectPinned(task.projectId, true)
+    repository.setTaskPinned(task.id, true)
+    assert.ok(repository.getProject(task.projectId).pinnedAt)
+    assert.ok(repository.getTask(task.id).pinnedAt)
+
+    repository.archiveTask(task.id)
+    assert.equal(repository.getTask(task.id).pinnedAt, null)
+    repository.restoreTask(task.id)
+    repository.setTaskPinned(task.id, true)
+    repository.archiveProject(task.projectId)
+    assert.equal(repository.getProject(task.projectId).pinnedAt, null)
+    assert.ok(repository.getTask(task.id).pinnedAt)
   } finally {
     db.close()
   }
