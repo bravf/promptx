@@ -96,6 +96,51 @@ test('本地已有用户占位但 Provider Turn 后续完成时补齐回复', ()
   assert.equal(result.rows.find((row) => row.sourceTurnId === 't2' && row.item.type === 'assistant_message')?.item.text, '完整答复 二')
 })
 
+test('已有过程消息时仍补齐 Provider 后续落盘的最终回复', () => {
+  const completed = providerTurn('t1', '继续', '最终答复')
+  completed.items.splice(1, 0, {
+    providerMessageId: 't1:commentary',
+    item: { type: 'assistant_message', messageId: 't1:commentary', phase: 'commentary', text: '我继续检查。' },
+  }, {
+    providerMessageId: 't1:commentary-later',
+    item: { type: 'assistant_message', messageId: 't1:commentary-later', phase: 'commentary', text: '检查完成。' },
+  })
+  const partial = {
+    ...completed,
+    items: completed.items.filter((entry) => !['t1:commentary-later', 't1:answer'].includes(entry.providerMessageId)),
+  }
+  const local = localTurn('local-1', 't1', 't1:client', '2026-09-04T10:00:00.000Z')
+  const result = reconcileHistory({
+    snapshot: { sourceId: 'thread-1', turns: [completed] },
+    localTurns: [local],
+    localRows: [
+      {
+        seq: 1,
+        turnId: local.id,
+        timestamp: local.createdAt,
+        source: 'provider',
+        providerMessageId: 't1:user',
+        item: completed.items[0].item,
+      },
+      {
+        seq: 2,
+        turnId: local.id,
+        timestamp: local.createdAt,
+        source: 'provider',
+        providerMessageId: 't1:commentary',
+        item: completed.items[1].item,
+      },
+    ],
+    syncState: { sourceId: 'thread-1', manifest: createHistoryManifest({ sourceId: 'thread-1', turns: [partial] }) },
+  })
+
+  assert.equal(result.mode, 'merge')
+  assert.deepEqual(result.rows.map((row) => [row.item.type, row.item.phase, row.item.text]), [
+    ['assistant_message', 'commentary', '检查完成。'],
+    ['assistant_message', 'final_answer', '最终答复'],
+  ])
+})
+
 test('Provider 中间插入 Turn 时重建顺序并保留未变化 Turn 的详细本地过程', () => {
   const first = providerTurn('t1', '一')
   const middle = providerTurn('t2', '二')

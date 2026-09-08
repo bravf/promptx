@@ -74,21 +74,36 @@ function publicTurn(turn, localTurnId = '') {
   }
 }
 
-function localItemIdentity(row) {
-  const id = row.providerMessageId || row.item?.clientMessageId || row.item?.messageId || row.item?.callId
-  return id ? `${row.item.type}:${id}` : ''
+function itemIdentities(entry) {
+  const type = entry.item?.type
+  if (!type) return []
+  return [
+    entry.providerMessageId,
+    entry.item.clientMessageId,
+    entry.item.messageId,
+    entry.item.callId,
+  ].filter(Boolean).map((id) => `${type}:${id}`)
 }
 
 function shouldImportProviderItem(entry, rows) {
   const typeRows = rows.filter((row) => row.item.type === entry.item.type)
   if (entry.item.type === 'user_message') return typeRows.length === 0
 
-  const key = historyItemKey(entry)
-  if (key && typeRows.some((row) => localItemIdentity(row) === key)) {
+  const identities = new Set(itemIdentities(entry))
+  const sameItem = identities.size > 0 && typeRows.some((row) => (
+    itemIdentities(row).some((identity) => identities.has(identity))
+  ))
+  if (sameItem) {
     // 工具状态可以继续追加，由 Timeline 投影合并生命周期；文本已经由本地流完整保存。
     return entry.item.type === 'tool_call'
   }
-  if (['assistant_message', 'reasoning'].includes(entry.item.type) && typeRows.length) return false
+  if (entry.item.type === 'assistant_message') {
+    // Provider 行按消息身份补充；只有本地实时流存在同 phase 内容时才优先保留本地版本。
+    // 过程消息不能证明最终回复已经存在。
+    const phase = entry.item.phase || 'unknown'
+    return !typeRows.some((row) => row.source !== 'provider' && (row.item.phase || 'unknown') === phase)
+  }
+  if (entry.item.type === 'reasoning' && typeRows.some((row) => row.source !== 'provider')) return false
   return !typeRows.some((row) => JSON.stringify(row.item) === JSON.stringify(entry.item))
 }
 
