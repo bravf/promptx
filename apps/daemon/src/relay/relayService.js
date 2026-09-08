@@ -1,5 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { Readable } from 'node:stream'
+import { createGzip } from 'node:zlib'
 import WebSocket from 'ws'
 
 import {
@@ -12,6 +14,7 @@ import {
   importSecretKey,
   NonceReplayWindow,
   parseJsonFrame,
+  RELAY_CHUNK_BYTES,
   splitBytes,
 } from '../../../../packages/relay/src/index.js'
 import { resolveDaemonPaths } from '../db/database.js'
@@ -31,6 +34,7 @@ const excludedHeaders = new Set([
   'authorization',
   'connection',
   'content-length',
+  'content-encoding',
   'cookie',
   'host',
   'keep-alive',
@@ -106,6 +110,16 @@ function safeRequestUrl(localBaseUrl, requestPath) {
   const target = new URL(rawPath, base)
   if (target.origin !== base.origin) throw new Error('Relay 请求目标无效。')
   return target
+}
+
+function isCompressibleResponse(response) {
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+  if (contentType.includes('text/event-stream')) return false
+  return contentType.startsWith('text/')
+    || contentType.includes('json')
+    || contentType.includes('javascript')
+    || contentType.includes('xml')
+    || contentType.includes('svg')
 }
 
 export class RelayService {
@@ -357,6 +371,7 @@ export class RelayService {
       sharedKey: null,
       seenNonces: new NonceReplayWindow(),
       requests: new Map(),
+      acceptedBodyEncodings: new Set(),
       handshakeTimer: null,
     }
     this.channels.set(connectionId, channel)
@@ -383,6 +398,11 @@ export class RelayService {
       const hello = parseJsonFrame(data.toString())
       if (hello?.type !== 'e2ee.hello') return this.closeChannel(channel, 1008, 'invalid_e2ee_hello')
       try {
+        channel.acceptedBodyEncodings = new Set(
+          (Array.isArray(hello.acceptBodyEncodings) ? hello.acceptBodyEncodings : [])
+            .map((value) => String(value).toLowerCase())
+            .filter((value) => value === 'gzip'),
+        )
         channel.sharedKey = deriveSharedKey(
           importSecretKey(this.identity.secretKeyB64),
           importPublicKey(hello.clientPublicKeyB64),
@@ -465,15 +485,22 @@ export class RelayService {
         body: ['GET', 'HEAD'].includes(request.method) || !body.length ? undefined : body,
         signal: controller.signal,
       })
+      const bodyEncoding = channel.acceptedBodyEncodings.has('gzip') && isCompressibleResponse(response)
+        ? 'gzip'
+        : ''
       this.sendEncrypted(channel, {
         type: 'response.start',
         requestId: request.requestId,
         status: response.status,
         statusText: response.statusText,
         headers: cleanHeaders(response.headers),
+        ...(bodyEncoding ? { bodyEncoding } : {}),
       })
       if (response.body) {
-        for await (const chunk of response.body) {
+        const responseBody = bodyEncoding
+          ? Readable.fromWeb(response.body).pipe(createGzip({ chunkSize: RELAY_CHUNK_BYTES }))
+          : response.body
+        for await (const chunk of responseBody) {
           for (const part of splitBytes(chunk)) {
             this.sendEncrypted(channel, {
               type: 'response.body',

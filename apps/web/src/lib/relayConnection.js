@@ -18,6 +18,7 @@ function createRequestId() {
 }
 
 const E2EE_HANDSHAKE_TIMEOUT_MS = 15_000
+const REQUEST_IDLE_TIMEOUT_MS = 30_000
 
 async function serializeBody(body, headers) {
   if (body == null) return new Uint8Array()
@@ -45,6 +46,10 @@ export class EncryptedRelayConnection {
   constructor(offer, options = {}) {
     this.offer = offer
     this.WebSocketClass = options.WebSocketClass || globalThis.WebSocket
+    this.DecompressionStreamClass = Object.hasOwn(options, 'DecompressionStreamClass')
+      ? options.DecompressionStreamClass
+      : globalThis.DecompressionStream
+    this.requestIdleTimeoutMs = Number(options.requestIdleTimeoutMs) || REQUEST_IDLE_TIMEOUT_MS
     this.socket = null
     this.sharedKey = null
     this.seenNonces = new NonceReplayWindow()
@@ -100,7 +105,11 @@ export class EncryptedRelayConnection {
       }
       socket.addEventListener('open', () => {
         if (this.socket !== socket) return
-        socket.send(JSON.stringify({ type: 'e2ee.hello', clientPublicKeyB64: keyPair.publicKeyB64 }))
+        socket.send(JSON.stringify({
+          type: 'e2ee.hello',
+          clientPublicKeyB64: keyPair.publicKeyB64,
+          acceptBodyEncodings: this.DecompressionStreamClass ? ['gzip'] : [],
+        }))
       })
       socket.addEventListener('message', (event) => {
         if (this.socket !== socket) return
@@ -169,10 +178,31 @@ export class EncryptedRelayConnection {
   handleResponseFrame(frame) {
     const record = this.pending.get(String(frame.requestId || ''))
     if (!record) return
+    this.touchRecord(record)
     if (frame.type === 'response.start') {
       record.started = true
       const noBody = record.method === 'HEAD' || [204, 205, 304].includes(Number(frame.status))
-      record.resolve(new Response(noBody ? null : record.stream, {
+      const bodyEncoding = String(frame.bodyEncoding || '')
+      if (bodyEncoding && bodyEncoding !== 'gzip') {
+        record.reject(new Error(`Relay 响应压缩格式不受支持：${bodyEncoding}`))
+        this.finishRecord(record)
+        return
+      }
+      if (bodyEncoding === 'gzip' && !this.DecompressionStreamClass) {
+        record.reject(new Error('当前浏览器不支持 Relay 压缩响应。'))
+        this.finishRecord(record)
+        return
+      }
+      const body = bodyEncoding === 'gzip'
+        ? record.stream.pipeThrough(new this.DecompressionStreamClass('gzip'))
+        : record.stream
+      const contentType = String(frame.headers?.['content-type'] || '')
+      if (contentType.includes('text/event-stream')) {
+        record.streaming = true
+        clearTimeout(record.idleTimer)
+        record.idleTimer = null
+      }
+      record.resolve(new Response(noBody ? null : body, {
         status: Number(frame.status || 500),
         statusText: String(frame.statusText || ''),
         headers: frame.headers || {},
@@ -197,14 +227,29 @@ export class EncryptedRelayConnection {
   }
 
   finishRecord(record) {
+    clearTimeout(record.idleTimer)
     record.signal?.removeEventListener('abort', record.abort)
     this.pending.delete(record.requestId)
+  }
+
+  touchRecord(record) {
+    if (record.streaming) return
+    clearTimeout(record.idleTimer)
+    record.idleTimer = setTimeout(() => {
+      if (!this.pending.has(record.requestId)) return
+      try { this.sendFrame({ type: 'request.cancel', requestId: record.requestId }) } catch {}
+      const error = new DOMException('等待本机 PromptX 响应超时。', 'TimeoutError')
+      if (record.started) record.controller.error(error)
+      else record.reject(error)
+      this.finishRecord(record)
+    }, this.requestIdleTimeoutMs)
   }
 
   failPending(error) {
     for (const record of this.pending.values()) {
       if (record.started) record.controller.error(error)
       else record.reject(error)
+      clearTimeout(record.idleTimer)
       record.signal?.removeEventListener('abort', record.abort)
     }
     this.pending.clear()
@@ -236,6 +281,8 @@ export class EncryptedRelayConnection {
         started: false,
         signal: options.signal,
         abort: null,
+        idleTimer: null,
+        streaming: false,
       }
       record.abort = () => {
         try { this.sendFrame({ type: 'request.cancel', requestId }) } catch {}
@@ -246,6 +293,7 @@ export class EncryptedRelayConnection {
       }
       options.signal?.addEventListener('abort', record.abort, { once: true })
       this.pending.set(requestId, record)
+      this.touchRecord(record)
     })
     try {
       this.sendFrame({ type: 'request.start', requestId, method, path, headers: headersToObject(headers) })

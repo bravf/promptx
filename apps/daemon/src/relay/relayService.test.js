@@ -57,6 +57,12 @@ function startLocalApi() {
       })
       return
     }
+    if (request.url === '/api/v2/large') {
+      response.setHeader('content-type', 'application/json')
+      response.end(JSON.stringify({ content: 'timeline-content\n'.repeat(80_000) }))
+      return
+    }
+    if (request.url === '/api/v2/stall') return
     response.statusCode = 404
     response.end()
   })
@@ -88,6 +94,7 @@ test('daemon 与浏览器通过盲 Relay 完成 E2EE JSON、SSE 和 FormData 隧
     appUrl: `http://127.0.0.1:${relay.port}/`,
   })
   let client
+  let timeoutClient
   try {
     await waitFor(() => service.getStatus().connected)
     client = new EncryptedRelayConnection(service.getOffer().offer, { WebSocketClass: WebSocket })
@@ -107,7 +114,28 @@ test('daemon 与浏览器通过盲 Relay 完成 E2EE JSON、SSE 和 FormData 隧
     const upload = await uploadResponse.json()
     assert.match(upload.contentType, /^multipart\/form-data; boundary=/)
     assert.match(upload.body, /private-file-content/)
+
+    let bodyEncoding = ''
+    const handleResponseFrame = client.handleResponseFrame.bind(client)
+    client.handleResponseFrame = (frame) => {
+      if (frame.type === 'response.start') bodyEncoding = frame.bodyEncoding || ''
+      handleResponseFrame(frame)
+    }
+    const largeResponse = await client.request('/api/v2/large')
+    const large = await largeResponse.json()
+    assert.equal(bodyEncoding, 'gzip')
+    assert.equal(large.content, 'timeline-content\n'.repeat(80_000))
+
+    timeoutClient = new EncryptedRelayConnection(service.getOffer().offer, {
+      WebSocketClass: WebSocket,
+      requestIdleTimeoutMs: 50,
+    })
+    await assert.rejects(
+      timeoutClient.request('/api/v2/stall'),
+      (error) => error.name === 'TimeoutError' && /响应超时/.test(error.message),
+    )
   } finally {
+    timeoutClient?.close()
     client?.close()
     service.stop()
     await relay.close()

@@ -106,6 +106,7 @@ let positioningTimeline = false
 const timelineCache = new Map()
 const draftsByTask = new Map()
 const MAX_TIMELINE_CACHE_SIZE = 10
+const INITIAL_TIMELINE_LIMIT = 30
 let directorySearchTimer = null
 let directorySearchController = null
 let markdownScrollFrame = null
@@ -356,7 +357,10 @@ async function loadInitial() {
     providers.value = providerResult.providers
     tasksByProject.value = Object.fromEntries(projectTasks.map(({ project, tasks }) => [project.id, tasks.map((task) => taskView(task, project.id)).filter(Boolean)]))
     expandedProjectIds.value = new Set(projects.value.map((project) => project.id))
-    if (projects.value.length) await selectProject(projects.value[0].id)
+    if (projects.value.length) {
+      loading.value = false
+      await selectProject(projects.value[0].id)
+    }
   } catch (cause) {
     error.value = cause.message
   } finally {
@@ -439,7 +443,10 @@ async function selectTask(id, { navigate = false } = {}) {
   closeEvents()
   if (cachedTimeline) openEvents(id, cachedTimeline.epoch, cachedTimeline.maxSeq)
   try {
-    const [result, turnResult] = await Promise.all([v2Api.getTaskTimeline(id), v2Api.listTaskTurns(id, 1000)])
+    const [result, turnResult] = await Promise.all([
+      v2Api.getTaskTimeline(id, { limit: INITIAL_TIMELINE_LIMIT }),
+      v2Api.listTaskTurns(id, 1000),
+    ])
     if (requestVersion !== timelineRequestVersion || activeTaskId.value !== id) return
     rows.value = result.timeline.rows
     turns.value = turnResult.turns
