@@ -285,7 +285,7 @@ export class AgentManager {
       this.runtimes.delete(agentId)
       runtime.releaseThreadWriter()
     }
-    void this.timelineSync.sync(agent).catch(() => {})
+    void this.timelineSync.sync(agent, { preserveTurnId: turn.id }).catch(() => {})
   }
 
   commitTimeline({ agentId, turnId, item }) {

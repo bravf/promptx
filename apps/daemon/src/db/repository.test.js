@@ -113,6 +113,38 @@ test('重建会切换 epoch 并清理被 Provider rewind 移除的 Turn', () => 
   }
 })
 
+test('canonical 重建会删除旧对账留下的本地 Turn 副本', () => {
+  const { db, repository, task } = setup()
+  try {
+    const canonical = repository.createTurn(task.id, 'provider-client')
+    repository.updateTurn(canonical.id, { status: 'completed', nativeTurnId: 'provider-turn' })
+    const duplicate = repository.createTurn(task.id, 'browser-client')
+    repository.updateTurn(duplicate.id, { status: 'completed', nativeTurnId: 'browser-client' })
+    repository.appendTimeline(task.id, duplicate.id, {
+      type: 'user_message',
+      clientMessageId: 'browser-client',
+      content: [{ type: 'text', text: '你好' }],
+    })
+    const before = repository.getTimelineState(task.id)
+
+    repository.applyTimelineSync(task.id, {
+      mode: 'replace',
+      providerId: 'kimi',
+      sourceId: 'session-1',
+      manifest: { sourceId: 'session-1', revision: '2', turns: [{ sourceTurnId: 'provider-turn' }] },
+      turns: [providerTurn('provider-turn', canonical.id)],
+      rows: [row('provider-turn', 'answer-1')],
+      dropLocalTurnIds: [duplicate.id],
+      expectedNextSeq: before.nextSeq,
+    })
+
+    assert.equal(repository.getTurn(duplicate.id), null)
+    assert.deepEqual(repository.listTurns(task.id).map((turn) => turn.id), [canonical.id])
+  } finally {
+    db.close()
+  }
+})
+
 test('Timeline 发生并发写入时同步事务回滚并抛出 stale', () => {
   const { db, repository, task } = setup()
   try {

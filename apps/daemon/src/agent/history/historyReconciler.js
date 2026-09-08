@@ -1,5 +1,7 @@
 import { createHistoryManifest, historyItemKey, historyTurnFingerprint, TERMINAL_HISTORY_STATUSES } from './historySnapshot.js'
 
+const PROVIDER_ECHO_TIME_WINDOW_MS = 5_000
+
 function firstUserClientId(turn) {
   return turn.items.find((entry) => entry.item.type === 'user_message')?.item.clientMessageId || ''
 }
@@ -16,6 +18,22 @@ function providerUserText(turn) {
 function localUserText(rows, turnId) {
   const content = rows.find((row) => row.turnId === turnId && row.item.type === 'user_message')?.item.content || []
   return normalizedText(content.map((block) => block.type === 'text' ? block.text : '').join('\n'))
+}
+
+function turnTimestamp(turn) {
+  const value = Date.parse(turn.startedAt || turn.createdAt || turn.finishedAt || '')
+  return Number.isFinite(value) ? value : null
+}
+
+function chronologicalTurns(turns) {
+  return [...turns].sort((left, right) => {
+    const leftTime = turnTimestamp(left)
+    const rightTime = turnTimestamp(right)
+    if (leftTime !== null && rightTime !== null && leftTime !== rightTime) return leftTime - rightTime
+    if (leftTime !== null && rightTime === null) return -1
+    if (leftTime === null && rightTime !== null) return 1
+    return String(left.id || '').localeCompare(String(right.id || ''))
+  })
 }
 
 function providerRows(turn) {
@@ -37,7 +55,8 @@ function localRowsForTurn(rows, localTurnId) {
 }
 
 function sameManifest(previous, next) {
-  return previous?.sourceId === next.sourceId
+  return previous?.reconcilerVersion === next.reconcilerVersion
+    && previous?.sourceId === next.sourceId
     && (previous.revision || '') === (next.revision || '')
     && JSON.stringify(previous.turns || []) === JSON.stringify(next.turns || [])
 }
@@ -58,17 +77,25 @@ function publicTurn(turn, localTurnId = '') {
   }
 }
 
-export function reconcileHistory({ snapshot, localRows = [], localTurns = [], syncState = null, activeTurnId = '' }) {
+export function reconcileHistory({
+  snapshot,
+  localRows = [],
+  localTurns = [],
+  syncState = null,
+  activeTurnId = '',
+  preserveTurnIds = [],
+}) {
   const manifest = createHistoryManifest(snapshot)
   if (syncState?.sourceId === snapshot.sourceId && sameManifest(syncState.manifest, manifest)) {
     return { mode: 'noop', changed: false, manifest, turns: [], rows: [] }
   }
 
   const settled = terminalTurns(snapshot)
+  const orderedLocalTurns = chronologicalTurns(localTurns)
   const localTurnBySource = new Map()
   const localTurnByClient = new Map()
   const localTurnsByText = new Map()
-  for (const turn of localTurns) {
+  for (const turn of orderedLocalTurns) {
     if (turn.nativeTurnId) localTurnBySource.set(turn.nativeTurnId, turn)
     if (turn.clientMessageId) localTurnByClient.set(turn.clientMessageId, turn)
     const text = localUserText(localRows, turn.id)
@@ -80,25 +107,63 @@ export function reconcileHistory({ snapshot, localRows = [], localTurns = [], sy
     if (text) providerTextCounts.set(text, (providerTextCounts.get(text) || 0) + 1)
   }
   const matchedLocalTurn = new Map()
+  const matchedLocalIds = new Set()
+  const bindLocalTurn = (providerTurn, localTurn) => {
+    if (!localTurn || matchedLocalIds.has(localTurn.id)) return false
+    matchedLocalTurn.set(providerTurn.sourceTurnId, localTurn)
+    matchedLocalIds.add(localTurn.id)
+    return true
+  }
   for (const turn of settled) {
     let local = localTurnBySource.get(turn.sourceTurnId) || localTurnByClient.get(firstUserClientId(turn))
-    if (!local) {
+    if (!bindLocalTurn(turn, local)) {
       const text = providerUserText(turn)
-      const candidates = localTurnsByText.get(text) || []
-      if (text && providerTextCounts.get(text) === 1 && candidates.length === 1) local = candidates[0]
+      const candidates = (localTurnsByText.get(text) || []).filter((candidate) => !matchedLocalIds.has(candidate.id))
+      const providerTime = turnTimestamp(turn)
+      const timedCandidates = providerTime === null
+        ? []
+        : candidates
+          .map((candidate) => {
+            const candidateTime = turnTimestamp(candidate)
+            return {
+              candidate,
+              distance: candidateTime === null ? Number.POSITIVE_INFINITY : Math.abs(candidateTime - providerTime),
+            }
+          })
+          .filter(({ distance }) => Number.isFinite(distance) && distance <= PROVIDER_ECHO_TIME_WINDOW_MS)
+          .sort((left, right) => left.distance - right.distance || String(left.candidate.id).localeCompare(String(right.candidate.id)))
+      local = timedCandidates[0]?.candidate
+        || (text && providerTextCounts.get(text) === 1 && candidates.length === 1 ? candidates[0] : null)
+      bindLocalTurn(turn, local)
     }
-    if (local) matchedLocalTurn.set(turn.sourceTurnId, local)
   }
   if (!matchedLocalTurn.size && settled.length === localTurns.length && settled.length > 0) {
     const providerTexts = settled.map(providerUserText)
-    const localTexts = localTurns.slice().reverse().map((turn) => localUserText(localRows, turn.id))
+    const localTexts = orderedLocalTurns.map((turn) => localUserText(localRows, turn.id))
     if (providerTexts.every(Boolean) && JSON.stringify(providerTexts) === JSON.stringify(localTexts)) {
-      settled.forEach((turn, index) => matchedLocalTurn.set(turn.sourceTurnId, localTurns.slice().reverse()[index]))
+      settled.forEach((turn, index) => bindLocalTurn(turn, orderedLocalTurns[index]))
     }
+  }
+
+  // 旧版对账可能同时留下 Provider Turn 和原始本地 Turn。相同提交时间附近的
+  // 已完成本地 Turn 是 canonical 行的旧副本，不是第二条用户消息。
+  const redundantLocalIds = new Set()
+  for (const local of orderedLocalTurns) {
+    if (local.status !== 'completed' || matchedLocalIds.has(local.id)) continue
+    const text = localUserText(localRows, local.id)
+    const localTime = turnTimestamp(local)
+    if (!text || localTime === null) continue
+    const hasCanonicalTwin = settled.some((turn) => {
+      if (providerUserText(turn) !== text || !matchedLocalTurn.has(turn.sourceTurnId)) return false
+      const providerTime = turnTimestamp(turn)
+      return providerTime !== null && Math.abs(providerTime - localTime) <= PROVIDER_ECHO_TIME_WINDOW_MS
+    })
+    if (hasCanonicalTwin) redundantLocalIds.add(local.id)
   }
 
   const previousTurns = syncState?.sourceId === snapshot.sourceId ? (syncState.manifest?.turns || []) : []
   const previousById = new Map(previousTurns.map((turn) => [turn.sourceTurnId, turn]))
+  const preservedLocalTurnIds = new Set([activeTurnId, ...preserveTurnIds].filter(Boolean))
   const settledIds = settled.map((turn) => turn.sourceTurnId)
   const previousSettled = previousTurns.filter((turn) => TERMINAL_HISTORY_STATUSES.has(turn.status))
   const prefixUnchanged = previousSettled.every((turn, index) => (
@@ -119,10 +184,13 @@ export function reconcileHistory({ snapshot, localRows = [], localTurns = [], sy
     const previous = previousById.get(turn.sourceTurnId)
     return Boolean(syncState) && (!previous || previous.fingerprint !== historyTurnFingerprint(turn))
   })
+  const requiresCanonicalRepair = Boolean(syncState)
+    && syncState.manifest?.reconcilerVersion !== manifest.reconcilerVersion
   const canAppend = (syncState ? prefixUnchanged : true)
     && onlyTailMissing
     && hasReliableBoundary
     && !hasChangedMatchedTurn
+    && !requiresCanonicalRepair
 
   if (canAppend) {
     const missing = missingIndexes.map((index) => settled[index])
@@ -154,15 +222,16 @@ export function reconcileHistory({ snapshot, localRows = [], localTurns = [], sy
   }
 
   const knownProviderIds = new Set(previousTurns.map((turn) => turn.sourceTurnId))
-  for (const turn of localTurns) {
+  for (const turn of orderedLocalTurns) {
     if (retainedLocalIds.has(turn.id)) continue
+    if (matchedLocalIds.has(turn.id) || redundantLocalIds.has(turn.id)) continue
     const belongsToRemovedProviderTurn = turn.nativeTurnId && knownProviderIds.has(turn.nativeTurnId)
-    if (belongsToRemovedProviderTurn && turn.id !== activeTurnId) continue
+    const mustPreserve = preservedLocalTurnIds.has(turn.id)
+    if (belongsToRemovedProviderTurn && !mustPreserve) continue
     const preserveUnmatchedInitialTurn = !syncState && turn.status !== 'completed'
     const preserveUnmatchedKnownTurn = Boolean(syncState) && !belongsToRemovedProviderTurn
     if (
-      (preserveUnmatchedInitialTurn || preserveUnmatchedKnownTurn || turn.id === activeTurnId)
-      && !matchedLocalTurn.has(turn.nativeTurnId)
+      (preserveUnmatchedInitialTurn || preserveUnmatchedKnownTurn || mustPreserve)
       && (!turn.nativeTurnId || !settledIds.includes(turn.nativeTurnId))
     ) {
       rows.push(...localRowsForTurn(localRows, turn.id))
@@ -175,6 +244,7 @@ export function reconcileHistory({ snapshot, localRows = [], localTurns = [], sy
     manifest,
     turns: settled.map((turn) => publicTurn(turn, matchedLocalTurn.get(turn.sourceTurnId)?.id)),
     rows,
+    dropLocalTurnIds: [...redundantLocalIds],
   }
 }
 

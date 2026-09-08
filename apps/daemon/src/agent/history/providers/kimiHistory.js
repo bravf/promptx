@@ -225,8 +225,12 @@ function mapKimiCodeHistorySnapshot(sessionId, records, revision) {
     }
     if (record.type !== 'context.append_loop_event') continue
     const event = record.event || {}
-    const turn = byTurnId.get(String(event.turnId || record.turnId || '')) || current
+    const runtimeTurnId = event.turnId ?? record.turnId
+    const turn = runtimeTurnId === undefined || runtimeTurnId === null
+      ? current
+      : byTurnId.get(String(runtimeTurnId)) || current
     if (!turn) continue
+    if (runtimeTurnId !== undefined && runtimeTurnId !== null) byTurnId.set(String(runtimeTurnId), turn)
     if (event.type === 'content.part') {
       const part = event.part || {}
       const text = part.type === 'think' ? part.think : part.type === 'text' ? part.text : ''
@@ -241,7 +245,10 @@ function mapKimiCodeHistorySnapshot(sessionId, records, revision) {
   }
   for (const record of records) {
     if (!['turn.ended', 'prompt.completed'].includes(record.type)) continue
-    const turn = byTurnId.get(String(record.turnId || record.promptId || '')) || turns.at(-1)
+    const sourceTurnId = record.type === 'prompt.completed' ? record.promptId : record.turnId
+    const turn = sourceTurnId === undefined || sourceTurnId === null
+      ? null
+      : byTurnId.get(String(sourceTurnId))
     if (turn) { turn.status = 'completed'; turn.finishedAt = toIsoTimestamp(record.finishedAt || record.time) || turn.finishedAt }
   }
   return { sourceId: sessionId, revision, turns }

@@ -135,6 +135,57 @@ test('首次同步可按唯一用户文本绑定没有原生 Turn ID 的旧数�
   assert.equal(result.rows.length, 0)
 })
 
+test('相同文本按提交时间分别绑定，不会把本地 Turn 倒序追加', () => {
+  const first = providerTurn('kimi-prompt-1', '你好', '第一次回复')
+  first.startedAt = '2026-09-04T10:00:01.000Z'
+  first.finishedAt = '2026-09-04T10:00:02.000Z'
+  first.items[0].item.clientMessageId = 'kimi-prompt-1'
+  const second = providerTurn('kimi-prompt-2', '你好', '第二次回复')
+  second.startedAt = '2026-09-04T10:01:01.000Z'
+  second.finishedAt = '2026-09-04T10:01:02.000Z'
+  second.items[0].item.clientMessageId = 'kimi-prompt-2'
+  const localFirst = localTurn('local-1', 'browser-1', 'browser-1', '2026-09-04T10:00:00.000Z')
+  const localSecond = localTurn('local-2', 'browser-2', 'browser-2', '2026-09-04T10:01:00.000Z')
+
+  const result = reconcileHistory({
+    snapshot: { sourceId: 'kimi-session', turns: [first, second] },
+    localTurns: [localSecond, localFirst],
+    localRows: [
+      ...localRows(localFirst, '你好', '第一次回复'),
+      ...localRows(localSecond, '你好', '第二次回复').map((row, index) => ({ ...row, seq: index + 10 })),
+    ],
+  })
+
+  assert.equal(result.mode, 'append')
+  assert.equal(result.rows.length, 0)
+  assert.deepEqual(result.turns.map((turn) => turn.localTurnId), ['local-1', 'local-2'])
+})
+
+test('旧版对账产生的本地副本会触发 canonical 重建并被标记清理', () => {
+  const remote = providerTurn('kimi-prompt-1', '你好', 'Provider 回复')
+  remote.startedAt = '2026-09-04T10:00:01.000Z'
+  remote.finishedAt = '2026-09-04T10:00:02.000Z'
+  remote.items[0].item.clientMessageId = 'kimi-prompt-1'
+  const canonical = localTurn('provider-turn', 'kimi-prompt-1', 'kimi-prompt-1', '2026-09-04T10:00:01.000Z')
+  const staleLocal = localTurn('local-turn', 'browser-id', 'browser-id', '2026-09-04T10:00:00.000Z')
+  const previousManifest = createHistoryManifest({ sourceId: 'kimi-session', turns: [remote] })
+  delete previousManifest.reconcilerVersion
+
+  const result = reconcileHistory({
+    snapshot: { sourceId: 'kimi-session', turns: [remote] },
+    localTurns: [canonical, staleLocal],
+    localRows: [
+      ...localRows(staleLocal, '你好', '本地流式回复'),
+      ...localRows(canonical, '你好', 'Provider 回复').map((row, index) => ({ ...row, seq: index + 10 })),
+    ],
+    syncState: { sourceId: 'kimi-session', manifest: previousManifest },
+  })
+
+  assert.equal(result.mode, 'replace')
+  assert.deepEqual(result.rows.filter((row) => row.item.type === 'user_message').map((row) => row.item.content[0].text), ['你好'])
+  assert.deepEqual(result.dropLocalTurnIds, ['local-turn'])
+})
+
 test('Provider rewind 后替换历史，不保留已移除的旧 Provider Turn', () => {
   const first = providerTurn('t1', '一')
   const removed = providerTurn('t2', '二')
@@ -151,4 +202,31 @@ test('Provider rewind 后替换历史，不保留已移除的旧 Provider Turn',
   })
   assert.equal(result.mode, 'replace')
   assert.deepEqual(result.rows.filter((row) => row.item.type === 'user_message').map((row) => row.item.content[0].text), ['一'])
+})
+
+test('结束同步期间 Provider 快照暂缺当前 Turn 时保留本地完整输出', () => {
+  const first = providerTurn('t1', '一')
+  const pendingProviderEcho = providerTurn('t2', '继续', '稍后写入 Provider 历史的答复')
+  const localFirst = localTurn('local-1', 't1', 't1:client', '2026-09-04T10:00:00.000Z')
+  const justCompleted = localTurn('local-2', 't2', 'browser-client-id', '2026-09-04T10:01:00.000Z')
+  const result = reconcileHistory({
+    snapshot: { sourceId: 'thread-1', turns: [first] },
+    localTurns: [justCompleted, localFirst],
+    localRows: [
+      ...localRows(localFirst, '一', '答复 一'),
+      ...localRows(justCompleted, '继续', '本地流式答复').map((row, index) => ({ ...row, seq: index + 10 })),
+    ],
+    syncState: {
+      sourceId: 'thread-1',
+      manifest: createHistoryManifest({ sourceId: 'thread-1', turns: [first, pendingProviderEcho] }),
+    },
+    preserveTurnIds: [justCompleted.id],
+  })
+
+  assert.equal(result.mode, 'replace')
+  assert.deepEqual(
+    result.rows.filter((row) => row.item.type === 'user_message').map((row) => row.item.content[0].text),
+    ['一', '继续'],
+  )
+  assert.equal(result.rows.find((row) => row.localTurnId === justCompleted.id && row.item.type === 'assistant_message')?.item.text, '本地流式答复')
 })

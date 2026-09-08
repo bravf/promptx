@@ -339,7 +339,7 @@ onBeforeUnmount(() => {
           </svg>
         </div>
         <PxIconButton v-if="running" class="h-8 w-8" label="停止" @click="emit('cancel')"><CircleStop class="h-4 w-4" /></PxIconButton>
-        <PxIconButton v-else variant="primary" class="h-8 w-8" :label="blockedReason || '发送'" :disabled="sendDisabled" @click="submit">
+        <PxIconButton v-else class="composer-send-button h-8 w-8" :label="blockedReason || '发送'" :disabled="sendDisabled" @click="submit">
           <LoaderCircle v-if="submitting || sending" class="h-4 w-4 animate-spin" />
           <Send v-else class="h-4 w-4" />
         </PxIconButton>
@@ -366,6 +366,9 @@ onBeforeUnmount(() => {
 .composer-control-button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 9999px; color: var(--theme-textMuted); transition: background-color 120ms ease, color 120ms ease; }
 .composer-control-button:hover:not(:disabled), .composer-select-wrap:hover, .effort-control:hover { background: var(--theme-appPanelMuted); }
 .composer-control-button:disabled { cursor: not-allowed; opacity: 0.5; }
+.composer-send-button { border: 0; border-radius: 0; background: transparent; color: var(--theme-accentText); }
+.composer-send-button:hover:not(:disabled) { background: transparent; color: var(--theme-textPrimary); }
+.composer-send-button:disabled { border: 0; background: transparent; color: var(--theme-textMuted); }
 .composer-select-wrap :deep(.px-select-trigger) { min-height: 1.75rem; border-color: transparent; background: transparent; color: var(--theme-textMuted); }
 .composer-select-wrap :deep(.px-select-trigger:hover:not(:disabled)), .composer-select-wrap :deep(.px-select-trigger:focus-visible) { border-color: transparent; background: transparent; }
 .effort-select :deep(.px-select-trigger) { padding-left: 2rem; }

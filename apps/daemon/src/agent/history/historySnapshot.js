@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 
 export const TERMINAL_HISTORY_STATUSES = new Set(['completed', 'failed', 'canceled'])
+export const HISTORY_RECONCILER_VERSION = 3
 
 export function historyItemKey(entry) {
   if (!entry?.item) return ''
@@ -29,6 +30,7 @@ export function historyTurnFingerprint(turn) {
 
 export function createHistoryManifest(snapshot) {
   return {
+    reconcilerVersion: HISTORY_RECONCILER_VERSION,
     sourceId: snapshot.sourceId,
     revision: snapshot.revision || '',
     turns: snapshot.turns.map((turn) => ({

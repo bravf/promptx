@@ -33,7 +33,7 @@ function providerRegistry() {
         currentModelId: 'test-model',
         reasoningEfforts: [{ id: 'low', label: '低' }],
         currentReasoningEffort: 'low',
-        contextUsage: { percentage: 0 },
+        contextUsage: { usedTokens: 0, maxTokens: 100, percentage: 0 },
       })
       runtime.readHistorySnapshot = async () => ({ status: 'unsupported' })
       runtime.startTurn = async () => ({})
@@ -118,6 +118,19 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   await desktop.goto(baseUrl, { waitUntil: 'domcontentloaded' })
   await desktop.getByText('V2 Timeline 已就绪').waitFor()
   assert.equal(await desktop.getByRole('button', { name: '新会话' }).isVisible(), true)
+  await desktop.locator('.composer-actions').waitFor()
+  const composerButtons = await desktop.locator('.composer-actions button').evaluateAll((elements) => elements.map((element) => ({
+    label: element.getAttribute('aria-label'),
+    className: element.className,
+  })))
+  const sendButton = composerButtons.find((button) => button.label === '发送')
+  assert.ok(sendButton, `Composer 未显示发送按钮：${JSON.stringify(composerButtons)}`)
+  assert.match(sendButton.className, /(?:^|\s)composer-send-button(?:\s|$)/)
+  const sendButtonStyle = await desktop.getByRole('button', { name: '发送', exact: true }).evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { backgroundColor: style.backgroundColor, borderRadius: style.borderRadius, borderWidth: style.borderTopWidth }
+  })
+  assert.deepEqual(sendButtonStyle, { backgroundColor: 'rgba(0, 0, 0, 0)', borderRadius: '0px', borderWidth: '0px' })
 
   for (const [themeId, mode] of themeCases) {
     await desktop.evaluate((id) => window.localStorage.setItem('promptx:theme-id', id), themeId)

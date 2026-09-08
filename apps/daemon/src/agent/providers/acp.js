@@ -212,7 +212,7 @@ export class AcpRuntime extends EventEmitter {
     await this.connect()
     this.hasTurnOutput = false
     const prompt = await buildAcpPrompt(content)
-    this.emit('turnStarted', { nativeTurnId: clientMessageId })
+    this.emit('turnStarted')
     this.connection.prompt({ sessionId: this.sessionId, prompt, messageId: clientMessageId })
       .then((result) => {
         if (!this.hasTurnOutput) {
@@ -222,7 +222,7 @@ export class AcpRuntime extends EventEmitter {
         else this.emit('turnCompleted', { usage: result.usage || {} })
       })
       .catch((error) => this.emit('turnFailed', error))
-    return { nativeTurnId: clientMessageId }
+    return {}
   }
 
   onSessionUpdate(update) {

@@ -150,3 +150,20 @@ test('新版 Kimi Code session wire 映射 turn.prompt 和 loop event', () => {
   assert.equal(snapshot.turns[0].status, 'completed')
   assert.deepEqual(snapshot.turns[0].items.map((entry) => entry.item.type), ['user_message', 'reasoning', 'assistant_message'])
 })
+
+test('新版 Kimi 不会用上一轮 turn.ended 提前结束刚开始的 Turn', () => {
+  const lines = [
+    { type: 'turn.prompt', promptId: 'prompt-1', input: [{ type: 'text', text: '第一轮' }], time: 1788500442911 },
+    { type: 'context.append_loop_event', turnId: 15, event: { type: 'content.part', turnId: 15, part: { type: 'text', text: '第一轮回复' } }, time: 1788500447051 },
+    { type: 'turn.ended', turnId: 15, time: 1788500447052 },
+    { type: 'prompt.completed', promptId: 'prompt-1', finishedAt: '2026-09-04T05:40:47.054Z' },
+    { type: 'turn.prompt', promptId: 'prompt-2', input: [{ type: 'text', text: '继续' }], time: 1788500450000 },
+    { type: 'context.append_loop_event', turnId: 16, event: { type: 'step.begin', turnId: 16 }, time: 1788500450001 },
+  ]
+
+  const snapshot = mapKimiHistorySnapshot('session_new', lines.map(JSON.stringify).join('\n'))
+
+  assert.equal(snapshot.turns[0].status, 'completed')
+  assert.equal(snapshot.turns[1].status, 'running')
+  assert.equal(snapshot.turns[1].finishedAt, '2026-09-04T05:40:50.001Z')
+})

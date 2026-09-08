@@ -236,6 +236,13 @@ export function createRepository(db) {
       nextSeq += 1
     }
 
+    if (input.mode === 'replace') {
+      for (const turnId of input.dropLocalTurnIds || []) {
+        db.prepare(`DELETE FROM agent_turns
+          WHERE id = ? AND task_id = ? AND status NOT IN ('queued', 'running')`).run(turnId, taskId)
+      }
+    }
+
     const syncedAt = nowIso()
     db.prepare(`INSERT INTO agent_timeline_sync_state
       (task_id, provider_id, source_id, manifest_json, synced_at)

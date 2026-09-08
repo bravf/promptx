@@ -1,22 +1,44 @@
 import { reconcileHistory } from './historyReconciler.js'
+import { HISTORY_RECONCILER_VERSION } from './historySnapshot.js'
 
 export class TimelineSyncCoordinator {
-  constructor({ repository, timelineStore, eventHub, getRuntime, getActiveTurnId }) {
+  constructor({
+    repository,
+    timelineStore,
+    eventHub,
+    getRuntime,
+    getActiveTurnId,
+    now = () => Date.now(),
+    preserveTurnMs = 5_000,
+  }) {
     this.repository = repository
     this.timelineStore = timelineStore
     this.eventHub = eventHub
     this.getRuntime = getRuntime
     this.getActiveTurnId = getActiveTurnId
+    this.now = now
+    this.preserveTurnMs = preserveTurnMs
     this.operations = new Map()
+    this.preservedTurns = new Map()
   }
 
-  sync(agent) {
+  sync(agent, { preserveTurnId = '' } = {}) {
+    if (preserveTurnId) {
+      const turns = this.preservedTurns.get(agent.id) || new Map()
+      turns.set(preserveTurnId, this.now() + this.preserveTurnMs)
+      this.preservedTurns.set(agent.id, turns)
+    }
     const current = this.operations.get(agent.id)
     if (current) {
+      if (preserveTurnId) current.preserveTurnIds.add(preserveTurnId)
       current.rerun = true
       return current.promise
     }
-    const operation = { rerun: false, promise: null }
+    const operation = {
+      rerun: false,
+      preserveTurnIds: new Set(preserveTurnId ? [preserveTurnId] : []),
+      promise: null,
+    }
     operation.promise = this.run(agent, operation).finally(() => {
       if (this.operations.get(agent.id) === operation) this.operations.delete(agent.id)
     })
@@ -24,12 +46,23 @@ export class TimelineSyncCoordinator {
     return operation.promise
   }
 
+  protectedTurnIds(agentId) {
+    const turns = this.preservedTurns.get(agentId)
+    if (!turns) return []
+    const now = this.now()
+    for (const [turnId, expiresAt] of turns) {
+      if (expiresAt <= now) turns.delete(turnId)
+    }
+    if (!turns.size) this.preservedTurns.delete(agentId)
+    return [...turns.keys()]
+  }
+
   async run(agent, operation) {
     let result
     do {
       operation.rerun = false
       try {
-        result = await this.runOnce(agent)
+        result = await this.runOnce(agent, operation)
       } catch (error) {
         if (error.code !== 'TIMELINE_SYNC_STALE') throw error
         operation.rerun = true
@@ -49,14 +82,17 @@ export class TimelineSyncCoordinator {
     return sync
   }
 
-  async runOnce(agent) {
+  async runOnce(agent, operation) {
     const beforeState = this.repository.getTimelineState(agent.taskId)
     const syncState = this.repository.getTimelineSyncState(agent.taskId)
     const runtime = this.getRuntime(agent)
     if (typeof runtime.readHistorySnapshot !== 'function') {
       return { status: 'unsupported', changed: false }
     }
-    const snapshot = await runtime.readHistorySnapshot({ knownRevision: syncState?.manifest?.revision || '' })
+    const knownRevision = syncState?.manifest?.reconcilerVersion === HISTORY_RECONCILER_VERSION
+      ? syncState.manifest.revision || ''
+      : ''
+    const snapshot = await runtime.readHistorySnapshot({ knownRevision })
     if (!snapshot || snapshot.status === 'unsupported') return { status: 'unsupported', changed: false }
     if (snapshot.status === 'unavailable') return { status: 'unavailable', changed: false }
     if (snapshot.status === 'unchanged') {
@@ -77,6 +113,7 @@ export class TimelineSyncCoordinator {
       localTurns: this.repository.listTurns(agent.taskId, 10000),
       syncState,
       activeTurnId: this.getActiveTurnId(agent.id),
+      preserveTurnIds: [...new Set([...operation.preserveTurnIds, ...this.protectedTurnIds(agent.id)])],
     })
     if (plan.mode === 'noop') {
       return this.publishSynced(agent.id, agent.taskId, { syncedAt: syncState?.syncedAt })
