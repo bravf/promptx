@@ -1334,9 +1334,9 @@ onBeforeUnmount(() => {
           <Transition name="workspace-agents">
             <div v-if="expandedProjectIds.has(project.id)" class="workspace-agents-wrapper">
               <div class="agent-list ml-6">
-                <div v-for="task in tasksForProject(project.id)" :key="task.id" class="agent-row group flex h-8 min-w-0 items-center rounded-sm" :class="task.id === activeTaskId ? 'row-active' : ''">
+                <div v-for="task in tasksForProject(project.id)" :key="task.id" class="agent-row group flex h-8 min-w-0 items-center overflow-hidden rounded-sm" :class="task.id === activeTaskId ? 'row-active' : ''">
                   <input v-if="renamingTaskId === task.id" :ref="(element) => { if (element) taskRenameInput = element }" v-model="taskRenameDraft"
-                    class="task-rename-input mx-1 h-8 min-w-0 flex-1 rounded-sm border px-2 text-xs outline-none" maxlength="120"
+                    class="task-rename-input mx-1 h-8 min-w-0 max-w-full flex-[1_1_0%] rounded-sm border px-2 text-xs outline-none" maxlength="120"
                     :disabled="taskRenameSaving" :aria-label="`重命名 ${task.title}`" @click.stop @blur="saveTaskRename(task)"
                     @keydown.enter.prevent="$event.currentTarget.blur()" @keydown.esc.prevent="cancelTaskRename" />
                   <div v-else role="link" tabindex="0" class="task-navigation flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 text-left"
@@ -1633,7 +1633,7 @@ onBeforeUnmount(() => {
 .workspace-heading:focus-within .workspace-action,
 .agent-row:hover .agent-action,
 .agent-row:focus-within .agent-action { opacity: 1; }
-.task-rename-input { border-color: var(--theme-inputBorder); background: var(--theme-inputBg); color: var(--theme-textPrimary); }
+.task-rename-input { width: 0; border-color: var(--theme-inputBorder); background: var(--theme-inputBg); color: var(--theme-textPrimary); }
 .task-rename-input:focus { border-color: var(--theme-borderStrong); box-shadow: 0 0 0 1px var(--theme-focusRing); }
 .agent-dot-finished { background: var(--theme-success); }
 .agent-dot-failed { background: var(--theme-danger); }

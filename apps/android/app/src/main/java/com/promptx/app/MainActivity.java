@@ -156,8 +156,11 @@ public class MainActivity extends Activity {
     settings.setJavaScriptEnabled(true);
     settings.setDomStorageEnabled(true);
     settings.setDatabaseEnabled(true);
-    settings.setLoadWithOverviewMode(true);
-    settings.setUseWideViewPort(true);
+    // 页面自身声明了 width=device-width；不要让 WebView 额外启用宽页面缩放，
+    // 否则部分 Android WebView 会把移动端页面按约 980px 的布局宽度渲染，
+    // 导致 CSS 移动断点失效，软键盘弹出时出现侧栏和输入框错位。
+    settings.setLoadWithOverviewMode(false);
+    settings.setUseWideViewPort(false);
     settings.setBuiltInZoomControls(false);
     settings.setDisplayZoomControls(false);
     settings.setAllowFileAccess(false);
