@@ -1,7 +1,41 @@
-import { TimelineItemSchema, projectTimelineRows } from '../../../../packages/protocol/src/index.js'
+import { TimelineItemSchema, presentTimelineRow, presentTimelineRows, projectTimelineRows } from '../../../../packages/protocol/src/index.js'
 
 const DEFAULT_LIMIT = 200
 const MAX_LIMIT = 1000
+const DEFAULT_PRESENTATION_BYTES = 128 * 1024
+
+function byteLength(value) {
+  return Buffer.byteLength(JSON.stringify(value))
+}
+
+function selectPresentedRows(rows, direction, limit, maxBytes) {
+  const groups = []
+  for (const row of rows) {
+    const key = row.turnId ? `turn:${row.turnId}` : `row:${row.seq}`
+    const previous = groups.at(-1)
+    if (previous?.key === key) previous.rows.push(row)
+    else groups.push({ key, rows: [row] })
+  }
+  const selected = []
+  let selectedRows = 0
+  let selectedBytes = 0
+  const indexes = direction === 'after'
+    ? groups.keys()
+    : [...groups.keys()].reverse()
+  for (const index of indexes) {
+    const group = groups[index]
+    const groupRows = group.rows.length
+    const groupBytes = byteLength(group.rows)
+    const exceeds = selected.length && (selectedRows + groupRows > limit || selectedBytes + groupBytes > maxBytes)
+    if (exceeds) break
+    selected.push(index)
+    selectedRows += groupRows
+    selectedBytes += groupBytes
+    if (selectedRows >= limit) break
+  }
+  selected.sort((left, right) => left - right)
+  return selected.flatMap((index) => groups[index].rows)
+}
 
 export class TimelineStore {
   constructor(repository) {
@@ -29,7 +63,11 @@ export class TimelineStore {
     const seq = effectiveDirection === 'before'
       ? (Number(cursor?.seq) || state.nextSeq)
       : Math.max(0, Number(cursor?.seq) || 0)
-    const rows = this.repository.listTimelineWindow(taskId, { direction: effectiveDirection, seq, limit })
+    const rawLimit = options.mode === 'presented' ? MAX_LIMIT : limit
+    const rawRows = this.repository.listTimelineWindow(taskId, { direction: effectiveDirection, seq, limit: rawLimit })
+    const rows = options.mode === 'presented'
+      ? selectPresentedRows(presentTimelineRows(rawRows), effectiveDirection, limit, Math.max(1, Number(options.maxBytes) || DEFAULT_PRESENTATION_BYTES))
+      : rawRows
 
     const result = {
       epoch: state.epoch,
@@ -44,5 +82,9 @@ export class TimelineStore {
     }
     if (options.mode === 'projected') result.entries = projectTimelineRows(rows)
     return result
+  }
+
+  presentRow(row) {
+    return presentTimelineRow(row)
   }
 }

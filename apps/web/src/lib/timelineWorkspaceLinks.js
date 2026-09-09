@@ -9,6 +9,10 @@ function objectValue(value) {
 }
 
 function pathCandidates(value, candidates) {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => pathCandidates(entry, candidates))
+    return
+  }
   const object = objectValue(value)
   if (!object) return
   for (const key of ['path', 'filePath', 'file_path', 'target']) {
@@ -91,6 +95,7 @@ export function workspaceLinksForTool(item, workspaceCwd = '') {
   if (item?.type !== 'tool_call') return []
   const detail = objectValue(item.detail) || {}
   const candidates = []
+  pathCandidates(detail.paths, candidates)
   pathCandidates(detail, candidates)
   pathCandidates(detail.input, candidates)
   pathCandidates(detail.rawInput, candidates)

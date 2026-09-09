@@ -444,7 +444,7 @@ async function selectTask(id, { navigate = false } = {}) {
   if (cachedTimeline) openEvents(id, cachedTimeline.epoch, cachedTimeline.maxSeq)
   try {
     const [result, turnResult] = await Promise.all([
-      v2Api.getTaskTimeline(id, { limit: INITIAL_TIMELINE_LIMIT }),
+      v2Api.getTaskTimeline(id, { limit: INITIAL_TIMELINE_LIMIT, mode: 'presented' }),
       v2Api.listTaskTurns(id, 1000),
     ])
     if (requestVersion !== timelineRequestVersion || activeTaskId.value !== id) return
@@ -505,6 +505,7 @@ async function loadOlderHistory() {
       direction: 'before',
       cursor: `${epoch}:${beforeSeq}`,
       limit: 300,
+      mode: 'presented',
     })
     if (requestVersion !== timelineRequestVersion || activeTaskId.value !== agentId) return
     if (result.timeline.reset || result.timeline.epoch !== epoch) {

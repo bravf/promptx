@@ -27,6 +27,8 @@ export const v2Api = {
   getTaskTimeline: (taskId, options = {}) => {
     const query = new URLSearchParams({ direction: options.direction || 'tail', limit: String(options.limit || 300) })
     if (options.cursor) query.set('cursor', options.cursor)
+    if (options.mode) query.set('mode', options.mode)
+    if (options.maxBytes) query.set('maxBytes', String(options.maxBytes))
     return request(`/api/v2/tasks/${encodeURIComponent(taskId)}/timeline?${query}`)
   },
   syncTaskTimeline: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/timeline/sync`, { method: 'POST' }),

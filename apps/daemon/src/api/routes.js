@@ -100,6 +100,18 @@ export function registerRoutes(app, context) {
     directoryPicker, taskLifecycle, environmentService, gitDelivery } = context
   let directoryPickerOpen = false
 
+  function presentEvent(event) {
+    if (!event || typeof event !== 'object') return event
+    if (event.type === 'timeline' && event.row) return { ...event, row: timelineStore.presentRow(event.row) }
+    if (event.type === 'reset' && event.timeline) {
+      return { ...event, timeline: { ...event.timeline, rows: event.timeline.rows.map((row) => timelineStore.presentRow(row)) } }
+    }
+    if (event.type === 'timeline-synced' && event.sync?.timeline) {
+      return { ...event, sync: { ...event.sync, timeline: { ...event.sync.timeline, rows: event.sync.timeline.rows.map((row) => timelineStore.presentRow(row)) } } }
+    }
+    return event
+  }
+
   async function createTask(project, rawInput) {
     const input = CreateTaskInputSchema.parse(rawInput)
     const provider = providerRegistry.get(input.providerId)
@@ -311,13 +323,16 @@ export function registerRoutes(app, context) {
     return { timeline: timelineStore.fetch(request.params.taskId, {
       direction: request.query.direction,
       limit: request.query.limit,
-      mode: request.query.mode,
+      mode: request.query.mode || 'presented',
+      maxBytes: request.query.maxBytes,
       cursor: parseCursor(request.query.cursor),
     }) }
   })
   app.post('/api/v2/tasks/:taskId/timeline/sync', async (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)
-    return agent ? { sync: await agentManager.syncTimeline(agent.id, { force: true }) } : reply.code(404).send({ error: 'agent_not_found' })
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    const sync = await agentManager.syncTimeline(agent.id, { force: true })
+    return { sync: presentEvent({ type: 'timeline-synced', sync }).sync }
   })
 
   app.get('/api/v2/tasks/:taskId/files', async (request, reply) => {
@@ -461,9 +476,9 @@ export function registerRoutes(app, context) {
     reply.hijack()
     const raw = reply.raw
     raw.writeHead(200, createSseHeaders(request.headers.origin, (origin) => corsPolicy.allows(origin)))
-    const unsubscribe = eventHub.subscribe(agent.id, (event) => sseWrite(raw, event))
+    const unsubscribe = eventHub.subscribe(agent.id, (event) => sseWrite(raw, presentEvent(event)))
     const cursor = parseCursor(request.headers['last-event-id'] || request.query.cursor)
-    const snapshot = timelineStore.fetch(request.params.taskId, { direction: cursor ? 'after' : 'tail', cursor })
+    const snapshot = timelineStore.fetch(request.params.taskId, { direction: cursor ? 'after' : 'tail', cursor, mode: 'presented' })
     if (snapshot.reset) sseWrite(raw, { type: 'reset', timeline: snapshot })
     else snapshot.rows.forEach((row) => sseWrite(raw, { type: 'timeline', epoch: snapshot.epoch, row }))
     sseWrite(raw, { type: 'agent', agent: repository.getAgent(agent.id) })
