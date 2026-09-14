@@ -371,6 +371,34 @@ test('V2 全面桌面交互回归', async (t) => {
   assert.equal(await page.getByTitle('重试').count(), 0)
   await page.getByTitle('移除附件').click()
 
+  const timeline = page.locator('.timeline')
+  await timeline.evaluate((element) => {
+    const spacer = document.createElement('div')
+    spacer.style.height = '1000px'
+    spacer.setAttribute('aria-hidden', 'true')
+    element.append(spacer)
+    element.scrollTop = element.scrollHeight
+    element.dispatchEvent(new Event('scroll'))
+    element.scrollTop = 0
+    element.dispatchEvent(new Event('scroll'))
+  })
+  const jumpButton = page.getByRole('button', { name: '回到底部', exact: true })
+  await jumpButton.waitFor()
+  const jumpButtonStyle = await jumpButton.evaluate((element) => {
+    const style = getComputedStyle(element)
+    const timelineStyle = getComputedStyle(document.querySelector('.timeline'))
+    return {
+      backgroundColor: style.backgroundColor,
+      timelineBackgroundColor: timelineStyle.backgroundColor,
+      borderStyle: style.borderTopStyle,
+      borderWidth: style.borderTopWidth,
+      boxShadow: style.boxShadow,
+    }
+  })
+  assert.notEqual(jumpButtonStyle.backgroundColor, jumpButtonStyle.timelineBackgroundColor)
+  assert.deepEqual([jumpButtonStyle.borderStyle, jumpButtonStyle.borderWidth], ['solid', '1px'])
+  assert.notEqual(jumpButtonStyle.boxShadow, 'none')
+
   await textarea.fill('正常发送回归')
   await page.getByTitle('发送').click()
   await page.getByText('已处理：正常发送回归', { exact: true }).waitFor()
@@ -378,6 +406,10 @@ test('V2 全面桌面交互回归', async (t) => {
   await textarea.fill('保持运行')
   await page.getByTitle('发送').click()
   await page.getByTitle('停止').waitFor()
+  const runningJumpButton = page.getByRole('button', { name: '正在生成，回到底部', exact: true })
+  await runningJumpButton.waitFor()
+  assert.equal(await runningJumpButton.locator('.timeline-jump-loading-dot').count(), 3)
+  assert.notEqual(await runningJumpButton.locator('.timeline-jump-loading-dot').first().evaluate((element) => getComputedStyle(element).animationName), 'none')
   assert.equal(await page.getByLabel('模型').isDisabled(), true)
   await page.getByTitle('停止').click()
   await page.getByTitle('发送').waitFor()

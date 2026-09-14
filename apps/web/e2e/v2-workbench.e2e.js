@@ -155,6 +155,13 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
     assert.equal(themeState.width, themeState.clientWidth)
   }
 
+  await desktop.getByRole('link', { name: '切换后的任务', exact: true }).click()
+  await desktop.reload({ waitUntil: 'domcontentloaded' })
+  assert.equal(await desktop.getByRole('link', { name: '切换后的任务', exact: true }).getAttribute('aria-current'), 'page')
+  assert.equal(await desktop.evaluate(() => window.localStorage.getItem('promptx:v2:active-task-id')), switchedTask.id)
+  await desktop.getByRole('link', { name: '移动端回归项目', exact: true }).click()
+  await desktop.getByText('V2 Timeline 已就绪').waitFor()
+
   await desktop.getByRole('button', { name: '移动端回归工作区 的更多操作' }).click()
   await desktop.getByRole('menuitem', { name: '置顶', exact: true }).click()
   await desktop.getByRole('button', { name: '移动端回归工作区 的更多操作' }).click()
@@ -175,6 +182,8 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   await desktop.getByLabel('重命名 界面创建会话').press('Enter')
   const renamedTaskLink = desktop.getByRole('link', { name: renamedTitle, exact: true })
   await renamedTaskLink.waitFor()
+  const renamedTaskId = app.sqliteRepository.listTasks(project.id).find((item) => item.title === renamedTitle)?.id
+  assert.ok(renamedTaskId)
   assert.equal(await renamedTaskLink.getAttribute('aria-current'), 'page')
   await desktop.waitForTimeout(50)
   assert.notEqual(await renamedTaskLink.locator('.session-title-marquee__content').evaluate((element) => getComputedStyle(element).animationName), 'none')
@@ -185,6 +194,12 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   await desktop.getByRole('button', { name: `${renamedTitle} 的更多操作` }).click()
   await desktop.getByRole('menuitem', { name: '归档会话', exact: true }).click()
   await desktop.getByRole('button', { name: '归档', exact: true }).click()
+  await desktop.waitForFunction((archivedTaskId) => (
+    window.localStorage.getItem('promptx:v2:active-task-id') !== archivedTaskId
+  ), renamedTaskId)
+  const fallbackTaskId = await desktop.evaluate(() => window.localStorage.getItem('promptx:v2:active-task-id'))
+  assert.notEqual(fallbackTaskId, renamedTaskId)
+  assert.equal(app.sqliteRepository.listTasks(project.id).some((item) => item.id === fallbackTaskId), true)
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   await mobile.goto(baseUrl, { waitUntil: 'domcontentloaded' })
@@ -214,6 +229,12 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   assert.equal(await mobileTaskLink.getAttribute('aria-current'), 'page')
   await mobile.waitForTimeout(50)
   assert.notEqual(await mobileTaskLink.locator('.session-title-marquee__content').evaluate((element) => getComputedStyle(element).animationName), 'none')
+  assert.equal(await mobile.evaluate(() => window.history.state?.promptxV2MobileTaskId), renamedTaskId)
+  await mobile.reload({ waitUntil: 'domcontentloaded' })
+  const restoredMobileTask = mobile.locator('.task-navigation[aria-current="page"]').filter({ hasText: renamedTitle })
+  await restoredMobileTask.waitFor({ state: 'attached' })
+  assert.equal(await restoredMobileTask.getAttribute('aria-current'), 'page')
+  assert.equal(await mobile.evaluate(() => window.history.state?.promptxV2MobileTaskId), renamedTaskId)
 
   await desktop.getByRole('button', { name: '浏览文件' }).click()
   await assertDrawerTransition(desktop.locator('.workspace-inspector'))

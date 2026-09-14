@@ -3,9 +3,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
 import { Archive, ArrowDown, ArrowLeft, Bot, CircleAlert, FileDiff, Files, Folder, FolderOpen, Info, LoaderCircle, Pencil, Pin, PinOff, Plus, Settings, TerminalSquare, X } from 'lucide-vue-next'
 import { v2Api, taskEventsUrl, globalEventsUrl } from '../lib/v2Api.js'
+import { readActiveTaskId, writeActiveTaskId } from '../lib/activeTaskStorage.js'
 import { createEventSource } from '../lib/eventSource.js'
 import { createMobileDialogHistoryState, getMobileDialogHistoryState } from '../lib/mobileDialogHistory.js'
-import { createMobileTimelineHistoryState, hasMobileTimelineHistoryState } from '../lib/mobileTimelineHistory.js'
+import { createMobileTimelineHistoryState, getMobileTimelineTaskId, hasMobileTimelineHistoryState } from '../lib/mobileTimelineHistory.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupTimelineTurns, isTimelineTurnRunning } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
@@ -299,6 +300,10 @@ function resetTimelineSelection() {
   timelineSyncing.value = false
   timelineSyncError.value = ''
   sending.value = false
+  writeActiveTaskId('')
+  if (isMobile.value && hasMobileTimelineHistoryState(window.history.state)) {
+    window.history.replaceState(createMobileTimelineHistoryState(window.history.state), '')
+  }
   closeEvents()
 }
 
@@ -357,9 +362,19 @@ async function loadInitial() {
     providers.value = providerResult.providers
     tasksByProject.value = Object.fromEntries(projectTasks.map(({ project, tasks }) => [project.id, tasks.map((task) => taskView(task, project.id)).filter(Boolean)]))
     expandedProjectIds.value = new Set(projects.value.map((project) => project.id))
-    if (projects.value.length) {
+    const availableTasks = Object.values(tasksByProject.value).flat()
+    const historyTaskId = isMobile.value ? getMobileTimelineTaskId(window.history.state) : ''
+    const restoredTaskId = [historyTaskId, readActiveTaskId()]
+      .find((taskId) => taskId && availableTasks.some((task) => task.id === taskId))
+    if (restoredTaskId || availableTasks.length) {
+      loading.value = false
+      await selectTask(restoredTaskId || availableTasks[0].id)
+    } else if (projects.value.length) {
       loading.value = false
       await selectProject(projects.value[0].id)
+    } else {
+      resetTimelineSelection()
+      positioningTimeline = false
     }
   } catch (cause) {
     error.value = cause.message
@@ -413,13 +428,17 @@ async function selectProject(id, { navigate = false } = {}) {
 async function selectTask(id, { navigate = false } = {}) {
   const task = Object.values(tasksByProject.value).flat().find((item) => item.id === id)
   if (!task) return
-  if (navigate) enterMobileTimeline()
+  if (navigate) enterMobileTimeline(id)
   activeProjectId.value = task.projectId
   setProjectExpanded(task.projectId)
   const requestVersion = ++timelineRequestVersion
   releaseTimelineBottomPin()
   positioningTimeline = true
   activeTaskId.value = id
+  writeActiveTaskId(id)
+  if (isMobile.value && hasMobileTimelineHistoryState(window.history.state)) {
+    window.history.replaceState(createMobileTimelineHistoryState(window.history.state, id), '')
+  }
   draftContent.value = draftsByTask.get(id)?.map((item) => ({ ...item })) || []
   const hasCachedTimeline = restoreTimelineCache(id)
   const cachedTimeline = timelineCache.get(id)
@@ -714,10 +733,12 @@ function showMobileSidebar() {
   mobileView.value = 'sidebar'
 }
 
-function enterMobileTimeline() {
+function enterMobileTimeline(taskId) {
   mobileView.value = 'timeline'
-  if (!isMobile.value || hasMobileTimelineHistoryState(window.history.state)) return
-  window.history.pushState(createMobileTimelineHistoryState(window.history.state), '')
+  if (!isMobile.value) return
+  const state = createMobileTimelineHistoryState(window.history.state, taskId)
+  if (hasMobileTimelineHistoryState(window.history.state)) window.history.replaceState(state, '')
+  else window.history.pushState(state, '')
 }
 
 function handleMobileHistoryPop(event) {
@@ -1421,11 +1442,17 @@ onBeforeUnmount(() => {
         </div>
         <PxIconButton
           v-if="!followingTimeline && timelineHasContent"
-          class="timeline-jump-button absolute bottom-3 left-1/2 z-10 h-9 w-9 -translate-x-1/2 p-0 shadow-sm"
-          :label="hasNewTimelineItems ? '有新消息，回到底部' : '回到底部'"
+          class="timeline-jump-button absolute bottom-3 left-1/2 z-10 h-9 w-9 -translate-x-1/2 p-0"
+          :class="{ 'is-running': isRunning || sending }"
+          :label="isRunning || sending ? '正在生成，回到底部' : (hasNewTimelineItems ? '有新消息，回到底部' : '回到底部')"
           @click="jumpToLatest"
         >
-          <ArrowDown class="h-3.5 w-3.5" />
+          <span v-if="isRunning || sending" class="timeline-jump-loading" aria-hidden="true">
+            <span class="timeline-jump-loading-dot" />
+            <span class="timeline-jump-loading-dot" />
+            <span class="timeline-jump-loading-dot" />
+          </span>
+          <ArrowDown v-else class="h-4 w-4" />
         </PxIconButton>
       </div>
 
@@ -1642,6 +1669,28 @@ onBeforeUnmount(() => {
 .status-dot { background: var(--theme-success); }
 .status-dot-running { background: var(--theme-warning); }
 .timeline { background: var(--theme-appPanel); }
+.timeline-jump-button {
+  border: 1px solid var(--theme-borderStrong);
+  background: color-mix(in srgb, var(--theme-appPanelStrong) 66%, var(--theme-appPanelInset) 34%);
+  color: var(--theme-textPrimary);
+  box-shadow: var(--theme-shadowPopover);
+}
+.timeline-jump-button:hover:not(:disabled) { background: var(--theme-buttonHover); color: var(--theme-textPrimary); }
+.timeline-jump-button.is-running { color: var(--theme-accentText); }
+.timeline-jump-loading { display: inline-flex; align-items: center; justify-content: center; gap: 3px; }
+.timeline-jump-loading-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: timeline-jump-loading-pulse 1.1s ease-in-out infinite;
+}
+.timeline-jump-loading-dot:nth-child(2) { animation-delay: 140ms; }
+.timeline-jump-loading-dot:nth-child(3) { animation-delay: 280ms; }
+@keyframes timeline-jump-loading-pulse {
+  0%, 60%, 100% { opacity: 0.38; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-1px); }
+}
 .timeline-generating-slot { contain: layout; }
 .timeline-generating-indicator { color: var(--theme-textMuted); font-size: 1.25rem; font-weight: 600; line-height: 0.75rem; opacity: 0; transition: opacity 150ms ease; }
 .timeline-generating-indicator.is-visible { opacity: 1; }
@@ -1683,6 +1732,7 @@ onBeforeUnmount(() => {
   .import-session-enter-active, .import-session-leave-active, .import-session-move { transition: none; }
   .timeline-generating-indicator { transition: none; }
   .timeline-generating-dot { animation: none; opacity: 0.72; }
+  .timeline-jump-loading-dot { animation: none; opacity: 0.78; }
 }
 @media (max-width: 900px) {
   .v2-shell { grid-template-columns: 200px minmax(0, 1fr); }
