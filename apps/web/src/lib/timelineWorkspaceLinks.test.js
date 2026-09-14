@@ -23,6 +23,11 @@ test('将 Timeline Markdown 中的工作区文件链接转换为抽屉目标', (
     intent: 'file',
     line: 27,
   })
+  assert.deepEqual(workspaceLinkForHref('/Users/bravf/code/plane-shooter/art/player-plane-preview.png', '/Users/bravf/code/plane-shooter'), {
+    path: 'art/player-plane-preview.png',
+    intent: 'file',
+    line: null,
+  })
 })
 
 test('Timeline Markdown 外链和工作区外路径不进入抽屉', () => {

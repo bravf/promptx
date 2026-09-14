@@ -20,6 +20,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  taskId: {
+    type: String,
+    default: '',
+  },
 })
 const emit = defineEmits(['rendered', 'open-workspace-path'])
 
@@ -38,6 +42,7 @@ const formattedLimit = new Intl.NumberFormat('zh-CN').format(TIMELINE_MARKDOWN_C
       :is-dark="isDark"
       :streaming="streaming && index === blocks.length - 1"
       :workspace-cwd="workspaceCwd"
+      :task-id="taskId"
       @rendered="emit('rendered')"
       @open-workspace-path="emit('open-workspace-path', $event)"
     />

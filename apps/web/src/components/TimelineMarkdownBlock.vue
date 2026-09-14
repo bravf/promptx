@@ -1,8 +1,9 @@
 <script setup>
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { renderCodexMarkdown, renderPlainCodexMarkdown } from '../lib/codexMarkdown.js'
 import { workspaceLinkForHref } from '../lib/timelineWorkspaceLinks.js'
 import { writeClipboardText } from '../lib/clipboard.js'
+import { v2Api } from '../lib/v2Api.js'
 
 const props = defineProps({
   text: {
@@ -21,17 +22,66 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  taskId: {
+    type: String,
+    default: '',
+  },
 })
 const emit = defineEmits(['rendered', 'open-workspace-path'])
 
 const html = ref('')
+const contentElement = ref(null)
 let renderTimer = null
 let renderVersion = 0
+let imageLoadController = null
+const imageObjectUrls = new Set()
+
+function releaseWorkspaceImages() {
+  imageLoadController?.abort()
+  imageLoadController = null
+  imageObjectUrls.forEach((url) => URL.revokeObjectURL(url))
+  imageObjectUrls.clear()
+}
+
+async function hydrateWorkspaceImages(version) {
+  await nextTick()
+  if (version !== renderVersion || !props.taskId || !props.workspaceCwd) return
+
+  const images = [...(contentElement.value?.querySelectorAll('img[src]') || [])]
+    .map((image) => ({ image, target: workspaceLinkForHref(image.getAttribute('src'), props.workspaceCwd) }))
+    .filter((entry) => entry.target)
+  if (!images.length) return
+
+  const controller = new AbortController()
+  imageLoadController = controller
+  await Promise.allSettled(images.map(async ({ image, target }) => {
+    try {
+      const objectUrl = await v2Api.taskFileObjectUrl(props.taskId, target.path, { signal: controller.signal })
+      if (controller.signal.aborted || version !== renderVersion || !image.isConnected) {
+        URL.revokeObjectURL(objectUrl)
+        return
+      }
+      imageObjectUrls.add(objectUrl)
+      image.addEventListener('load', () => emit('rendered'), { once: true })
+      image.src = objectUrl
+    } catch (cause) {
+      if (cause?.name !== 'AbortError' && version === renderVersion) image.dataset.workspaceImageError = 'true'
+    }
+  }))
+  if (imageLoadController === controller) imageLoadController = null
+}
+
+function applyHtml(nextHtml, version, { hydrateImages = true } = {}) {
+  if (version !== renderVersion) return
+  releaseWorkspaceImages()
+  html.value = nextHtml
+  if (hydrateImages) void hydrateWorkspaceImages(version)
+}
 
 function scheduleRender() {
   const version = ++renderVersion
   if (renderTimer) clearTimeout(renderTimer)
-  html.value = renderPlainCodexMarkdown(props.text)
+  applyHtml(renderPlainCodexMarkdown(props.text), version, { hydrateImages: false })
   renderTimer = setTimeout(async () => {
     renderTimer = null
     try {
@@ -41,7 +91,7 @@ function scheduleRender() {
         copyAriaLabel: '复制代码',
       })
       if (version === renderVersion) {
-        html.value = rendered
+        applyHtml(rendered, version)
         emit('rendered')
       }
     } catch {
@@ -81,14 +131,15 @@ function handleContentClick(event) {
   copyCode(event)
 }
 
-watch(() => [props.text, props.isDark, props.streaming], scheduleRender, { immediate: true })
+watch(() => [props.text, props.isDark, props.streaming, props.workspaceCwd, props.taskId], scheduleRender, { immediate: true })
 
 onBeforeUnmount(() => {
   renderVersion += 1
   if (renderTimer) clearTimeout(renderTimer)
+  releaseWorkspaceImages()
 })
 </script>
 
 <template>
-  <div class="prose-like codex-markdown" @click="handleContentClick" v-html="html" />
+  <div ref="contentElement" class="prose-like codex-markdown" @click="handleContentClick" v-html="html" />
 </template>

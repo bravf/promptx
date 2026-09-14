@@ -13,6 +13,7 @@ const props = defineProps({
   running: { type: Boolean, default: false },
   isDark: { type: Boolean, default: false },
   workspaceCwd: { type: String, default: '' },
+  taskId: { type: String, default: '' },
 })
 const emit = defineEmits(['rendered', 'open-workspace-path'])
 
@@ -79,7 +80,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
       <div v-else class="theme-muted-text py-1 text-xs">{{ heading }}</div>
       <div v-if="expanded && hasProcessEntries" class="process-content pb-1 pl-5 pt-1">
         <div v-for="entry in visibleProcessEntries" :key="`${entry.seqStart}-${entry.item.callId || entry.item.type}`" class="process-entry py-1.5 text-xs">
-          <TimelineMarkdown v-if="entry.item.type === 'assistant_message'" class="theme-secondary-text" :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
+          <TimelineMarkdown v-if="entry.item.type === 'assistant_message'" class="theme-secondary-text" :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
           <div v-else-if="entry.item.type === 'reasoning'" class="theme-secondary-text whitespace-pre-wrap leading-5">{{ entry.item.text }}</div>
           <div v-else-if="entry.item.type === 'tool_call'" class="flex min-w-0 items-start gap-2">
             <Wrench class="theme-muted-text mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -116,7 +117,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
       <div v-if="entry.item.type === 'assistant_message'" class="flex gap-3">
         <Bot class="mt-1 h-4 w-4 shrink-0" />
         <div class="min-w-0 flex-1">
-          <TimelineMarkdown :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
+          <TimelineMarkdown :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
           <TimelineMessageMeta :text="entry.item.text" :timestamp="entry.timestamp" />
         </div>
       </div>

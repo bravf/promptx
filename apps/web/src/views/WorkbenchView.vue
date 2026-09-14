@@ -1427,7 +1427,7 @@ onBeforeUnmount(() => {
           <div v-else-if="!activeTask || !entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">{{ activeTask ? '开始一段新的协作' : '新建一条会话' }}</p><p v-if="activeTask" class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
-              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" :workspace-cwd="activeTask?.environment?.cwd" @rendered="handleMarkdownRendered" @open-workspace-path="openProjectPath" />
+              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" :workspace-cwd="activeTask?.environment?.cwd" :task-id="activeTaskId" @rendered="handleMarkdownRendered" @open-workspace-path="openProjectPath" />
               <article v-else-if="entry.item?.type === 'error'" class="error-row mb-5 ml-7 rounded-sm border px-3 py-2 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.message }}</article>
               <article v-else-if="entry.item?.type === 'system_notice'" class="theme-muted-text mb-5 ml-7 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.text }}</article>
             </template>
