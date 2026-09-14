@@ -218,7 +218,6 @@ function restoreProjectExpansion() {
 
 function toggleProject(projectId) { setProjectExpanded(projectId, !expandedProjectIds.value.has(projectId)) }
 function providerLabel(providerId) { return providers.value.find((provider) => provider.id === providerId)?.label || providerId }
-function paneIndex(taskId) { return taskId === primaryTaskId.value ? '1' : (splitEnabled.value && taskId === secondaryTaskId.value ? '2' : '') }
 
 function projectMenuItems(project) {
   return [{ id: 'new', label: '新建会话', icon: Plus }, { id: 'pin', label: project.pinnedAt ? '取消置顶' : '置顶', icon: project.pinnedAt ? PinOff : Pin }, { separator: true }, { id: 'archive', label: '归档工作区', icon: Archive }]
@@ -495,7 +494,6 @@ onBeforeUnmount(() => {
                   <div v-else role="link" tabindex="0" class="task-navigation flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 text-left" :aria-current="task.id === focusedTaskId ? 'page' : undefined" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })" @keydown.enter.prevent="selectTask(task.id, { navigate: true })">
                     <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
                     <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="task.title" :active="task.id === focusedTaskId" />
-                    <span v-if="splitEnabled && paneIndex(task.id)" class="pane-index shrink-0 text-[9px]">{{ paneIndex(task.id) }}</span>
                     <Pin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
                     <LoaderCircle v-if="task.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
                   </div>
@@ -601,7 +599,6 @@ onBeforeUnmount(() => {
 .agent-dot-finished { background: var(--theme-success); }
 .agent-dot-failed { background: var(--theme-danger); }
 .row-active { background: var(--theme-appPanelActive); }
-.pane-index { min-width: 1rem; border: 1px solid var(--theme-borderDefault); border-radius: 999px; color: var(--theme-textMuted); text-align: center; line-height: 0.9rem; }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .import-session-row { border-color: var(--theme-borderDefault); }
 .import-session-row:hover { background: var(--theme-appPanelHover); }

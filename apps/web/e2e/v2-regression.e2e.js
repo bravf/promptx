@@ -623,6 +623,19 @@ test('Timeline 拆屏保持两套独立会话、抽屉和刷新状态', async (t
   }
 
   await panes.nth(0).getByRole('button', { name: '浏览文件' }).click()
+  const leftDrawer = panes.nth(0).locator('.workspace-inspector')
+  await leftDrawer.waitFor()
+  assert.equal(await leftDrawer.evaluate(async (drawer) => {
+    await Promise.all(drawer.getAnimations().map((animation) => animation.finished))
+    const rightPane = drawer.closest('.task-timeline-pane').nextElementSibling
+    const bounds = rightPane.getBoundingClientRect()
+    drawer.style.transition = 'none'
+    drawer.style.transform = 'translateX(50%)'
+    const target = document.elementFromPoint(bounds.left + 10, bounds.top + 100)
+    drawer.style.removeProperty('transform')
+    drawer.style.removeProperty('transition')
+    return rightPane.contains(target)
+  }), true, '左屏抽屉滑动时不能覆盖右屏')
   await panes.nth(1).getByRole('button', { name: '查看 Diff' }).click()
   await panes.nth(0).locator('.workspace-inspector').waitFor()
   await panes.nth(1).locator('.workspace-inspector').waitFor()

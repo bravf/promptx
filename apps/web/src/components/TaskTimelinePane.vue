@@ -618,6 +618,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .task-timeline-pane { background: var(--theme-appPanel); }
+.task-timeline-pane.is-split { overflow: hidden; }
 .task-timeline-pane.is-split.is-focused .pane-title { color: var(--theme-accent); }
 .task-timeline-pane > header, .composer-wrap { border-color: var(--theme-borderDefault); }
 .task-timeline-pane :deep(.workspace-inspector), .task-timeline-pane :deep(.task-details-drawer) { bottom: 0; left: 0; position: absolute; right: 0; top: 3.5rem; z-index: 20; }
