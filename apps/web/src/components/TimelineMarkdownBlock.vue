@@ -47,25 +47,51 @@ async function hydrateWorkspaceImages(version) {
   await nextTick()
   if (version !== renderVersion || !props.taskId || !props.workspaceCwd) return
 
-  const images = [...(contentElement.value?.querySelectorAll('img[src]') || [])]
-    .map((image) => ({ image, target: workspaceLinkForHref(image.getAttribute('src'), props.workspaceCwd) }))
-    .filter((entry) => entry.target)
-  if (!images.length) return
+  const previews = [...(contentElement.value?.querySelectorAll('[data-workspace-image-path]') || [])]
+    .filter((preview) => preview.dataset.workspaceImageState !== 'ready')
+  if (!previews.length) return
 
   const controller = new AbortController()
   imageLoadController = controller
-  await Promise.allSettled(images.map(async ({ image, target }) => {
+  await Promise.allSettled(previews.map(async (preview) => {
+    const image = preview.querySelector('img')
+    const status = preview.querySelector('.workspace-image-status')
+    if (!image) return
+    preview.dataset.workspaceImageState = 'loading'
+    preview.setAttribute('role', 'status')
+    preview.removeAttribute('tabindex')
+    if (status) status.textContent = '图片加载中'
     try {
-      const objectUrl = await v2Api.taskFileObjectUrl(props.taskId, target.path, { signal: controller.signal })
-      if (controller.signal.aborted || version !== renderVersion || !image.isConnected) {
+      const objectUrl = await v2Api.taskFileObjectUrl(props.taskId, preview.dataset.workspaceImagePath, { signal: controller.signal })
+      if (controller.signal.aborted || version !== renderVersion || !preview.isConnected) {
         URL.revokeObjectURL(objectUrl)
         return
       }
       imageObjectUrls.add(objectUrl)
-      image.addEventListener('load', () => emit('rendered'), { once: true })
+      image.addEventListener('load', () => {
+        if (version !== renderVersion || !preview.isConnected) return
+        preview.dataset.workspaceImageState = 'ready'
+        preview.removeAttribute('role')
+        preview.removeAttribute('tabindex')
+        emit('rendered')
+      }, { once: true })
+      image.addEventListener('error', () => {
+        if (version !== renderVersion || !preview.isConnected) return
+        imageObjectUrls.delete(objectUrl)
+        URL.revokeObjectURL(objectUrl)
+        preview.dataset.workspaceImageState = 'error'
+        preview.setAttribute('role', 'button')
+        preview.setAttribute('tabindex', '0')
+        if (status) status.textContent = '图片加载失败，点击重试'
+      }, { once: true })
       image.src = objectUrl
     } catch (cause) {
-      if (cause?.name !== 'AbortError' && version === renderVersion) image.dataset.workspaceImageError = 'true'
+      if (cause?.name !== 'AbortError' && version === renderVersion && preview.isConnected) {
+        preview.dataset.workspaceImageState = 'error'
+        preview.setAttribute('role', 'button')
+        preview.setAttribute('tabindex', '0')
+        if (status) status.textContent = '图片加载失败，点击重试'
+      }
     }
   }))
   if (imageLoadController === controller) imageLoadController = null
@@ -81,7 +107,7 @@ function applyHtml(nextHtml, version, { hydrateImages = true } = {}) {
 function scheduleRender() {
   const version = ++renderVersion
   if (renderTimer) clearTimeout(renderTimer)
-  applyHtml(renderPlainCodexMarkdown(props.text), version, { hydrateImages: false })
+  applyHtml(renderPlainCodexMarkdown(props.text, { workspaceCwd: props.workspaceCwd }), version, { hydrateImages: false })
   renderTimer = setTimeout(async () => {
     renderTimer = null
     try {
@@ -89,6 +115,7 @@ function scheduleRender() {
         isDark: props.isDark,
         copyLabel: '复制',
         copyAriaLabel: '复制代码',
+        workspaceCwd: props.workspaceCwd,
       })
       if (version === renderVersion) {
         applyHtml(rendered, version)
@@ -96,6 +123,7 @@ function scheduleRender() {
       }
     } catch {
       // 同步 Markdown 已经作为安全回退结果展示。
+      if (version === renderVersion) void hydrateWorkspaceImages(version)
     }
   }, props.streaming ? 180 : 0)
 }
@@ -120,6 +148,13 @@ async function copyCode(event) {
 }
 
 function handleContentClick(event) {
+  const failedImage = event.target?.closest?.('[data-workspace-image-state="error"]')
+  if (failedImage) {
+    event.preventDefault()
+    event.stopPropagation()
+    void hydrateWorkspaceImages(renderVersion)
+    return
+  }
   const anchor = event.target?.closest?.('a[href]')
   const target = anchor && workspaceLinkForHref(anchor.getAttribute('href'), props.workspaceCwd)
   if (target) {
@@ -129,6 +164,12 @@ function handleContentClick(event) {
     return
   }
   copyCode(event)
+}
+
+function handleContentKeydown(event) {
+  if (!['Enter', ' '].includes(event.key) || !event.target?.matches?.('[data-workspace-image-state="error"]')) return
+  event.preventDefault()
+  void hydrateWorkspaceImages(renderVersion)
 }
 
 watch(() => [props.text, props.isDark, props.streaming, props.workspaceCwd, props.taskId], scheduleRender, { immediate: true })
@@ -141,5 +182,5 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="contentElement" class="prose-like codex-markdown" @click="handleContentClick" v-html="html" />
+  <div ref="contentElement" class="prose-like codex-markdown" @click="handleContentClick" @keydown="handleContentKeydown" v-html="html" />
 </template>

@@ -143,3 +143,19 @@ test('Markdown 图片路径中的转义点会还原为正常文件路径', async
   assert.match(html, /<img src="\/Users\/bravf\/code\/plane-shooter\/art\/player-plane-preview\.png" alt="玩家飞机预览">/)
   assert.doesNotMatch(html, /preview\\\.png/)
 })
+
+test('工作区内的 Markdown 图片首次渲染为加载占位', async () => {
+  const markdown = '![玩家飞机预览](/Users/bravf/code/plane-shooter/art/player-plane-preview\\.png)'
+  const options = {
+    workspaceCwd: '/Users/bravf/code/plane-shooter',
+  }
+  const html = await renderCodexMarkdown(markdown, options)
+  const plainHtml = renderPlainCodexMarkdown(markdown, options)
+
+  for (const rendered of [plainHtml, html]) {
+    assert.match(rendered, /data-workspace-image-path="art\/player-plane-preview\.png"/)
+    assert.match(rendered, /data-workspace-image-state="loading"/)
+    assert.match(rendered, />图片加载中<\/span>/)
+    assert.doesNotMatch(rendered, /src="\/Users\/bravf/)
+  }
+})

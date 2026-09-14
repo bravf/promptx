@@ -1,8 +1,10 @@
 import MarkdownIt from 'markdown-it'
 import { renderHighlightedCodeLines, resolvePreviewLanguage } from './sourceCodePreview.js'
+import { workspaceLinkForHref } from './timelineWorkspaceLinks.js'
 
 const markdownUtils = new MarkdownIt()
 const FENCE_PLACEHOLDER_PREFIX = '__PROMPTX_FENCE__'
+const TRANSPARENT_IMAGE_SRC = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
 
 function normalizeLanguage(value = '') {
   return String(value || '').trim().toLowerCase()
@@ -114,6 +116,7 @@ function createMarkdownRenderer(options = {}) {
   const defaultTableOpenRule = instance.renderer.rules.table_open
   const defaultTableCloseRule = instance.renderer.rules.table_close
   const defaultFenceRule = instance.renderer.rules.fence
+  const defaultImageRule = instance.renderer.rules.image
 
   instance.renderer.rules.link_open = (tokens, idx, renderOptions, env, self) => {
     const token = tokens[idx]
@@ -141,6 +144,18 @@ function createMarkdownRenderer(options = {}) {
       : self.renderToken(tokens, idx, renderOptions)
 
     return `${rendered}</div>`
+  }
+
+  instance.renderer.rules.image = (tokens, idx, renderOptions, env = {}, self) => {
+    const token = tokens[idx]
+    const target = workspaceLinkForHref(token.attrGet('src'), env.workspaceCwd)
+    const renderImage = () => typeof defaultImageRule === 'function'
+      ? defaultImageRule(tokens, idx, renderOptions, env, self)
+      : self.renderToken(tokens, idx, renderOptions)
+    if (!target) return renderImage()
+
+    token.attrSet('src', TRANSPARENT_IMAGE_SRC)
+    return `<span class="workspace-image-preview" data-workspace-image-path="${escapeHtml(target.path)}" data-workspace-image-state="loading" role="status"><span class="workspace-image-status">图片加载中</span>${renderImage()}</span>`
   }
 
   if (options.captureFences) {
@@ -215,18 +230,18 @@ export async function renderCodexMarkdown(value = '', options = {}) {
     return ''
   }
 
-  const env = {}
+  const env = { workspaceCwd: String(options.workspaceCwd || '') }
   const html = markdown.render(text, env)
   return resolveFencePlaceholders(html, env.__promptxFences || [], options)
 }
 
-export function renderPlainCodexMarkdown(value = '') {
+export function renderPlainCodexMarkdown(value = '', options = {}) {
   const text = String(value || '').trim()
   if (!text) {
     return ''
   }
 
-  return plainMarkdown.render(text)
+  return plainMarkdown.render(text, { workspaceCwd: String(options.workspaceCwd || '') })
 }
 
 export async function renderHighlightedCodeBlock(value = '', language = '', options = {}) {
