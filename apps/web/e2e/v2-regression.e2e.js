@@ -323,7 +323,7 @@ test('V2 全面桌面交互回归', async (t) => {
 
   const textarea = page.getByPlaceholder('向 Agent 发送消息')
   await textarea.fill('第二会话草稿')
-  await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+  await page.locator('.task-navigation[title^="主回归会话 ·"]').click()
   await textarea.fill('主会话草稿')
   await page.getByRole('link', { name: '草稿切换会话', exact: true }).click()
   assert.equal(await textarea.inputValue(), '第二会话草稿')
@@ -598,4 +598,54 @@ test('Timeline 报告链接打开文件抽屉且不跳转或新开页面', async
     assert.deepEqual(failures, [])
     await page.close()
   }
+})
+
+test('Timeline 拆屏保持两套独立会话、抽屉和刷新状态', async (t) => {
+  const fixture = await createFixture(t)
+  const page = await fixture.browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const failures = collectPageFailures(page)
+  await page.goto(fixture.baseUrl, { waitUntil: 'domcontentloaded' })
+  await page.getByText('回归基线已经准备完成。').waitFor()
+
+  await page.getByRole('button', { name: '拆分 Timeline' }).click()
+  const panes = page.locator('.task-timeline-pane')
+  assert.equal(await panes.count(), 2)
+  await panes.nth(1).getByText('从左栏选择一个会话', { exact: true }).waitFor()
+
+  await page.getByRole('link', { name: '草稿切换会话', exact: true }).click()
+  await panes.nth(0).getByText('主回归会话', { exact: true }).waitFor()
+  await panes.nth(1).getByText('草稿切换会话', { exact: true }).waitFor()
+  for (const index of [0, 1]) {
+    assert.equal(await panes.nth(index).getByRole('button', { name: '浏览文件' }).count(), 1)
+    assert.equal(await panes.nth(index).getByRole('button', { name: '查看 Diff' }).count(), 1)
+    assert.equal(await panes.nth(index).getByRole('button', { name: '任务详情' }).count(), 1)
+    assert.equal(await panes.nth(index).getByRole('button', { name: '关闭此窗格' }).count(), 1)
+  }
+
+  await panes.nth(0).getByRole('button', { name: '浏览文件' }).click()
+  await panes.nth(1).getByRole('button', { name: '查看 Diff' }).click()
+  await panes.nth(0).locator('.workspace-inspector').waitFor()
+  await panes.nth(1).locator('.workspace-inspector').waitFor()
+  assert.equal(await page.locator('.workspace-inspector').count(), 2)
+
+  await panes.nth(0).getByRole('button', { name: '关闭抽屉' }).click()
+  await panes.nth(1).getByRole('button', { name: '关闭抽屉' }).click()
+  await panes.nth(0).locator('.workspace-inspector').waitFor({ state: 'detached' })
+  await panes.nth(1).locator('.workspace-inspector').waitFor({ state: 'detached' })
+  const composers = page.getByPlaceholder('向 Agent 发送消息')
+  await composers.nth(0).fill('左窗格草稿')
+  await composers.nth(1).fill('右窗格草稿')
+  assert.equal(await composers.nth(0).inputValue(), '左窗格草稿')
+  assert.equal(await composers.nth(1).inputValue(), '右窗格草稿')
+
+  await page.locator('.task-navigation[title^="主回归会话 ·"]').click()
+  assert.equal(await panes.count(), 2)
+  assert.equal(await panes.nth(1).getByText('草稿切换会话', { exact: true }).count(), 1)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator('.task-timeline-pane').nth(0).getByText('主回归会话', { exact: true }).waitFor()
+  await page.locator('.task-timeline-pane').nth(1).getByText('草稿切换会话', { exact: true }).waitFor()
+
+  await page.locator('.task-timeline-pane').nth(1).getByRole('button', { name: '关闭此窗格' }).click()
+  assert.equal(await page.locator('.task-timeline-pane').count(), 1)
+  assert.deepEqual(failures, [])
 })
