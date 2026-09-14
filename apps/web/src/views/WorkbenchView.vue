@@ -7,6 +7,7 @@ import { readActiveTaskId, writeActiveTaskId } from '../lib/activeTaskStorage.js
 import { createEventSource } from '../lib/eventSource.js'
 import { createMobileDialogHistoryState, getMobileDialogHistoryState } from '../lib/mobileDialogHistory.js'
 import { createMobileTimelineHistoryState, getMobileTimelineTaskId, hasMobileTimelineHistoryState } from '../lib/mobileTimelineHistory.js'
+import { readCollapsedProjectIds, writeCollapsedProjectIds } from '../lib/projectExpansionStorage.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupTimelineTurns, isTimelineTurnRunning } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
@@ -177,6 +178,21 @@ function setProjectExpanded(projectId, expanded = true) {
   if (expanded) next.add(projectId)
   else next.delete(projectId)
   expandedProjectIds.value = next
+  persistProjectExpansion()
+}
+
+function restoreProjectExpansion() {
+  const projectIds = new Set(projects.value.map((project) => project.id))
+  const collapsedIds = readCollapsedProjectIds().filter((projectId) => projectIds.has(projectId))
+  const collapsedSet = new Set(collapsedIds)
+  expandedProjectIds.value = new Set([...projectIds].filter((projectId) => !collapsedSet.has(projectId)))
+  writeCollapsedProjectIds(collapsedIds)
+}
+
+function persistProjectExpansion() {
+  writeCollapsedProjectIds(projects.value
+    .map((project) => project.id)
+    .filter((projectId) => !expandedProjectIds.value.has(projectId)))
 }
 
 function toggleProject(projectId) {
@@ -361,7 +377,7 @@ async function loadInitial() {
     projects.value = projectTasks.map(({ project }) => project)
     providers.value = providerResult.providers
     tasksByProject.value = Object.fromEntries(projectTasks.map(({ project, tasks }) => [project.id, tasks.map((task) => taskView(task, project.id)).filter(Boolean)]))
-    expandedProjectIds.value = new Set(projects.value.map((project) => project.id))
+    restoreProjectExpansion()
     const availableTasks = Object.values(tasksByProject.value).flat()
     const historyTaskId = isMobile.value ? getMobileTimelineTaskId(window.history.state) : ''
     const restoredTaskId = [historyTaskId, readActiveTaskId()]
@@ -390,6 +406,7 @@ async function refreshProjects() {
   const projectTasks = await Promise.all((result.projects || []).map(async (project) => ({ project, ...(await v2Api.listProjectTasks(project.id)) })))
   projects.value = projectTasks.map(({ project }) => project)
   tasksByProject.value = Object.fromEntries(projectTasks.map(({ project, tasks }) => [project.id, tasks.map((task) => taskView(task, project.id)).filter(Boolean)]))
+  restoreProjectExpansion()
 
   if (!projects.value.some((project) => project.id === previousProjectId)) {
     resetTimelineSelection()
@@ -430,7 +447,6 @@ async function selectTask(id, { navigate = false } = {}) {
   if (!task) return
   if (navigate) enterMobileTimeline(id)
   activeProjectId.value = task.projectId
-  setProjectExpanded(task.projectId)
   const requestVersion = ++timelineRequestVersion
   releaseTimelineBottomPin()
   positioningTimeline = true
