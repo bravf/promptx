@@ -18,6 +18,7 @@
     "@promptx/protocol": "workspace:*",
     "better-sqlite3": "12.8.0",
     "fastify": "^5.8.2",
+    "node-pty": "^1.1.0",
     "ws": "^8.18.3",
     "zod": "^4.4.3"
   }

@@ -1,4 +1,5 @@
 import Fastify from 'fastify'
+import { registerTerminalRoutes } from './terminal/terminalService.js'
 import cors from '@fastify/cors'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
@@ -61,6 +62,7 @@ export async function createApp(options = {}) {
     agentManager,
   })
   app.decorate('sqliteRepository', repository)
+  registerTerminalRoutes(app, repository)
   repository.failActiveTurnsOnStartup()
   registerRoutes(app, {
     repository,

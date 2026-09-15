@@ -661,3 +661,104 @@ test('Timeline 拆屏保持两套独立会话、抽屉和刷新状态', async (t
   assert.equal(await page.locator('.task-timeline-pane').count(), 1)
   assert.deepEqual(failures, [])
 })
+
+test('多终端标签支持隔离、重命名、恢复且只拉取当前标签输出', async (t) => {
+  const fixture = await createFixture(t)
+  const page = await fixture.browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
+  const terminals = new Map()
+  const reads = new Map()
+  let sequence = 0
+  await page.route('**/api/v2/tasks/*/terminals**', async route => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const parts = url.pathname.split('/')
+    const taskId = parts[4], id = parts[6]
+    if (request.method() === 'GET' && !id) {
+      await route.fulfill({ json: { terminals: [...terminals.values()].filter(item => item.taskId === taskId) } })
+    } else if (request.method() === 'POST' && !id) {
+      const body = request.postDataJSON()
+      let terminal = body.ensure && [...terminals.values()].find(item => item.taskId === taskId)
+      if (!terminal) {
+        sequence++
+        terminal = { id: `terminal-${sequence}`, taskId, name: `终端 ${sequence}`, cwd: '/tmp', data: 'ready\r\n', running: true }
+        terminals.set(terminal.id, terminal)
+      }
+      await route.fulfill({ json: { terminal } })
+    } else if (request.method() === 'GET') {
+      const terminal = terminals.get(id)
+      reads.set(id, (reads.get(id) || 0) + 1)
+      await route.fulfill({ json: { ...terminal, data: terminal.data.slice(Number(url.searchParams.get('cursor'))), cursor: terminal.data.length, reset: false } })
+    } else {
+      if (request.method() === 'PATCH') Object.assign(terminals.get(id), request.postDataJSON())
+      if (parts[7] === 'input') terminals.get(id).data += request.postDataJSON().data
+      if (request.method() === 'DELETE') terminals.delete(id)
+      await route.fulfill({ json: { ok: true, terminal: terminals.get(id) } })
+    }
+  })
+  await page.goto(fixture.baseUrl)
+  await page.getByText('回归基线已经准备完成。').waitFor()
+  await page.getByRole('button', { name: '终端', exact: true }).click()
+  await page.getByRole('tab', { name: '终端 1', exact: true }).waitFor()
+  await page.getByRole('button', { name: '新建终端', exact: true }).click()
+  const second = page.getByRole('tab', { name: '终端 2', exact: true })
+  await second.waitFor()
+  assert.equal(await second.getAttribute('aria-selected'), 'true')
+  assert.equal(await page.locator('.xterm').count(), 1)
+  await page.waitForTimeout(300)
+  const inactiveReads = reads.get('terminal-1')
+  await page.waitForTimeout(1200)
+  assert.equal(reads.get('terminal-1'), inactiveReads, '后台标签不能拉取输出')
+  await page.getByRole('button', { name: '重命名终端', exact: true }).click()
+  await page.getByRole('textbox', { name: '终端名称', exact: true }).fill('前端服务')
+  await page.getByRole('textbox', { name: '终端名称', exact: true }).press('Enter')
+  await page.getByRole('tab', { name: '前端服务', exact: true }).waitFor()
+  await page.getByRole('button', { name: '收起终端（保留进程）' }).click()
+  await page.waitForTimeout(200)
+  const stoppedReads = [...reads.entries()]
+  await page.waitForTimeout(1200)
+  assert.deepEqual([...reads.entries()], stoppedReads, '收起区域后不能拉取输出')
+  await page.reload()
+  await page.getByRole('button', { name: '终端', exact: true }).click()
+  await page.getByRole('tab', { name: '前端服务', exact: true }).waitFor()
+  assert.equal(await page.getByRole('tab', { name: '前端服务', exact: true }).getAttribute('aria-selected'), 'true')
+  assert.equal(terminals.size, 2)
+  await page.getByRole('button', { name: '关闭 终端 1（结束进程）', exact: true }).click()
+  await page.getByRole('tab', { name: '终端 1', exact: true }).waitFor({ state: 'detached' })
+  assert.equal(terminals.size, 1)
+  await page.getByRole('button', { name: '拆分 Timeline', exact: true }).click()
+  await page.getByRole('link', { name: '草稿切换会话', exact: true }).click()
+  await page.locator('.task-timeline-pane').nth(1).getByRole('button', { name: '终端', exact: true }).click()
+  await page.getByRole('tab', { name: '终端 3', exact: true }).waitFor()
+  assert.equal(await page.locator('.xterm').count(), 2)
+  assert.equal(terminals.size, 2)
+})
+
+test('手机终端快捷键发送控制字符并保留输入焦点', async (t) => {
+  const fixture = await createFixture(t)
+  const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
+  const inputs = []
+  const terminal = { id: 'mobile-terminal', name: '终端 1', cwd: '/tmp', running: true }
+  await page.route('**/api/v2/tasks/*/terminals**', async route => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (url.pathname.endsWith('/input')) inputs.push(request.postDataJSON().data)
+    if (request.method() === 'GET' && url.pathname.endsWith('/terminals')) return route.fulfill({ json: { terminals: [terminal] } })
+    if (request.method() === 'GET') return route.fulfill({ json: { ...terminal, data: '', cursor: 0, reset: false } })
+    return route.fulfill({ json: { terminal, ok: true } })
+  })
+  await page.goto(fixture.baseUrl)
+  await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+  await page.getByRole('button', { name: '终端', exact: true }).click()
+  const shortcuts = page.getByRole('group', { name: '终端快捷键' })
+  await shortcuts.waitFor()
+  const cases = [['中断当前命令', '\x03'], ['补全命令', '\t'], ['退出当前模式', '\x1b'], ['光标左移', '\x1b[D'], ['下一条历史或向下', '\x1b[B'], ['上一条历史或向上', '\x1b[A'], ['光标右移', '\x1b[C']]
+  for (const [name, data] of cases) {
+    const sent = page.waitForResponse(response => response.url().endsWith('/input') && response.request().postDataJSON().data === data)
+    await shortcuts.getByRole('button', { name, exact: true }).tap()
+    await sent
+    assert.equal(await page.locator('.xterm-helper-textarea').evaluate(el => el === document.activeElement), true)
+  }
+  assert.deepEqual(inputs, cases.map(([, data]) => data))
+  const box = await shortcuts.boundingBox()
+  assert.ok(box.x >= 0 && box.x + box.width <= 390)
+})

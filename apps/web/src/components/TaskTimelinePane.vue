@@ -1,13 +1,14 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, ArrowLeft, Bot, CircleAlert, Columns2, FileDiff, Files, Info, LoaderCircle, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, Bot, CircleAlert, Columns2, FileDiff, Files, Info, LoaderCircle, TerminalSquare, X } from 'lucide-vue-next'
 import { v2Api, taskEventsUrl } from '../lib/v2Api.js'
 import { createEventSource } from '../lib/eventSource.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupTimelineTurns, isTimelineTurnRunning } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
 import AgentComposer from './AgentComposer.vue'
+const TaskTerminal = defineAsyncComponent(() => import('./TaskTerminal.vue'))
 import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
 import TimelineTurn from './TimelineTurn.vue'
@@ -46,6 +47,7 @@ const hasNewTimelineItems = ref(false)
 const timelineElement = ref(null)
 const inspectorDrawer = ref(null)
 const drawerMode = ref(null)
+const terminalOpen = ref(false)
 
 let eventSource = null
 let timelineRequestVersion = 0
@@ -526,6 +528,7 @@ function handleGlobalKeydown(event) {
 }
 
 watch(activeTaskId, (taskId) => {
+  terminalOpen.value = false
   drawerMode.value = null
   selectTask(taskId)
 }, { immediate: true })
@@ -563,6 +566,7 @@ onBeforeUnmount(() => {
       <div class="ml-auto flex shrink-0 items-center gap-1">
         <div v-if="timelineSyncing" class="timeline-sync-status theme-muted-text flex h-8 w-8 items-center justify-center" title="正在同步 Timeline" aria-label="正在同步 Timeline"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
         <div v-if="task" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
+        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="terminalOpen ? 'is-active' : ''" label="终端" :aria-pressed="terminalOpen" @click="terminalOpen = !terminalOpen"><TerminalSquare class="h-4 w-4" /></PxIconButton>
         <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :label="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></PxIconButton>
         <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :label="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></PxIconButton>
         <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'task-details' ? 'is-active' : ''" label="任务详情" :aria-pressed="drawerMode === 'task-details'" @click="toggleDrawer('task-details')"><Info class="h-4 w-4" /></PxIconButton>
@@ -601,6 +605,7 @@ onBeforeUnmount(() => {
         <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex max-w-3xl items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs"><span>{{ sendBlockedReason }}</span><PxButton variant="ghost" size="sm" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</PxButton></div>
         <AgentComposer :key="activeTaskId" :task-id="task.id" :running="isRunning" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="v2Api.cancelTask(activeTaskId)" @draft-change="saveTaskDraft" />
       </footer>
+      <TaskTerminal v-if="terminalOpen && !drawerMode" :key="task.id" :task-id="task.id" @close="terminalOpen = false" />
     </template>
 
     <div v-else class="theme-empty-state flex min-h-0 flex-1 flex-col items-center justify-center p-8 text-center">

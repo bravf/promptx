@@ -23,6 +23,8 @@ export default defineConfig({
             return undefined
           }
 
+          if (id.includes('/@xterm/')) return 'vendor-terminal'
+
           if (id.includes('/lucide-vue-next/')) {
             return 'vendor-ui'
           }
