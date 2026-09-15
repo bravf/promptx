@@ -8,9 +8,22 @@ import {
   getWorkspaceGitDiff,
   getWorkspaceGitStatus,
   listWorkspaceDirectory,
+  parseGitStatus,
   readWorkspaceFile,
   resolveWorkspaceTarget,
 } from './workspaceInspection.js'
+
+test('Git 分支状态区分未设置上游、已删除上游和提交差异', () => {
+  const local = parseGitStatus('## v2\0')
+  assert.equal(local.upstream, '')
+  const tracked = parseGitStatus('## v2...origin/v2 [ahead 2, behind 1]\0')
+  assert.equal(tracked.upstream, 'origin/v2')
+  assert.equal(tracked.ahead, 2)
+  assert.equal(tracked.behind, 1)
+  assert.equal(tracked.upstreamGone, false)
+  assert.equal(parseGitStatus('## v2...origin/v2 [gone]\0').upstreamGone, true)
+  assert.equal(parseGitStatus('## HEAD (no branch)\0').branch, 'HEAD')
+})
 
 function fixture(t, prefix = 'promptx-workspace-inspection-') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix))

@@ -37,6 +37,8 @@ export const WorkspaceGitStatusSchema = z.object({
   available: z.boolean(),
   root: z.string().optional(),
   branch: z.string(),
+  upstream: z.string().optional(),
+  upstreamGone: z.boolean().optional(),
   ahead: z.number().int().nonnegative(),
   behind: z.number().int().nonnegative(),
   files: z.array(WorkspaceGitFileSchema),

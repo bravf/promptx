@@ -207,7 +207,8 @@ function parseBranchLine(line = '') {
     .split('...')[0]
     .split(' [')[0]
     .trim()
-  return { branch: branch === 'HEAD (no branch)' ? 'HEAD' : branch, ahead, behind }
+  const upstream = value.includes('...') ? value.split('...')[1].split(' [')[0].trim() : ''
+  return { branch: branch === 'HEAD (no branch)' ? 'HEAD' : branch, upstream, upstreamGone: value.includes('[gone]'), ahead, behind }
 }
 
 function statusName(indexStatus, worktreeStatus) {
@@ -266,6 +267,8 @@ export async function getWorkspaceGitStatus(cwd) {
       available: true,
       root: gitRoot,
       branch: parsed.branch,
+      upstream: parsed.upstream,
+      upstreamGone: parsed.upstreamGone,
       ahead: parsed.ahead,
       behind: parsed.behind,
       files,
