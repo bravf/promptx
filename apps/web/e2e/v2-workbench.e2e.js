@@ -155,6 +155,13 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
     assert.equal(themeState.width, themeState.clientWidth)
   }
 
+  for (const label of ['浏览文件', '查看 Diff', '任务详情']) {
+    await desktop.getByRole('button', { name: label, exact: true }).click()
+    await desktop.locator('.workspace-inspector, .task-details-drawer').waitFor()
+    await desktop.getByRole('link', { name: '切换后的任务', exact: true }).click()
+    await desktop.locator('.workspace-inspector, .task-details-drawer').waitFor({ state: 'detached' })
+    await desktop.getByRole('link', { name: '移动端回归项目', exact: true }).click()
+  }
   await desktop.getByRole('link', { name: '切换后的任务', exact: true }).click()
   await desktop.reload({ waitUntil: 'domcontentloaded' })
   assert.equal(await desktop.getByRole('link', { name: '切换后的任务', exact: true }).getAttribute('aria-current'), 'page')
@@ -253,8 +260,7 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   assert.deepEqual(detailsBox, inspectorBox)
   assert.equal(await desktop.getByText('任务操作', { exact: true }).count(), 0)
   await desktop.getByRole('link', { name: '切换后的任务', exact: true }).click()
-  await desktop.locator('.task-details-drawer').getByRole('heading', { name: '切换后的任务', exact: true }).waitFor()
-  await desktop.getByRole('button', { name: '关闭抽屉' }).click()
+  await desktop.locator('.task-details-drawer').waitFor({ state: 'detached' })
   await desktop.getByRole('button', { name: '切换后的任务 的更多操作' }).click()
   await desktop.getByRole('menuitem', { name: '归档会话', exact: true }).click()
   await desktop.getByRole('button', { name: '归档', exact: true }).click()

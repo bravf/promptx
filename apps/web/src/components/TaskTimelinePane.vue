@@ -525,7 +525,10 @@ function handleGlobalKeydown(event) {
   if (event.key === 'Escape' && props.focused && drawerMode.value) drawerMode.value = null
 }
 
-watch(activeTaskId, (taskId) => selectTask(taskId), { immediate: true })
+watch(activeTaskId, (taskId) => {
+  drawerMode.value = null
+  selectTask(taskId)
+}, { immediate: true })
 watch(() => props.task?.lifecycle, (lifecycle, previous) => {
   if (previous === 'running' && lifecycle !== 'running') reconcileTerminalTaskTurns()
 })

@@ -318,8 +318,7 @@ test('V2 全面桌面交互回归', async (t) => {
   await page.locator('.task-details-drawer').getByRole('heading', { name: '主回归会话' }).waitFor()
   await page.getByText('3 个未提交文件', { exact: true }).waitFor()
   await page.getByRole('link', { name: '草稿切换会话', exact: true }).click()
-  await page.locator('.task-details-drawer').getByRole('heading', { name: '草稿切换会话' }).waitFor()
-  await page.locator('.task-details-drawer').getByTitle('关闭抽屉').click()
+  await page.locator('.task-details-drawer').waitFor({ state: 'detached' })
 
   const textarea = page.getByPlaceholder('向 Agent 发送消息')
   await textarea.fill('第二会话草稿')
