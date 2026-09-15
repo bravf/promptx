@@ -464,13 +464,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="v2-shell panel relative grid h-full min-h-0 overflow-hidden">
+  <div class="v2-shell relative grid h-full min-h-0 overflow-hidden">
     <div v-if="loading" class="v2-loading-skeleton absolute inset-0 z-30 grid grid-cols-[240px_minmax(0,1fr)]" role="status" aria-label="正在加载工作区">
       <div class="border-r p-3"><div class="skeleton-line h-7 w-24" /><div class="skeleton-line mt-5 h-9 w-full" /><div class="skeleton-line mt-3 h-8 w-4/5" /><div class="skeleton-line mt-2 h-8 w-3/5" /></div>
       <div class="p-4"><div class="skeleton-line h-8 w-40" /><div class="mx-auto mt-16 max-w-3xl space-y-3"><div class="skeleton-line h-12 w-3/4" /><div class="skeleton-line h-20 w-5/6" /><div class="skeleton-line h-12 w-2/3" /></div></div>
     </div>
 
-    <aside class="workspace-sidebar flex min-h-0 flex-col border-r" :class="mobileView === 'sidebar' ? 'mobile-panel-active' : 'mobile-panel-hidden'" :inert="isMobile && mobileView !== 'sidebar'" :aria-hidden="isMobile ? mobileView !== 'sidebar' : undefined">
+    <aside class="workspace-sidebar panel flex min-h-0 flex-col overflow-hidden" :class="mobileView === 'sidebar' ? 'mobile-panel-active' : 'mobile-panel-hidden'" :inert="isMobile && mobileView !== 'sidebar'" :aria-hidden="isMobile ? mobileView !== 'sidebar' : undefined">
       <header class="flex h-14 shrink-0 items-center border-b px-3">
         <div class="flex min-w-0 items-center gap-2"><div class="brand-mark flex h-7 w-7 items-center justify-center rounded-sm"><TerminalSquare class="h-4 w-4" /></div><span class="text-sm font-semibold">PromptX</span><span class="theme-muted-text text-[10px]">V2</span></div>
       </header>
@@ -569,12 +569,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.v2-shell { grid-template-columns: 240px minmax(0, 1fr); border: 0; }
+.v2-shell { --workspace-gap: 0.5rem; grid-template-columns: 240px minmax(0, 1fr); column-gap: var(--workspace-gap); border: 0; }
+.workspace-sidebar.panel { border: 0; box-shadow: inset 0 1px 0 var(--theme-panelHighlight); }
 .timeline-workspace { grid-template-columns: minmax(0, 1fr); }
 .timeline-workspace.is-split {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
-  background: var(--theme-appBg);
+  gap: var(--workspace-gap);
 }
 .v2-loading-skeleton { background: var(--theme-appPanel); color: var(--theme-textMuted); }
 .v2-loading-skeleton > div, .workspace-sidebar, .workspace-sidebar header, .workspace-sidebar footer { border-color: var(--theme-borderDefault); }
@@ -612,6 +612,7 @@ onBeforeUnmount(() => {
   .v2-loading-skeleton { display: block; }
   .v2-loading-skeleton > div:first-child { display: none; }
   .v2-shell { display: block; border: 0; border-radius: 0; }
+  .workspace-sidebar.panel { border-radius: 0; }
   .workspace-sidebar, .timeline-workspace { position: absolute; inset: 0; width: 100%; background: var(--theme-appPanel); transition: transform 220ms cubic-bezier(0.25, 0.1, 0.25, 1), opacity 180ms ease; }
   .workspace-sidebar { z-index: 1; border-right: 0; }
   .timeline-workspace { z-index: 2; display: block; }

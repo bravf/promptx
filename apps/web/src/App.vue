@@ -32,7 +32,7 @@ onBeforeUnmount(() => window.removeEventListener('promptx:global-error', handleG
       <span class="min-w-0 flex-1">{{ globalError }}</span>
       <PxIconButton class="h-6 w-6 shrink-0" size="sm" label="关闭错误提示" @click="clearGlobalError"><X class="h-3.5 w-3.5" /></PxIconButton>
     </div>
-    <main class="app-main flex min-h-0 flex-1 overflow-hidden px-3 py-3 sm:px-4 sm:py-4 lg:px-4 lg:py-4">
+    <main class="app-main flex min-h-0 flex-1 overflow-hidden p-2">
       <div class="app-stage h-full min-h-0 w-full overflow-hidden">
         <RouterView />
       </div>

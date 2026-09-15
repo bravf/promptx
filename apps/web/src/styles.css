@@ -786,18 +786,6 @@ body {
       radial-gradient(circle, rgba(245, 223, 196, 0.42) 0%, rgba(245, 223, 196, 0.18) 36%, transparent 72%);
   }
 
-  :root[data-theme='promptx-glass-light'] .app-stage::before {
-    content: '';
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    border-radius: 1rem;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 18%, transparent 82%, rgba(103, 132, 119, 0.08)),
-      linear-gradient(135deg, rgba(255, 255, 255, 0.14), transparent 28%);
-  }
-
   :root[data-theme='promptx-glass-light'] .app-stage > * {
     position: relative;
     z-index: 1;
@@ -1029,17 +1017,6 @@ body {
     background: var(--theme-shellGradient);
   }
 
-  :root[data-theme='promptx-aqua-classic'] .app-stage::before {
-    content: '';
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    border-radius: 0.75rem;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 10%, transparent 88%, rgba(72, 88, 108, 0.04));
-  }
-
   :root[data-theme='promptx-aqua-classic'] .app-stage > * {
     position: relative;
     z-index: 1;
@@ -1265,8 +1242,7 @@ body {
   }
 
   :root[data-theme='promptx-ink-landscape'] .app-shell::before,
-  :root[data-theme='promptx-ink-landscape'] .app-shell::after,
-  :root[data-theme='promptx-ink-landscape'] .app-stage::after {
+  :root[data-theme='promptx-ink-landscape'] .app-shell::after {
     content: '';
     pointer-events: none;
     position: fixed;
@@ -1298,30 +1274,6 @@ body {
     filter: blur(22px);
     opacity: 0.78;
     clip-path: polygon(0% 74%, 18% 48%, 32% 60%, 48% 34%, 60% 50%, 78% 26%, 100% 62%, 100% 100%, 0% 100%);
-  }
-
-  :root[data-theme='promptx-ink-landscape'] .app-stage::before {
-    content: '';
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    border-radius: 1rem;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent 14%, transparent 84%, rgba(95, 105, 108, 0.04)),
-      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 22px),
-      repeating-linear-gradient(0deg, rgba(78, 86, 90, 0.016) 0 1px, transparent 1px 18px);
-  }
-
-  :root[data-theme='promptx-ink-landscape'] .app-stage::after {
-    right: 8vw;
-    top: 5rem;
-    width: min(20rem, 24vw);
-    height: 20rem;
-    border-radius: 9999px;
-    background: radial-gradient(circle, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.06) 28%, transparent 66%);
-    filter: blur(10px);
-    opacity: 0.65;
   }
 
   :root[data-theme='promptx-ink-landscape'] .app-stage > * {

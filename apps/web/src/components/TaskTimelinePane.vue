@@ -546,7 +546,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section
-    class="task-timeline-pane relative flex min-h-0 min-w-0 flex-col"
+    class="task-timeline-pane panel relative flex min-h-0 min-w-0 flex-col overflow-hidden"
     :class="{ 'is-focused': focused, 'is-split': splitEnabled }"
     @pointerdown.capture="emit('focus')"
   >
@@ -617,8 +617,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.task-timeline-pane { background: var(--theme-appPanel); }
-.task-timeline-pane.is-split { overflow: hidden; }
+.task-timeline-pane.panel { border: 0; box-shadow: inset 0 1px 0 var(--theme-panelHighlight); }
 .task-timeline-pane.is-split.is-focused .pane-title { color: var(--theme-accent); }
 .task-timeline-pane > header, .composer-wrap { border-color: var(--theme-borderDefault); }
 .task-timeline-pane :deep(.workspace-inspector), .task-timeline-pane :deep(.task-details-drawer) { bottom: 0; left: 0; position: absolute; right: 0; top: 3.5rem; z-index: 20; }
@@ -654,6 +653,7 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 720px) {
   .task-timeline-pane { position: absolute; inset: 0; width: 100%; }
+  .task-timeline-pane.panel { border-radius: 0; }
   .status-text { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
