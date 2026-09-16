@@ -8,7 +8,7 @@ function nowIso() {
 }
 
 export class AgentManager {
-  constructor({ repository, timelineStore, providerRegistry, eventHub }) {
+  constructor({ repository, timelineStore, providerRegistry, eventHub, assetsDir }) {
     this.repository = repository
     this.timelineStore = timelineStore
     this.providerRegistry = providerRegistry
@@ -20,6 +20,7 @@ export class AgentManager {
     this.controlStates = new Map()
     this.coalescer = new TimelineCoalescer((payload) => this.commitTimeline(payload))
     this.timelineSync = new TimelineSyncCoordinator({
+      assetsDir,
       repository,
       timelineStore,
       eventHub,

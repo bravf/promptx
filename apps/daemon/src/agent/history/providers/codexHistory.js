@@ -26,7 +26,11 @@ function userContent(content = []) {
   const result = []
   for (const block of content) {
     if (block?.type === 'text' && block.text) result.push({ type: 'text', text: block.text })
-    else if (block?.type === 'localImage' && block.path) result.push({ type: 'text', text: `[图片] ${block.path}` })
+    else if (block?.type === 'localImage' && block.path) result.push({ type: 'history_image', source: block.path })
+    else if (['image', 'input_image'].includes(block?.type)) {
+      const source = block.imageUrl || block.image_url?.url || block.image_url || block.url
+      if (typeof source === 'string') result.push({ type: 'history_image', source })
+    }
   }
   return result
 }
@@ -137,11 +141,12 @@ function addRolloutItem(turn, item, timestamp) {
 
 function addRolloutMessage(turn, id, role, content, phase, timestamp) {
   const text = rolloutText(content)
-  if (!id || !text || !['user', 'assistant'].includes(role)) return
+  const blocks = Array.isArray(content) ? content.map(block => block?.type === 'input_text' ? { type: 'text', text: block.text } : block) : [{ type: 'text', text }]
+  if (!id || (!text && !userContent(blocks).length) || !['user', 'assistant'].includes(role)) return
   addRolloutItem(turn, {
     id,
     type: role === 'user' ? 'userMessage' : 'agentMessage',
-    ...(role === 'user' ? { client_id: id, content: [{ type: 'text', text }] } : { phase, text }),
+    ...(role === 'user' ? { client_id: id, content: blocks } : { phase, text }),
   }, timestamp)
 }
 
@@ -221,7 +226,11 @@ export function mapCodexRolloutSnapshot(thread, content, revision = '') {
     }
     if (eventType === 'user_message' || eventType === 'agent_message') {
       const turn = getTurn(payload.turn_id, timestamp)
-      const message = payload.message
+      const message = eventType === 'user_message'
+        ? [{ type: 'text', text: rolloutText(payload.message) },
+            ...(payload.local_images || []).map(path => ({ type: 'localImage', path })),
+            ...(payload.images || []).map(image => typeof image === 'string' ? { type: 'image', image_url: image } : image)]
+        : payload.message
       addRolloutMessage(turn, `${turn.sourceTurnId}:${eventType}:${turn.items.length}`, eventType === 'user_message' ? 'user' : 'assistant',
         message, payload.phase, timestamp)
       continue

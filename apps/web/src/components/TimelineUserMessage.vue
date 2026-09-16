@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight, FileText, ImageOff, LoaderCircle, RotateCw, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
+import { importedMessageText } from '../lib/importedMessageText.js'
 import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
 
@@ -20,8 +21,9 @@ const assetUrls = ref({})
 const assetStates = ref({})
 let assetLoadVersion = 0
 let assetLoadController = null
-const text = computed(() => props.content.filter((block) => block.type === 'text').map((block) => block.text).join('\n'))
+const text = computed(() => importedMessageText(props.content))
 const attachments = computed(() => props.content.filter((block) => block.type !== 'text'))
+const files = computed(() => attachments.value.filter((block) => block.type === 'file'))
 
 function formatBytes(value) {
   const size = Number(value || 0)
@@ -150,10 +152,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="user-message max-w-[85%] rounded-sm px-3 py-2 text-sm">
-    <div v-if="text" class="whitespace-pre-wrap">{{ text }}</div>
-    <div v-if="attachments.length" class="flex flex-wrap gap-2" :class="text ? 'mt-2' : ''">
+    <div v-if="images.length" class="flex flex-wrap gap-2">
       <PxButton
-        v-for="block in attachments.filter((item) => item.type === 'image')"
+        v-for="block in images"
         :key="block.assetId"
         variant="ghost"
         size="md"
@@ -182,7 +183,10 @@ onBeforeUnmount(() => {
           <span class="flex items-center gap-1 text-[10px]"><RotateCw class="h-3 w-3" />重试</span>
         </span>
       </PxButton>
-      <a v-for="block in attachments.filter((item) => item.type === 'file')" :key="block.assetId" class="message-file flex min-w-0 max-w-64 items-center gap-2 rounded-sm px-2 py-1.5" :href="assetUrls[block.assetId] || undefined" :download="block.name">
+    </div>
+    <div v-if="text" class="whitespace-pre-wrap" :class="images.length ? 'mt-2' : ''">{{ text }}</div>
+    <div v-if="files.length" class="flex flex-wrap gap-2" :class="images.length || text ? 'mt-2' : ''">
+      <a v-for="block in files" :key="block.assetId" class="message-file flex min-w-0 max-w-64 items-center gap-2 rounded-sm px-2 py-1.5" :href="assetUrls[block.assetId] || undefined" :download="block.name">
         <FileText class="h-4 w-4 shrink-0" />
         <span class="min-w-0"><span class="block truncate text-xs font-medium">{{ block.name }}</span><span class="theme-muted-text block text-[10px]">{{ formatBytes(block.size) }}</span></span>
       </a>

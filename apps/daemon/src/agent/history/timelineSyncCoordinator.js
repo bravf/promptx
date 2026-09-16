@@ -1,4 +1,5 @@
 import { reconcileHistory } from './historyReconciler.js'
+import { materializeHistoryImages } from './historyImages.js'
 import { assertHistorySnapshot, HISTORY_RECONCILER_VERSION } from './historySnapshot.js'
 
 const DEFAULT_CONFIRM_RETRY_DELAYS = [500, 1_000, 2_000, 5_000]
@@ -7,6 +8,7 @@ const DEFAULT_SYNC_FRESHNESS_MS = 1_000
 export class TimelineSyncCoordinator {
   constructor({
     repository,
+    assetsDir,
     timelineStore,
     eventHub,
     getRuntime,
@@ -15,6 +17,7 @@ export class TimelineSyncCoordinator {
     syncFreshnessMs = DEFAULT_SYNC_FRESHNESS_MS,
   }) {
     this.repository = repository
+    this.assetsDir = assetsDir
     this.timelineStore = timelineStore
     this.eventHub = eventHub
     this.getRuntime = getRuntime
@@ -166,6 +169,9 @@ export class TimelineSyncCoordinator {
       throw error
     }
 
+    if (agent.providerId === 'codex') {
+      await materializeHistoryImages(snapshot, { taskId: agent.taskId, assetsDir: this.assetsDir, repository: this.repository })
+    }
     const checkedTurnIds = [...operation.checkedTurnIds]
     const plan = reconcileHistory({
       snapshot,
