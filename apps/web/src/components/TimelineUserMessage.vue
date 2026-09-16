@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { FileText, ImageOff, LoaderCircle, RotateCw, X } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { ChevronLeft, ChevronRight, FileText, ImageOff, LoaderCircle, RotateCw, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
 import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
@@ -10,6 +10,10 @@ const props = defineProps({
 })
 
 const preview = ref(null)
+const previewElement = ref(null)
+let previousFocus = null
+const images = computed(() => attachments.value.filter(block => block.type === 'image'))
+const previewIndex = computed(() => images.value.indexOf(preview.value))
 const previewLoading = ref(false)
 const previewError = ref(false)
 const assetUrls = ref({})
@@ -77,15 +81,52 @@ function handleImageClick(block) {
     return
   }
   if (state !== 'ready') return
+  if (!preview.value) previousFocus = document.activeElement
+  showPreview(block)
+  nextTick(() => previewElement.value?.focus())
+}
+
+function showPreview(block) {
   preview.value = block
   previewLoading.value = true
   previewError.value = false
 }
 
+function movePreview(direction) {
+  const index = previewIndex.value + direction
+  if (index < 0 || index >= images.value.length) return
+  const block = images.value[index]
+  showPreview(block)
+  if (assetStates.value[block.assetId] === 'error') loadAsset(block)
+}
+
+function handlePreviewKey(event) {
+  if (!preview.value || !['Escape', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  if (event.key === 'Escape') closePreview()
+  else movePreview(event.key === 'ArrowLeft' ? -1 : 1)
+}
+
+watch(preview, value => {
+  if (value) window.addEventListener('keydown', handlePreviewKey, true)
+  else window.removeEventListener('keydown', handlePreviewKey, true)
+}, { flush: 'sync' })
+
+watch(() => preview.value && assetStates.value[preview.value.assetId], state => {
+  if (state === 'error') {
+    previewLoading.value = false
+    previewError.value = true
+  }
+})
+
 function closePreview() {
+  const wasOpen = Boolean(preview.value)
   preview.value = null
   previewLoading.value = false
   previewError.value = false
+  if (wasOpen && previousFocus?.isConnected) previousFocus.focus()
+  previousFocus = null
 }
 
 watch(attachments, (blocks) => {
@@ -100,6 +141,7 @@ watch(attachments, (blocks) => {
 }, { immediate: true })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handlePreviewKey, true)
   assetLoadVersion += 1
   assetLoadController?.abort()
   revokeAssetUrls()
@@ -147,9 +189,15 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="preview" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-6" @click.self="closePreview">
+  <Teleport to="body">
+  <div v-if="preview" ref="previewElement" role="dialog" aria-modal="true" aria-label="图片预览" tabindex="-1" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-6" @click.self="closePreview">
     <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 h-9 w-9" label="关闭预览" @click="closePreview"><X class="h-4 w-4" /></PxIconButton>
-    <div v-if="previewLoading" class="theme-muted-text absolute inset-0 flex items-center justify-center gap-2 text-xs">
+    <template v-if="images.length > 1">
+      <PxIconButton variant="secondary" class="image-preview-overlay__button absolute left-3 top-1/2 z-10 h-9 w-9 -translate-y-1/2" label="上一张图片" :disabled="previewIndex <= 0" @click="movePreview(-1)"><ChevronLeft class="h-4 w-4" /></PxIconButton>
+      <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-3 top-1/2 z-10 h-9 w-9 -translate-y-1/2" label="下一张图片" :disabled="previewIndex >= images.length - 1" @click="movePreview(1)"><ChevronRight class="h-4 w-4" /></PxIconButton>
+      <span class="image-preview-overlay__button absolute bottom-3 rounded-sm px-2 py-1 text-xs" aria-live="polite">{{ previewIndex + 1 }} / {{ images.length }}</span>
+    </template>
+    <div v-if="previewLoading" class="theme-muted-text pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-xs">
       <LoaderCircle class="h-4 w-4 animate-spin" />
       <span>正在加载大图</span>
     </div>
@@ -158,6 +206,8 @@ onBeforeUnmount(() => {
       <span>图片加载失败</span>
     </div>
     <img
+      v-if="assetUrls[preview.assetId]"
+      :key="preview.assetId"
       v-show="!previewError"
       :src="assetUrls[preview.assetId]"
       :alt="preview.name"
@@ -167,6 +217,7 @@ onBeforeUnmount(() => {
       @error="previewLoading = false; previewError = true"
     />
   </div>
+  </Teleport>
 </template>
 
 <style scoped>

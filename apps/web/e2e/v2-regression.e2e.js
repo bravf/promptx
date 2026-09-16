@@ -762,3 +762,30 @@ test('手机终端快捷键发送控制字符并保留输入焦点', async (t) =
   const box = await shortcuts.boundingBox()
   assert.ok(box.x >= 0 && box.x + box.width <= 390)
 })
+
+test('同一条消息的图片预览支持方向键、边界和 Esc 关闭', async (t) => {
+  const fixture = await createFixture(t)
+  const page = await fixture.browser.newPage({ viewport: { width: 1440, height: 900 } })
+  await page.goto(fixture.baseUrl)
+  await page.getByText('回归基线已经准备完成。').waitFor()
+  await page.locator('input[type="file"]').setInputFiles([
+    { name: 'first.png', mimeType: 'image/png', buffer: png },
+    { name: 'second.png', mimeType: 'image/png', buffer: png },
+  ])
+  await page.getByText('second.png', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  const first = page.locator('.message-image[title="first.png"]')
+  await first.click()
+  const preview = page.getByRole('dialog', { name: '图片预览' })
+  await preview.getByAltText('first.png').waitFor()
+  await page.keyboard.press('ArrowRight')
+  await preview.getByAltText('second.png').waitFor()
+  assert.equal(await preview.getByRole('button', { name: '下一张图片' }).isDisabled(), true)
+  await page.keyboard.press('ArrowRight')
+  await preview.getByAltText('second.png').waitFor()
+  await page.keyboard.press('ArrowLeft')
+  await preview.getByAltText('first.png').waitFor()
+  await page.keyboard.press('Escape')
+  await preview.waitFor({ state: 'detached' })
+  assert.equal(await first.evaluate(el => el === document.activeElement), true)
+})
