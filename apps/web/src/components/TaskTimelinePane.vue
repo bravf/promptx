@@ -559,8 +559,8 @@ onBeforeUnmount(() => {
     <header class="timeline-header flex h-14 shrink-0 items-center gap-2 border-b px-3">
       <PxIconButton v-if="mobile" class="h-8 w-8" label="返回项目列表" @click="emit('back')"><ArrowLeft class="h-4 w-4" /></PxIconButton>
       <div v-if="task" class="pane-heading min-w-0 flex-1" :title="task.title">
-        <span class="pane-title block truncate text-xs font-medium">{{ splitEnabled ? task.title : projectDirectoryName }}</span>
-        <span v-if="splitEnabled" class="theme-muted-text block truncate text-[9px]">{{ projectDirectoryName }}</span>
+        <span class="pane-title block truncate text-xs font-medium">{{ task.title }}</span>
+        <span class="theme-muted-text block truncate text-[9px]">{{ projectDirectoryName }}</span>
       </div>
       <div v-else class="theme-muted-text min-w-0 flex-1 truncate text-xs">选择会话</div>
       <div class="ml-auto flex shrink-0 items-center gap-1">
