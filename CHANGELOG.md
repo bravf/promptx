@@ -4,6 +4,7 @@
 
 - 抽出通用 ACP Runtime：`createAcpProvider()` 用命令、参数和历史适配器注册 Agent，Kimi 改为配置接入。
 - 接入 Grok：本机 `grok agent stdio` 作为第四个 Provider，支持新建会话、取消、Timeline，以及从 `~/.grok/sessions` 导入已有会话。
+- 清理 V1 残留：删除已无源码的 `apps/server`、`apps/runner` 空目录及其本地依赖，并从 `.gitignore` 去掉对应路径。
 
 ## 0.2.19
 

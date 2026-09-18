@@ -8,9 +8,6 @@ coverage
 /data
 /uploads
 /tmp
-apps/server/data
-apps/server/uploads
-apps/server/tmp
 data
 uploads
 tmp
