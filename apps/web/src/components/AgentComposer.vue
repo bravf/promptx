@@ -299,7 +299,7 @@ onBeforeUnmount(() => {
         <input ref="fileInput" class="hidden" type="file" multiple @change="handleFileInput" />
         <PxIconButton class="composer-control-button h-7 w-7" label="添加图片或文件" :disabled="running || attachments.length >= MAX_ATTACHMENTS" @click="chooseFiles"><Paperclip class="h-4 w-4" /></PxIconButton>
         <span v-if="dragging" class="theme-muted-text text-[10px]">松开以添加附件</span>
-        <div v-if="control?.models?.length" class="composer-select-wrap model-select min-w-0 max-w-48">
+        <div v-if="control?.models?.length" class="composer-select-wrap model-select min-w-0 max-w-48 rounded-full">
           <PxSelect
             :model-value="control.currentModelId"
             :options="modelOptions"
@@ -310,7 +310,7 @@ onBeforeUnmount(() => {
             @update:model-value="changeSetting($event, 'modelId')"
           />
         </div>
-        <div v-if="control?.reasoningEfforts?.length" class="effort-control relative min-w-0 rounded-full">
+        <div v-if="control?.reasoningEfforts?.length" class="composer-select-wrap effort-control relative min-w-0 rounded-full">
           <Brain class="theme-muted-text pointer-events-none absolute left-1.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2" />
           <PxSelect
             class="effort-select"
