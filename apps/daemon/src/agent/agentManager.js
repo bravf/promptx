@@ -221,8 +221,8 @@ export class AgentManager {
       const nextControl = await runtime.updateSettings({ modelId, reasoningEffort })
       const current = this.repository.getAgent(agentId)
       const updated = this.repository.updateAgent(agentId, {
-        modelId,
-        config: { ...current.config, reasoningEffort },
+        modelId: nextControl.currentModelId,
+        config: { ...current.config, reasoningEffort: nextControl.currentReasoningEffort },
       })
       this.controlStates.set(agentId, nextControl)
       this.eventHub.publish(agentId, { type: 'agent', agent: updated })

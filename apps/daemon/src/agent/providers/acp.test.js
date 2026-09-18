@@ -7,6 +7,43 @@ import { ProviderRegistry } from '../providerRegistry.js'
 import { projectTimelineRows } from '../../../../../packages/protocol/src/timelineProjection.js'
 import { mapGrokHistorySnapshot } from '../history/providers/grokHistorySnapshot.js'
 
+test('ACP 跨模型切换先同步新选项，无强度模型清空旧值，切回后恢复并设置强度', async () => {
+  const runtime = grokProvider.createRuntime()
+  const options = (model, effort = 'high') => [
+    { id: 'model', category: 'model', type: 'select', currentValue: model, options: ['thinking', 'build'].map(value => ({ value, name: value })) },
+    ...(model === 'thinking' ? [{ id: 'effort', category: 'thought_level', type: 'select', currentValue: effort, options: ['low', 'high'].map(value => ({ value, name: value })) }] : []),
+  ]
+  runtime.sessionControls = {
+    models: { currentModelId: 'thinking', availableModels: ['thinking', 'build'].map(modelId => ({ modelId })) },
+    configOptions: options('thinking'),
+  }
+  runtime.refreshControlState()
+  runtime.connected = true
+  const requests = []
+  runtime.connection = {
+    unstable_setSessionModel: async () => assert.fail('有配置接口时不应使用旧版模型接口'),
+    setSessionConfigOption: async ({ configId, value }) => {
+      requests.push([configId, value])
+      const configOptions = configId === 'model' ? options(value) : options('thinking', value)
+      runtime.onSessionUpdate({ sessionUpdate: 'config_option_update', configOptions })
+      return { configOptions }
+    },
+  }
+  try {
+    const build = await runtime.updateSettings({ modelId: 'build', reasoningEffort: 'low' })
+    assert.equal(build.currentReasoningEffort, '')
+    assert.deepEqual(build.reasoningEfforts, [])
+    assert.deepEqual(requests, [['model', 'build']])
+    const thinking = await runtime.updateSettings({ modelId: 'thinking', reasoningEffort: 'low' })
+    assert.equal(thinking.currentModelId, 'thinking')
+    assert.equal(thinking.currentReasoningEffort, 'low')
+    assert.deepEqual(requests.slice(1), [['model', 'thinking'], ['effort', 'low']])
+    runtime.connection.setSessionConfigOption = async () => { throw new Error('Provider 拒绝设置') }
+    await assert.rejects(runtime.updateSettings({ reasoningEffort: 'high' }), /Provider 拒绝/)
+    assert.equal(runtime.controlState.currentReasoningEffort, 'low')
+  } finally { runtime.close() }
+})
+
 test('ACP 实时与 Grok 历史对同一工具事件序列生成相同结果', () => {
   const runtime = new AcpRuntime()
   let latest

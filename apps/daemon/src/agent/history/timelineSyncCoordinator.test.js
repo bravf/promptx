@@ -19,6 +19,25 @@ function snapshot() {
   }
 }
 
+test('未创建原生会话的空 Timeline 同步正常，已有原生会话仍报告历史不可用', async () => {
+  let reads = 0
+  const coordinator = new TimelineSyncCoordinator({
+    repository: {
+      getTimelineState: () => ({ epoch: 'empty', nextSeq: 1 }),
+      getTimelineSyncState: () => null,
+      listTurns: () => [],
+    },
+    eventHub: { publish() {} },
+    getRuntime: () => ({ readHistorySnapshot: async () => { reads += 1; return { status: 'unavailable' } } }),
+  })
+  const agent = { id: 'a', taskId: 't', nativeHandle: {} }
+  assert.equal((await coordinator.sync(agent)).status, 'synced')
+  assert.equal(reads, 0)
+  assert.equal((await coordinator.sync({ ...agent, nativeHandle: { threadId: 'existing' } }, { force: true })).status, 'unavailable')
+  assert.equal(reads, 1)
+  await coordinator.shutdown()
+})
+
 test('多个页面同时同步同一 Agent 时共享同一次读取', async () => {
   const firstRead = deferred()
   let reads = 0

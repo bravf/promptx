@@ -136,6 +136,12 @@ export class TimelineSyncCoordinator {
     const beforeState = this.repository.getTimelineState(agent.taskId)
     const syncState = this.repository.getTimelineSyncState(agent.taskId)
     const runtime = this.getRuntime(agent)
+    // 新建但尚未发送消息的会话没有 Provider 历史，不代表不支持同步。
+    const hasNativeSource = Boolean(agent.nativeHandle?.threadId || agent.nativeHandle?.sessionId || runtime.threadId || runtime.sessionId)
+    if (!hasNativeSource && !syncState && beforeState?.nextSeq === 1
+      && !operation.checkedTurnIds.size && !this.repository.listTurns(agent.taskId, 1).length) {
+      return this.publishSynced(agent.id, agent.taskId)
+    }
     if (typeof runtime.readHistorySnapshot !== 'function') {
       return this.publishSynced(agent.id, agent.taskId, { status: 'unsupported' })
     }

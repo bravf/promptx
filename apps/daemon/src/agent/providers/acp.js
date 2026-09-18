@@ -39,8 +39,8 @@ export function normalizeAcpControls({ models: modelState, configOptions = [] } 
     label: option.name || effortLabel(option.value),
     description: option.description || '',
   }))
-  const currentModelId = requestedModelId || modelState?.currentModelId || modelConfig?.currentValue || ''
-  const currentReasoningEffort = requestedReasoningEffort || thoughtConfig?.currentValue || ''
+  const currentModelId = modelConfig?.currentValue || modelState?.currentModelId || requestedModelId || ''
+  const currentReasoningEffort = reasoningEfforts.length ? (thoughtConfig?.currentValue || requestedReasoningEffort) : ''
   return createControlState({
     models: modelItems.map((model) => ({ ...model, reasoningEfforts })),
     requestedModelId: currentModelId,
@@ -178,27 +178,37 @@ export class AcpRuntime extends EventEmitter {
   }
 
   async applyStoredSettings() {
+    const requestedModelId = this.modelId
+    const requestedEffort = this.reasoningEffort
     const { models, configOptions } = this.sessionControls
     const modelConfig = findConfigOption(configOptions, 'model')
-    const currentModelId = models?.currentModelId || modelConfig?.currentValue || ''
-    if (this.modelId && this.modelId !== currentModelId) {
-      if (models?.availableModels?.some((model) => model.modelId === this.modelId)) {
-        await this.connection.unstable_setSessionModel({ sessionId: this.sessionId, modelId: this.modelId })
-        this.sessionControls.models = { ...models, currentModelId: this.modelId }
-      } else if (modelConfig) {
-        const result = await this.connection.setSessionConfigOption({ sessionId: this.sessionId, configId: modelConfig.id, value: this.modelId })
-        this.sessionControls.configOptions = result.configOptions || this.sessionControls.configOptions
+    const currentModelId = modelConfig?.currentValue || models?.currentModelId || ''
+    if (requestedModelId && requestedModelId !== currentModelId) {
+      // 优先使用返回完整选项的配置接口，避免旧模型的强度配置残留。
+      if (modelConfig) {
+        const result = await this.connection.setSessionConfigOption({ sessionId: this.sessionId, configId: modelConfig.id, value: requestedModelId })
+        this.sessionControls.configOptions = result.configOptions || []
+      } else if (models?.availableModels?.some((model) => model.modelId === requestedModelId)) {
+        this.sessionControls.configOptions = []
+        await this.connection.unstable_setSessionModel({ sessionId: this.sessionId, modelId: requestedModelId })
       }
+      if (models) this.sessionControls.models = { ...models, currentModelId: requestedModelId }
     }
     const thoughtConfig = findConfigOption(this.sessionControls.configOptions, 'thought_level')
-    if (this.reasoningEffort && thoughtConfig && this.reasoningEffort !== thoughtConfig.currentValue) {
+    const efforts = flattenAcpOptions(thoughtConfig ? [thoughtConfig] : [])
+    const effort = efforts.some(option => option.value === requestedEffort)
+      ? requestedEffort
+      : (thoughtConfig?.currentValue || efforts[0]?.value || '')
+    if (effort && thoughtConfig && effort !== thoughtConfig.currentValue) {
       const result = await this.connection.setSessionConfigOption({
         sessionId: this.sessionId,
         configId: thoughtConfig.id,
-        value: this.reasoningEffort,
+        value: effort,
       })
       this.sessionControls.configOptions = result.configOptions || this.sessionControls.configOptions
     }
+    this.modelId = findConfigOption(this.sessionControls.configOptions, 'model')?.currentValue || this.sessionControls.models?.currentModelId || requestedModelId
+    this.reasoningEffort = findConfigOption(this.sessionControls.configOptions, 'thought_level')?.currentValue || ''
   }
 
   refreshControlState() {
@@ -241,14 +251,23 @@ export class AcpRuntime extends EventEmitter {
     if (modelId !== this.modelId && (!this.capabilities.models || !this.controlState.models.some(model => model.id === modelId))) {
       throw new Error('该 ACP Agent 不支持所选模型。')
     }
-    if (reasoningEffort !== this.reasoningEffort && (!this.capabilities.reasoningEffort || !this.controlState.reasoningEfforts.some(effort => effort.id === reasoningEffort))) {
+    if (modelId === this.modelId && reasoningEffort !== this.reasoningEffort && (!this.capabilities.reasoningEffort || !this.controlState.reasoningEfforts.some(effort => effort.id === reasoningEffort))) {
       throw new Error('该 ACP Agent 不支持所选思考强度。')
     }
     this.modelId = modelId
     this.reasoningEffort = reasoningEffort
-    await this.applyStoredSettings()
-    this.refreshControlState()
-    this.persistSessionControls()
+    this.updatingSettings = true
+    try {
+      await this.applyStoredSettings()
+    } catch (error) {
+      this.modelId = findConfigOption(this.sessionControls.configOptions, 'model')?.currentValue || this.sessionControls.models?.currentModelId || ''
+      this.reasoningEffort = findConfigOption(this.sessionControls.configOptions, 'thought_level')?.currentValue || ''
+      throw error
+    } finally {
+      this.updatingSettings = false
+      this.refreshControlState()
+      this.persistSessionControls()
+    }
     return this.controlState
   }
 
@@ -305,6 +324,7 @@ export class AcpRuntime extends EventEmitter {
       this.emit('controlState', this.controlState)
     } else if (update.sessionUpdate === 'config_option_update') {
       this.sessionControls.configOptions = update.configOptions || []
+      if (this.updatingSettings) return
       this.refreshControlState()
       this.persistSessionControls()
     } else if (update.sessionUpdate === 'agent_message_chunk') {
