@@ -14,8 +14,8 @@ Each workspace maps to a real directory and may contain multiple Codex, Claude, 
 
 ## Features
 
-- Codex, Claude Code, and Kimi Code providers.
-- Import existing local sessions from all three providers.
+- Codex, Claude Code, Kimi Code, and Grok providers.
+- Import existing local sessions from these providers.
 - Live user messages, reasoning, tool activity, and final replies.
 - In-memory drafts per conversation; drafts survive switching conversations but not a page reload.
 - Workspace file browsing and staged, unstaged, or untracked Git diffs.
@@ -27,7 +27,7 @@ Each workspace maps to a real directory and may contain multiple Codex, Claude, 
 Requirements:
 
 - Node 22 LTS is recommended. Node 20.19+, 22.13+, and 24.x are supported.
-- Install at least one supported provider CLI: `codex`, `claude`, or `kimi`.
+- Install at least one supported provider CLI: `codex`, `claude`, `kimi`, or `grok`.
 
 ```bash
 npm install -g @muyichengshayu/promptx

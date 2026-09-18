@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { AcpRuntime } from './acp.js'
+import { grokProvider } from './grok.js'
 import { ClaudeRuntime } from './claude.js'
 import { CodexRuntime } from './codex.js'
 
@@ -95,8 +96,38 @@ test('ACP 将 thought 放入过程，将 agent message 标记为最终回复', (
   runtime.onSessionUpdate({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '正在分析。' } })
   runtime.onSessionUpdate({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '分析完成。' } })
 
-  assert.deepEqual(items.map((item) => [item.type, item.phase]), [
+  assert.deepEqual(items.map((item) => [item.type, item.phase || item.code]), [
     ['reasoning', undefined],
     ['assistant_message', 'final_answer'],
   ])
+})
+
+test('ACP 扩展 session/update 通知会校验方法与会话后转发', async () => {
+  const runtime = grokProvider.createRuntime({ cwd: process.cwd() })
+  const holder = { connection: {} }
+  runtime.sessionId = 'session-1'
+  runtime.connection = holder.connection
+  runtime.acceptUpdates = true
+  const items = []
+  runtime.on('timeline', (item) => items.push(item))
+  const client = runtime.createClientDelegate(holder)
+
+  await client.extNotification('_x.ai/session/update', {
+    sessionId: 'session-other',
+    update: { sessionUpdate: 'retry_state', type: 'retrying', reason: '其他会话' },
+  })
+  await client.extNotification('session/log', {
+    sessionId: 'session-1',
+    update: { sessionUpdate: 'retry_state', type: 'retrying', reason: '非更新方法' },
+  })
+  await client.extNotification('_x.ai/session/update', {
+    sessionId: 'session-1',
+    update: { sessionUpdate: 'retry_state', type: 'retrying', reason: '模型服务连接异常，正在自动重试。' },
+  })
+
+  assert.deepEqual(items, [{
+    type: 'system_notice',
+    code: 'provider_retrying',
+    text: '模型服务连接异常，正在自动重试。',
+  }])
 })

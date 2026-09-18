@@ -1,6 +1,6 @@
 # V2 Agent 与 Timeline 协议
 
-本文说明 PromptX V2 如何把 Codex、Claude 和 ACP/Kimi 的原生事件统一为前端可消费、SQLite 可持久化的 Timeline。完整领域模型见 [V2 架构基线](./v2-architecture-baseline.md)。
+本文说明 PromptX V2 如何把 Codex、Claude 和 ACP（Kimi、Grok）的原生事件统一为前端可消费、SQLite 可持久化的 Timeline。完整领域模型见 [V2 架构基线](./v2-architecture-baseline.md)。
 
 ## 边界
 
@@ -88,6 +88,8 @@ Provider 历史是跨客户端会话内容的来源，本地 SQLite 是 PromptX 
 - 同步协调：`apps/daemon/src/agent/history/timelineSyncCoordinator.js`
 - Codex：`apps/daemon/src/agent/providers/codex.js`
 - Claude：`apps/daemon/src/agent/providers/claude.js`
-- ACP/Kimi：`apps/daemon/src/agent/providers/acp.js`
+- ACP Runtime：`apps/daemon/src/agent/providers/acp.js`
+- Kimi：`apps/daemon/src/agent/providers/kimi.js`
+- Grok：`apps/daemon/src/agent/providers/grok.js`
 - API 与 SSE：`apps/daemon/src/api/routes.js`
 - 前端：`apps/web/src/views/WorkbenchView.vue`

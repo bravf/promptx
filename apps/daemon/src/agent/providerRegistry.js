@@ -1,9 +1,10 @@
 import { codexProvider } from './providers/codex.js'
 import { claudeProvider } from './providers/claude.js'
-import { kimiProvider } from './providers/acp.js'
+import { kimiProvider } from './providers/kimi.js'
+import { grokProvider } from './providers/grok.js'
 
 export class ProviderRegistry {
-  constructor(providers = [codexProvider, claudeProvider, kimiProvider]) {
+  constructor(providers = [codexProvider, claudeProvider, kimiProvider, grokProvider]) {
     this.providers = new Map(providers.map((provider) => [provider.id, provider]))
   }
 

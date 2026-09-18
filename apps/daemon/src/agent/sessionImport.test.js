@@ -110,3 +110,32 @@ test('导入 linked worktree 会话时归属主仓库项目', async () => {
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('ACP Provider 可通过 listHistorySessions 扫描导入列表', async () => {
+  const db = openDatabase(':memory:')
+  const repository = createRepository(db)
+  let scans = 0
+  const grok = {
+    id: 'grok',
+    label: 'Grok',
+    capabilities: { protocol: 'acp' },
+    listHistorySessions: async () => {
+      scans += 1
+      return [{ providerId: 'grok', providerHandleId: 'session-1', title: 'Grok 会话', cwd: process.cwd() }]
+    },
+  }
+  const service = new SessionImportService({
+    repository,
+    providerRegistry: { list: () => [{ id: grok.id, label: grok.label }], get: () => grok },
+    agentManager: { syncTimeline: async () => ({ status: 'synced' }), close() {} },
+    cacheTtlMs: 10_000,
+  })
+  try {
+    const result = await service.list({ providerId: 'grok' })
+    assert.equal(scans, 1)
+    assert.equal(result.sessions[0].providerId, 'grok')
+    assert.equal(result.sessions[0].providerHandleId, 'session-1')
+  } finally {
+    db.close()
+  }
+})

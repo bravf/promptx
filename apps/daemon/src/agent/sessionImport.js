@@ -1,43 +1,5 @@
-import { JsonRpcProcess } from './jsonRpcProcess.js'
 import fs from 'node:fs'
-import { listClaudeHistorySessions } from './history/providers/claudeHistory.js'
-import { listKimiHistorySessions } from './history/providers/kimiHistory.js'
 import { repositoryContext, defaultBranch } from '../environments/worktreeService.js'
-import { CODEX_BIN } from './providers/codexCli.js'
-
-function unixSecondsToIso(value) {
-  if (!Number.isFinite(Number(value))) return ''
-  return new Date(Number(value) * 1000).toISOString()
-}
-
-async function listCodexSessions() {
-  const rpc = new JsonRpcProcess(CODEX_BIN, ['app-server', '--stdio'], { cwd: process.cwd() })
-  try {
-    await rpc.request('initialize', {
-      clientInfo: { name: 'promptx-import', title: 'PromptX', version: '2.0.0' },
-      capabilities: { experimentalApi: true },
-    })
-    rpc.notify('initialized', {})
-    const sessions = []
-    // Codex 当前版本只支持单次非分页查询；带 cursor 会返回 paginated_threads 错误。
-    const page = await rpc.request('thread/list', { limit: 500 })
-    for (const thread of page.data || []) {
-      const preview = String(thread.preview || thread.name || '').trim()
-      sessions.push({
-        providerId: 'codex',
-        providerHandleId: thread.id || thread.sessionId,
-        cwd: thread.cwd || '',
-        title: String(thread.name || preview || 'Codex 会话').slice(0, 80),
-        firstPromptPreview: preview.slice(0, 160),
-        lastPromptPreview: preview.slice(0, 160),
-        lastActivityAt: unixSecondsToIso(thread.recencyAt || thread.updatedAt || thread.createdAt),
-      })
-    }
-    return sessions
-  } finally {
-    rpc.close()
-  }
-}
 
 function sessionKey(providerId, providerHandleId) {
   return `${providerId}:${providerHandleId}`
@@ -55,19 +17,14 @@ export class SessionImportService {
     this.agentManager = agentManager
     this.cacheTtlMs = cacheTtlMs
     this.cache = new Map()
-    this.historyLoaders = {
-      codex: () => listCodexSessions(),
-      claude: () => listClaudeHistorySessions(),
-      kimi: (workspaceList) => listKimiHistorySessions(workspaceList),
-      ...historyLoaders,
-    }
+    this.historyLoaders = historyLoaders
   }
 
   loadProvider(provider, projectList) {
     const now = Date.now()
     const cached = this.cache.get(provider.id)
     if (cached && cached.expiresAt > now) return cached.promise
-    const loader = this.historyLoaders[provider.id]
+    const loader = this.historyLoaders[provider.id] || provider.listHistorySessions
     const directories = projectList.map((project) => ({ cwd: project.repositoryRoot }))
     const promise = Promise.resolve().then(() => loader ? loader(directories) : [])
     this.cache.set(provider.id, { expiresAt: now + this.cacheTtlMs, promise })
@@ -75,7 +32,9 @@ export class SessionImportService {
   }
 
   async list({ providerId = '', query = '', limit = 100 } = {}) {
-    const providers = providerId ? [this.providerRegistry.get(providerId)] : this.providerRegistry.list()
+    const providers = providerId
+      ? [this.providerRegistry.get(providerId)]
+      : this.providerRegistry.list().map((item) => this.providerRegistry.get(item.id))
     const projectList = this.repository.listProjects()
     const tasks = providers.map((provider) => this.loadProvider(provider, projectList))
     const results = await Promise.allSettled(tasks)

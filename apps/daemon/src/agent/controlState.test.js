@@ -76,7 +76,7 @@ test('ACP 分组选项会展开为统一的模型和思考强度控制状态', (
   assert.equal(control.currentReasoningEffort, 'medium')
 })
 
-test('ACP 使用缓存目录原地切换模型并保留可选项', async () => {
+test('ACP 使用当前会话目录原地切换模型并保留可选项', async () => {
   const acpSessionControls = {
     models: {
       currentModelId: 'thinking',
@@ -87,7 +87,9 @@ test('ACP 使用缓存目录原地切换模型并保留可选项', async () => {
     },
     configOptions: [],
   }
-  const runtime = new AcpRuntime({ cwd: process.cwd(), config: { acpSessionControls } })
+  const runtime = new AcpRuntime({ cwd: process.cwd(), capabilities: { models: true } })
+  runtime.sessionControls = acpSessionControls
+  runtime.refreshControlState()
   const changedModels = []
   runtime.connection = {
     unstable_setSessionModel: async ({ modelId }) => { changedModels.push(modelId) },

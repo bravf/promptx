@@ -81,7 +81,12 @@ SQLite 默认位于 `~/.promptx/data/promptx-v2.sqlite`，启用 foreign keys、
 
 - Codex：Codex app-server。
 - Claude：Claude Agent SDK 与本地历史 JSONL。
-- Kimi：ACP Runtime 与本地 wire JSONL。
+- Kimi：通用 ACP Runtime，命令为 `kimi acp`，历史来自本地 wire JSONL。
+- Grok：同一套 ACP Runtime，命令为 `grok agent --always-approve --no-leader stdio`，历史来自 `~/.grok/sessions/**/updates.jsonl`。
+
+ACP Provider 通过 `createAcpProvider()` 注册命令、参数、明确的能力声明、历史适配器和可选扩展通知转换函数。Runtime 负责连接与会话生命周期，`acpEvents.js` 的纯函数统一实时与历史的标准工具事件转换。Grok 的扩展通知仅识别 `_x.ai/session/update`；其日志轮次边界和 prompt 元数据由 `grokHistorySnapshot.js` 解释，不作为通用 ACP 存储格式。
+
+ACP 可选能力默认关闭。恢复与图片输入还需通过初始化握手确认；模型和思考选项以本次会话返回为准，不沿用上次连接的能力列表。协商后的能力写入 Agent Session。四个 Provider 均通过 `listHistorySessions` 提供扫描入口，导入服务只负责缓存、筛选和导入流程。
 
 `native_handle_json` 只保存恢复原生会话所需的最小句柄。`native_source_id` 用于同一 Provider 原生会话的导入去重。SDK 对象、子进程、AbortController、密钥和认证信息不得持久化。
 

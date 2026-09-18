@@ -4,6 +4,7 @@ export const ProviderIds = Object.freeze({
   CODEX: 'codex',
   CLAUDE: 'claude',
   KIMI: 'kimi',
+  GROK: 'grok',
 })
 
 export const AgentLifecycleSchema = z.enum([

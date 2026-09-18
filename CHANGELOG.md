@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- 抽出通用 ACP Runtime：`createAcpProvider()` 用命令、参数和历史适配器注册 Agent，Kimi 改为配置接入。
+- 接入 Grok：本机 `grok agent stdio` 作为第四个 Provider，支持新建会话、取消、Timeline，以及从 `~/.grok/sessions` 导入已有会话。
+
 ## 0.2.19
 
 - 工作台 Response 卡片新增图片导出预览：右上角“图片”按钮会按 640px 版式生成 2x 高清 PNG，并在弹窗中展示，方便 PC 右键或手机长按保存、复制和转发。

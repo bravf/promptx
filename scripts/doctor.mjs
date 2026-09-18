@@ -19,6 +19,7 @@ const HUMAN_READABLE_NODE_SUPPORT = '推荐 Node 22 LTS，当前兼容 Node 20 /
 const CODEX_BIN = process.env.CODEX_BIN || 'codex'
 const CLAUDE_CODE_BIN = process.env.CLAUDE_CODE_BIN || 'claude'
 const KIMI_CODE_BIN = process.env.KIMI_CODE_BIN || 'kimi'
+const GROK_BIN = process.env.GROK_BIN || 'grok'
 const AGENT_CLI_CONFIGS = [
   {
     key: 'codex',
@@ -39,6 +40,13 @@ const AGENT_CLI_CONFIGS = [
     name: 'Kimi Code CLI',
     envName: 'KIMI_CODE_BIN',
     bin: KIMI_CODE_BIN,
+    versionArgs: ['--version'],
+  },
+  {
+    key: 'grok',
+    name: 'Grok CLI',
+    envName: 'GROK_BIN',
+    bin: GROK_BIN,
     versionArgs: ['--version'],
   },
 ]

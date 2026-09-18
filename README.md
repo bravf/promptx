@@ -14,8 +14,8 @@ PromptX 是一个本地优先的 AI 编程工作台。它把工作目录、Agent
 
 ## 核心能力
 
-- 支持 Codex、Claude Code 和 Kimi Code。
-- 从本机扫描并导入三种 Provider 的已有会话。
+- 支持 Codex、Claude Code、Kimi Code 和 Grok。
+- 从本机扫描并导入这些 Provider 的已有会话。
 - 实时展示用户消息、思考过程、工具调用和最终回复。
 - 按会话保留内存草稿，切换会话后可立即恢复；刷新页面后不保留。
 - 浏览工作区文件并查看 staged、unstaged 和 untracked Diff。
@@ -27,7 +27,7 @@ PromptX 是一个本地优先的 AI 编程工作台。它把工作目录、Agent
 运行要求：
 
 - 推荐 Node 22 LTS；兼容 Node 20.19+、22.13+ 和 24.x。
-- 本机至少安装一个受支持的 Provider CLI：`codex`、`claude` 或 `kimi`。
+- 本机至少安装一个受支持的 Provider CLI：`codex`、`claude`、`kimi` 或 `grok`。
 
 安装并启动：
 

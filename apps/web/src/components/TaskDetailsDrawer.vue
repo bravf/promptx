@@ -13,7 +13,7 @@ const data = ref(null)
 const git = ref(null)
 const gitError = ref('')
 const copied = ref('')
-const providerLabel = computed(() => ({ codex: 'Codex', claude: 'Claude Code', kimi: 'Kimi' })[task.value?.providerId] || task.value?.providerId)
+const providerLabel = computed(() => ({ codex: 'Codex', claude: 'Claude Code', kimi: 'Kimi', grok: 'Grok' })[task.value?.providerId] || task.value?.providerId)
 function formatTime(value) {
   const date = new Date(value)
   return value && !Number.isNaN(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : '暂无记录'

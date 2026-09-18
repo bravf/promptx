@@ -4,6 +4,7 @@ import { filePromptText } from '../promptAttachments.js'
 import { createControlState, effortLabel, normalizeContextUsage } from '../controlState.js'
 import { readCodexHistorySnapshot } from '../history/providers/codexHistory.js'
 import { CODEX_BIN, createPaginatedResumeError } from './codexCli.js'
+import { listCodexHistorySessions } from '../history/providers/codexSessions.js'
 
 export function buildCodexInput(content) {
   return content.map((block) => {
@@ -364,6 +365,7 @@ export class CodexRuntime extends EventEmitter {
 
 export const codexProvider = {
   id: 'codex',
+  listHistorySessions: listCodexHistorySessions,
   label: 'Codex',
   capabilities: { resume: true, cancel: true, images: true, models: true, reasoningEffort: true, contextUsage: true },
   createRuntime(options) {

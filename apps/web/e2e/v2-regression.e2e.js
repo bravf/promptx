@@ -33,6 +33,7 @@ function providerRegistry(runtimeRecords) {
     { id: 'codex', label: 'Codex' },
     { id: 'claude', label: 'Claude Code' },
     { id: 'kimi', label: 'Kimi Code' },
+    { id: 'grok', label: 'Grok' },
   ]
   const providers = new Map(definitions.map((definition) => {
     const provider = {
@@ -215,6 +216,14 @@ async function createFixture(t) {
           lastActivityAt: '2026-09-05T08:00:00.000Z',
         }],
         kimi: async () => { throw new Error('Kimi CLI 未安装') },
+        grok: async () => [{
+          providerId: 'grok',
+          providerHandleId: 'grok-import-regression',
+          cwd: path.join(root, 'workspace'),
+          title: '可导入 Grok 会话',
+          firstPromptPreview: 'Grok 导入预览',
+          lastActivityAt: '2026-09-06T07:00:00.000Z',
+        }],
       },
     },
     relayOptions: {
@@ -484,7 +493,7 @@ test('V2 移动端布局、弹层和 History 回归', async (t) => {
   const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   const failures = collectPageFailures(page)
   await page.goto(fixture.baseUrl, { waitUntil: 'domcontentloaded' })
-  await page.getByText('主回归会话', { exact: true }).click()
+  await page.getByRole('link', { name: '主回归会话', exact: true }).click()
   await page.getByText('回归基线已经准备完成。').waitFor()
   await page.waitForTimeout(300)
   await assertNoHorizontalOverflow(page)

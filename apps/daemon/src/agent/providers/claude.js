@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { filePromptText, imageBase64 } from '../promptAttachments.js'
 import { createControlState, effortLabel, normalizeContextUsage } from '../controlState.js'
-import { readClaudeHistorySnapshot } from '../history/providers/claudeHistory.js'
+import { readClaudeHistorySnapshot, listClaudeHistorySessions } from '../history/providers/claudeHistory.js'
 
 class AsyncMessageQueue {
   constructor() {
@@ -259,6 +259,7 @@ export class ClaudeRuntime extends EventEmitter {
 
 export const claudeProvider = {
   id: 'claude',
+  listHistorySessions: listClaudeHistorySessions,
   label: 'Claude',
   capabilities: { resume: true, cancel: true, images: true, models: true, reasoningEffort: true, contextUsage: true },
   createRuntime(options) {

@@ -6,6 +6,8 @@ import { test } from 'node:test'
 import { mapCodexHistorySnapshot, mapCodexRolloutSnapshot, readCodexHistorySnapshot } from './codexHistory.js'
 import { mapClaudeHistorySnapshot, readClaudeHistorySnapshot } from './claudeHistory.js'
 import { mapKimiHistorySnapshot, readKimiHistorySnapshot } from './kimiHistory.js'
+import { mapGrokHistorySnapshot, readGrokHistoryFile } from './grokHistorySnapshot.js'
+import { listGrokHistorySessions, readGrokHistorySnapshot } from './grokHistory.js'
 
 test('Codex thread/read 映射为统一历史快照', () => {
   const snapshot = mapCodexHistorySnapshot({
@@ -295,4 +297,127 @@ test('新版 Kimi 不会用上一轮 turn.ended 提前结束刚开始的 Turn', 
   assert.equal(snapshot.turns[0].status, 'completed')
   assert.equal(snapshot.turns[1].status, 'running')
   assert.equal(snapshot.turns[1].finishedAt, '2026-09-04T05:40:50.001Z')
+})
+
+test('Grok JSONL 映射用户、思考、工具、计划和失败 Turn', () => {
+  const lines = [
+    { timestamp: 1_789_700_722, method: 'session/update', params: { sessionId: 'session-1', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '你好' }, _meta: { promptIndex: 0 } } } },
+    { timestamp: 1_789_700_723, method: 'session/update', params: { update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '先看文件' } } } },
+    { timestamp: 1_789_700_724, method: 'session/update', params: { update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Read' } } },
+    { timestamp: 1_789_700_725, method: 'session/update', params: { update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', title: 'Read a.js', rawOutput: 'ok' } } },
+    { timestamp: 1_789_700_726, method: 'session/update', params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '你好。' } } } },
+    { timestamp: 1_789_700_727, method: 'session/update', params: { update: { sessionUpdate: 'plan', entries: [{ content: '检查', status: 'completed' }] } } },
+    { timestamp: 1_789_700_728, method: '_x.ai/session/update', params: { update: { sessionUpdate: 'turn_completed', prompt_id: 'prompt-1', stop_reason: 'end_turn' } } },
+    { timestamp: 1_789_700_800, method: 'session/update', params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '再试' }, _meta: { promptIndex: 1 } } } },
+    { timestamp: 1_789_700_801, method: '_x.ai/session/update', params: { update: { sessionUpdate: 'retry_state', type: 'failed', message: '模型不可用' } } },
+  ]
+  const snapshot = mapGrokHistorySnapshot('session-1', lines.map(JSON.stringify).join('\n'))
+  assert.equal(snapshot.turns.length, 2)
+  assert.equal(snapshot.turns[0].status, 'completed')
+  assert.equal(snapshot.turns[0].providerPromptId, 'prompt-1')
+  assert.deepEqual(snapshot.turns[0].items.map((entry) => entry.item.type), ['user_message', 'reasoning', 'tool_call', 'assistant_message', 'todo'])
+  assert.equal(snapshot.turns[0].items.find((entry) => entry.item.type === 'tool_call').item.status, 'completed')
+  assert.equal(snapshot.turns[0].items.find((entry) => entry.item.type === 'assistant_message').item.text, '你好。')
+  assert.equal(snapshot.turns[1].status, 'failed')
+  assert.equal(snapshot.turns[1].errorMessage, '模型不可用')
+})
+
+test('Grok 用户消息分片会合并到同一 Turn', () => {
+  const lines = [
+    { params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '你' } } } },
+    { params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '好' } } } },
+    { params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hi' } } } },
+    { params: { update: { sessionUpdate: 'turn_completed', stop_reason: 'end_turn' } } },
+  ]
+  const snapshot = mapGrokHistorySnapshot('session-1', lines.map(JSON.stringify).join('\n'))
+  assert.equal(snapshot.turns.length, 1)
+  assert.equal(snapshot.turns[0].items[0].item.content[0].text, '你好')
+})
+
+test('Grok 增量同步从运行中 Turn 的第一条用户分片重读', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-acp-cursor-'))
+  const file = path.join(root, 'updates.jsonl')
+  const lines = [
+    { params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '第一轮' } } } },
+    { params: { update: { sessionUpdate: 'turn_completed', stop_reason: 'end_turn' } } },
+    { params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '你' } } } },
+    { params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '好' } } } },
+  ].map((record) => `${JSON.stringify(record)}\n`)
+  fs.writeFileSync(file, lines.join(''))
+  try {
+    const initial = readGrokHistoryFile('session-1', file)
+    const secondTurnOffset = Buffer.byteLength(lines[0] + lines[1])
+    assert.equal(initial.turns.length, 2)
+    assert.equal(initial.turns[1].items[0].item.content[0].text, '你好')
+    assert.equal(initial.turns[1].status, 'running')
+    assert.equal(initial.cursor, secondTurnOffset)
+
+    fs.appendFileSync(file, `${JSON.stringify({ params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hi' } } } })}\n`)
+    const running = readGrokHistoryFile('session-1', file, { cursor: initial.cursor })
+    assert.equal(running.completeness, 'incremental')
+    assert.equal(running.turns.length, 1)
+    assert.equal(running.turns[0].items[0].item.content[0].text, '你好')
+    assert.equal(running.turns[0].status, 'running')
+    assert.equal(running.cursor, secondTurnOffset)
+
+    fs.appendFileSync(file, `${JSON.stringify({ params: { update: { sessionUpdate: 'turn_completed', stop_reason: 'end_turn' } } })}\n`)
+    const completed = readGrokHistoryFile('session-1', file, { cursor: running.cursor })
+    assert.equal(completed.turns[0].status, 'completed')
+    assert.equal(completed.turns[0].items[0].item.content[0].text, '你好')
+    assert.ok(completed.cursor > secondTurnOffset)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('Grok 缺少 prompt 元数据时用日志偏移生成稳定 Turn ID', () => {
+  const first = { params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '第一轮' } } } }
+  const firstDone = { params: { update: { sessionUpdate: 'turn_completed', stop_reason: 'end_turn' } } }
+  const second = { params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '第二轮' } } } }
+  const firstBlock = [first, firstDone].map(JSON.stringify).join('\n') + '\n'
+  const secondLine = JSON.stringify(second) + '\n'
+  const full = mapGrokHistorySnapshot('session-1', firstBlock + secondLine)
+  const incremental = mapGrokHistorySnapshot('session-1', secondLine, '', { baseOffset: Buffer.byteLength(firstBlock) })
+  assert.equal(full.turns.length, 2)
+  assert.notEqual(full.turns[0].sourceTurnId, full.turns[1].sourceTurnId)
+  assert.equal(incremental.turns[0].sourceTurnId, full.turns[1].sourceTurnId)
+  assert.match(full.turns[0].sourceTurnId, /^acp-offset:\d+$/)
+  assert.match(full.turns[1].sourceTurnId, /^acp-offset:\d+$/)
+})
+
+test('Grok 扫描会话并跳过 subagent', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-grok-'))
+  const encoded = encodeURIComponent('/Users/demo/project')
+  const parentDir = path.join(root, 'sessions', encoded, 'session-parent')
+  const childDir = path.join(root, 'sessions', encoded, 'session-child')
+  fs.mkdirSync(parentDir, { recursive: true })
+  fs.mkdirSync(childDir, { recursive: true })
+  fs.writeFileSync(path.join(parentDir, 'summary.json'), JSON.stringify({
+    info: { id: 'session-parent', cwd: '/Users/demo/project' },
+    generated_title: '主会话',
+    last_turn_summary: '已经看过项目',
+    last_active_at: '2026-09-18T03:00:00.000Z',
+  }))
+  fs.writeFileSync(path.join(parentDir, 'updates.jsonl'), [
+    { params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '阅读项目' }, _meta: { promptIndex: 0 } } } },
+    { params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '这是工作台。' } } } },
+    { params: { update: { sessionUpdate: 'turn_completed', prompt_id: 'prompt-1', stop_reason: 'end_turn' } } },
+  ].map(JSON.stringify).join('\n'))
+  fs.writeFileSync(path.join(childDir, 'summary.json'), JSON.stringify({ session_kind: 'subagent', generated_title: '子代理' }))
+  fs.writeFileSync(path.join(childDir, 'updates.jsonl'), '{}\n')
+  const previous = process.env.GROK_HOME
+  process.env.GROK_HOME = root
+  try {
+    const sessions = listGrokHistorySessions()
+    assert.deepEqual(sessions.map((session) => session.providerHandleId), ['session-parent'])
+    assert.equal(sessions[0].cwd, '/Users/demo/project')
+    assert.equal(sessions[0].title, '主会话')
+    const snapshot = readGrokHistorySnapshot('session-parent')
+    assert.equal(snapshot.turns[0].status, 'completed')
+    assert.equal(snapshot.turns[0].items[0].item.content[0].text, '阅读项目')
+  } finally {
+    if (previous === undefined) delete process.env.GROK_HOME
+    else process.env.GROK_HOME = previous
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })

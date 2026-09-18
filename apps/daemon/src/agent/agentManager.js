@@ -55,6 +55,9 @@ export class AgentManager {
       this.controlStates.set(agent.id, control)
       this.eventHub.publish(agent.id, { type: 'control', control })
     })
+    runtime.on('capabilities', (capabilities) => {
+      if (this.repository.getAgent(agent.id)) this.repository.updateAgent(agent.id, { capabilities })
+    })
     runtime.on('timeline', (item) => {
       const turn = this.activeTurns.get(agent.id)
       if (turn) this.coalescer.push(agent.id, { agentId: agent.id, turnId: turn.id, item })
