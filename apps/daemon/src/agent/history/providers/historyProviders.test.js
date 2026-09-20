@@ -405,6 +405,16 @@ test('Grok 扫描会话并跳过 subagent', () => {
   ].map(JSON.stringify).join('\n'))
   fs.writeFileSync(path.join(childDir, 'summary.json'), JSON.stringify({ session_kind: 'subagent', generated_title: '子代理' }))
   fs.writeFileSync(path.join(childDir, 'updates.jsonl'), '{}\n')
+  const resumedChildDir = path.join(root, 'sessions', encoded, 'session-child-resumed')
+  fs.mkdirSync(resumedChildDir)
+  fs.writeFileSync(path.join(resumedChildDir, 'summary.json'), JSON.stringify({
+    session_kind: 'subagent_resume', parent_session_id: 'session-parent', generated_title: '恢复的子代理',
+  }))
+  fs.writeFileSync(path.join(resumedChildDir, 'updates.jsonl'), '{}\n')
+  // 普通分叉会话也可能有父会话 ID，不能仅凭父 ID 过滤。
+  const parentSummaryPath = path.join(parentDir, 'summary.json')
+  const parentSummary = JSON.parse(fs.readFileSync(parentSummaryPath, 'utf8'))
+  fs.writeFileSync(parentSummaryPath, JSON.stringify({ ...parentSummary, parent_session_id: 'another-session' }))
   const previous = process.env.GROK_HOME
   process.env.GROK_HOME = root
   try {

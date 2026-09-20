@@ -55,7 +55,7 @@ export function listGrokHistorySessions() {
         const sessionDir = path.join(groupDir, session.name)
         const updates = path.join(sessionDir, 'updates.jsonl')
         const summary = readJson(path.join(sessionDir, 'summary.json')) || {}
-        if (!fs.existsSync(updates) || summary.session_kind === 'subagent') continue
+        if (!fs.existsSync(updates) || ['subagent', 'subagent_resume'].includes(summary.session_kind)) continue
         let stat
         try { stat = fs.statSync(updates) } catch { continue }
         const preview = sessionPreview(summary)
