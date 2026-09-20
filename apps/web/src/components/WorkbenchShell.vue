@@ -488,8 +488,8 @@ onBeforeUnmount(() => {
           </div>
           <Transition name="workspace-agents">
             <div v-if="expandedProjectIds.has(project.id)" class="workspace-agents-wrapper">
-              <div class="agent-list ml-6">
-                <div v-for="task in tasksForProject(project.id)" :key="task.id" class="agent-row group flex h-8 min-w-0 items-center overflow-hidden rounded-sm" :class="task.id === focusedTaskId ? 'row-active' : ''">
+              <div class="agent-list">
+                <div v-for="task in tasksForProject(project.id)" :key="task.id" class="agent-row group flex h-8 min-w-0 items-center overflow-hidden rounded-sm pl-6" :class="task.id === focusedTaskId ? 'row-active' : ''">
                   <input v-if="renamingTaskId === task.id" :ref="(element) => { if (element) taskRenameInput = element }" v-model="taskRenameDraft" class="task-rename-input mx-1 h-8 min-w-0 max-w-full flex-[1_1_0%] rounded-sm border px-2 text-xs outline-none" maxlength="120" :disabled="taskRenameSaving" :aria-label="`重命名 ${task.title}`" @click.stop @blur="saveTaskRename(task)" @keydown.enter.prevent="$event.currentTarget.blur()" @keydown.esc.prevent="cancelTaskRename" />
                   <div v-else role="link" tabindex="0" class="task-navigation flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 text-left" :aria-current="task.id === focusedTaskId ? 'page' : undefined" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })" @keydown.enter.prevent="selectTask(task.id, { navigate: true })">
                     <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
@@ -499,7 +499,7 @@ onBeforeUnmount(() => {
                   </div>
                   <PxActionMenu class="agent-action" :label="`${task.title} 的更多操作`" :items="taskMenuItems(task)" @select="handleTaskMenu($event, task)" />
                 </div>
-                <button v-if="!tasksForProject(project.id).length" type="button" class="theme-muted-text flex h-8 w-full items-center justify-start gap-2 px-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</button>
+                <button v-if="!tasksForProject(project.id).length" type="button" class="theme-muted-text flex h-8 w-full items-center justify-start gap-2 pl-8 pr-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</button>
               </div>
             </div>
           </Transition>
