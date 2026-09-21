@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight, FileText, ImageOff, LoaderCircle, RotateCw, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
 import { importedMessageText } from '../lib/importedMessageText.js'
@@ -9,6 +9,68 @@ import PxIconButton from './PxIconButton.vue'
 const props = defineProps({
   content: { type: Array, default: () => [] },
 })
+
+const timelineVisible = inject('timelineVisible', ref(true))
+const zoom = ref(1)
+const offset = ref({ x: 0, y: 0 })
+const pointers = new Map()
+let gesture = null
+
+function resetTransform() {
+  zoom.value = 1
+  offset.value = { x: 0, y: 0 }
+  pointers.clear()
+  gesture = null
+}
+
+function gesturePosition() {
+  const points = [...pointers.values()]
+  const first = points[0]
+  const second = points[1] || first
+  return {
+    x: (first.x + second.x) / 2,
+    y: (first.y + second.y) / 2,
+    distance: points.length > 1 ? Math.hypot(second.x - first.x, second.y - first.y) : 0,
+  }
+}
+
+function transformAt(scale, from, to = from) {
+  const bounds = previewElement.value.getBoundingClientRect()
+  const center = { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
+  const nextZoom = Math.min(8, Math.max(1, scale))
+  const ratio = nextZoom / zoom.value
+  offset.value = nextZoom === 1 ? { x: 0, y: 0 } : {
+    x: to.x - center.x - (from.x - center.x - offset.value.x) * ratio,
+    y: to.y - center.y - (from.y - center.y - offset.value.y) * ratio,
+  }
+  zoom.value = nextZoom
+}
+
+function handleWheel(event) {
+  if (previewLoading.value || previewError.value) return
+  const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1)
+  transformAt(zoom.value * Math.exp(-Math.max(-200, Math.min(200, delta)) * 0.005), { x: event.clientX, y: event.clientY })
+}
+
+function startPointer(event) {
+  if (event.button !== 0 || previewLoading.value || previewError.value) return
+  event.currentTarget.setPointerCapture(event.pointerId)
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+  gesture = gesturePosition()
+}
+
+function movePointer(event) {
+  if (!pointers.has(event.pointerId)) return
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+  const next = gesturePosition()
+  transformAt(gesture.distance && next.distance ? zoom.value * next.distance / gesture.distance : zoom.value, gesture, next)
+  gesture = next
+}
+
+function endPointer(event) {
+  pointers.delete(event.pointerId)
+  gesture = pointers.size ? gesturePosition() : null
+}
 
 const preview = ref(null)
 const previewElement = ref(null)
@@ -89,6 +151,7 @@ function handleImageClick(block) {
 }
 
 function showPreview(block) {
+  resetTransform()
   preview.value = block
   previewLoading.value = true
   previewError.value = false
@@ -122,12 +185,17 @@ watch(() => preview.value && assetStates.value[preview.value.assetId], state => 
   }
 })
 
+watch(timelineVisible, visible => {
+  if (!visible) closePreview()
+})
+
 function closePreview() {
+  resetTransform()
   const wasOpen = Boolean(preview.value)
   preview.value = null
   previewLoading.value = false
   previewError.value = false
-  if (wasOpen && previousFocus?.isConnected) previousFocus.focus()
+  if (wasOpen && timelineVisible.value && previousFocus?.isConnected) previousFocus.focus()
   previousFocus = null
 }
 
@@ -194,12 +262,12 @@ onBeforeUnmount(() => {
   </div>
 
   <Teleport to="body">
-  <div v-if="preview" ref="previewElement" role="dialog" aria-modal="true" aria-label="图片预览" tabindex="-1" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-6" @click.self="closePreview">
-    <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 h-9 w-9" label="关闭预览" @click="closePreview"><X class="h-4 w-4" /></PxIconButton>
+  <div v-if="preview" ref="previewElement" role="dialog" aria-modal="true" aria-label="图片预览" tabindex="-1" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-6" @wheel.prevent="handleWheel" @click.self="closePreview">
+    <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 z-10 h-9 w-9" label="关闭预览" @click="closePreview"><X class="h-4 w-4" /></PxIconButton>
     <template v-if="images.length > 1">
       <PxIconButton variant="secondary" class="image-preview-overlay__button absolute left-3 top-1/2 z-10 h-9 w-9 -translate-y-1/2" label="上一张图片" :disabled="previewIndex <= 0" @click="movePreview(-1)"><ChevronLeft class="h-4 w-4" /></PxIconButton>
       <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-3 top-1/2 z-10 h-9 w-9 -translate-y-1/2" label="下一张图片" :disabled="previewIndex >= images.length - 1" @click="movePreview(1)"><ChevronRight class="h-4 w-4" /></PxIconButton>
-      <span class="image-preview-overlay__button absolute bottom-3 rounded-sm px-2 py-1 text-xs" aria-live="polite">{{ previewIndex + 1 }} / {{ images.length }}</span>
+      <span class="image-preview-overlay__button absolute bottom-3 z-10 rounded-sm px-2 py-1 text-xs" aria-live="polite">{{ previewIndex + 1 }} / {{ images.length }}</span>
     </template>
     <div v-if="previewLoading" class="theme-muted-text pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-xs">
       <LoaderCircle class="h-4 w-4 animate-spin" />
@@ -215,7 +283,15 @@ onBeforeUnmount(() => {
       v-show="!previewError"
       :src="assetUrls[preview.assetId]"
       :alt="preview.name"
-      class="max-h-full max-w-full object-contain transition-opacity duration-200"
+      class="max-h-full max-w-full touch-none select-none object-contain transition-opacity duration-200"
+      :style="{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`, cursor: zoom > 1 ? 'grab' : 'zoom-in' }"
+      draggable="false"
+      @pointerdown.prevent="startPointer"
+      @pointermove.prevent="movePointer"
+      @pointerup="endPointer"
+      @pointercancel="endPointer"
+      @lostpointercapture="endPointer"
+      @dblclick.prevent="resetTransform"
       :class="previewLoading ? 'opacity-0' : 'opacity-100'"
       @load="previewLoading = false"
       @error="previewLoading = false; previewError = true"

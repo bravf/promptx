@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { Archive, Folder, FolderOpen, LoaderCircle, Pencil, Pin, PinOff, Plus, Settings, TerminalSquare, X } from 'lucide-vue-next'
 import { v2Api, globalEventsUrl } from '../lib/v2Api.js'
 import { readActiveTaskId, writeActiveTaskId } from '../lib/activeTaskStorage.js'
@@ -33,6 +33,7 @@ const splitEnabled = ref(false)
 const focusedPane = ref('primary')
 const mobileView = ref('sidebar')
 const isMobile = ref(false)
+provide('timelineVisible', computed(() => !isMobile.value || mobileView.value === 'timeline'))
 const dialog = ref('')
 const importSessions = ref([])
 const importProviderFilter = ref('')
