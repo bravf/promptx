@@ -59,6 +59,9 @@ function applyThemeToDocument(nextTheme) {
   root.classList.toggle('dark', nextTheme.mode === 'dark')
   root.style.colorScheme = nextTheme.mode
 
+  // 未指定字体的主题使用全局默认值，避免沿用上一个主题的字体。
+  root.style.removeProperty('--theme-fontSans')
+  root.style.removeProperty('--theme-primaryIcon')
   Object.entries(nextTheme.colors || {}).forEach(([token, value]) => {
     root.style.setProperty(`--theme-${token}`, String(value))
   })

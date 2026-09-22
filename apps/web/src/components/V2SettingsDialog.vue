@@ -231,6 +231,7 @@ watch(
           <div>
             <div class="theme-heading text-sm font-medium">PromptX</div>
             <div class="theme-muted-text mt-1 text-xs">本地 AI 编程工作台</div>
+            <div class="theme-muted-text mt-2 text-xs">界面使用小米 MiSans 字体。</div>
           </div>
           <span class="theme-muted-text font-mono text-xs">V2</span>
         </div>

@@ -140,7 +140,9 @@ test('renderCodexMarkdown escapes raw html and hardens links', async () => {
 test('Markdown 图片路径中的转义点会还原为正常文件路径', async () => {
   const html = await renderCodexMarkdown('![玩家飞机预览](/Users/bravf/code/plane-shooter/art/player-plane-preview\\.png)')
 
-  assert.match(html, /<img src="\/Users\/bravf\/code\/plane-shooter\/art\/player-plane-preview\.png" alt="玩家飞机预览">/)
+  assert.match(html, /data-workspace-image-path="\/Users\/bravf\/code\/plane-shooter\/art\/player-plane-preview\.png"/)
+  assert.match(html, /data-local-image="1"/)
+  assert.doesNotMatch(html, /src="\/Users\/bravf/)
   assert.doesNotMatch(html, /preview\\\.png/)
 })
 

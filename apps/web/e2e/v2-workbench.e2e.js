@@ -12,6 +12,7 @@ import { createApp } from '../../daemon/src/app.js'
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist')
 const themeCases = [
   ['promptx-stone-light', 'light'],
+  ['promptx-paper-orange', 'light'],
   ['promptx-glass-light', 'light'],
   ['promptx-aqua-classic', 'light'],
   ['promptx-stone-dark', 'dark'],
@@ -210,7 +211,7 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   await mobile.goto(baseUrl, { waitUntil: 'domcontentloaded' })
-  await mobile.getByText('移动端回归项目', { exact: true }).click()
+  await mobile.getByRole('link', { name: '移动端回归项目', exact: true }).click()
   await mobile.getByText('V2 Timeline 已就绪').waitFor()
   assert.deepEqual(await mobile.evaluate(() => ({
     width: document.documentElement.scrollWidth,

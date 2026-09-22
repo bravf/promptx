@@ -109,3 +109,14 @@ export function workspaceLinksForTool(item, workspaceCwd = '') {
     return [{ path: filePath, intent, line: lineNumber(candidate.source) }]
   })
 }
+
+// 图片允许引用工作区之外的本机产物；普通文件链接仍保持工作区边界。
+export function timelineImageForHref(value, workspaceCwd = '') {
+  const workspaceTarget = workspaceLinkForHref(value, workspaceCwd)
+  if (workspaceTarget) return workspaceTarget
+  const href = decodedHref(value)
+  if (!href.startsWith('//') && (href.startsWith('/') || /^[a-z]:[\\/]/i.test(href))) {
+    return { path: href, local: true }
+  }
+  return workspaceLinkForHref(value, workspaceCwd)
+}

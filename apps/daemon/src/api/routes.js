@@ -13,6 +13,7 @@ import {
 } from '../../../../packages/protocol/src/index.js'
 import { DATABASE_VERSION } from '../db/database.js'
 import fs from 'node:fs'
+import path from 'node:path'
 import { searchDirectories } from '../workspaces/directorySearch.js'
 import {
   getWorkspaceGitDiff,
@@ -344,6 +345,26 @@ export function registerRoutes(app, context) {
     const current = taskContext(repository, request.params.taskId)
     return current ? { file: await readWorkspaceFile(current.environment.cwd, request.query.path || '') }
       : reply.code(404).send({ error: 'task_not_found' })
+  })
+  // 本机生成图片可能位于 /tmp 等工作区外目录，仅开放已有的限大小栅格图片预览。
+  app.get('/api/v2/tasks/:taskId/local-image/content', async (request, reply) => {
+    if (!taskContext(repository, request.params.taskId)) return reply.code(404).send({ error: 'task_not_found' })
+    const requestedPath = String(request.query.path || '')
+    if (!path.isAbsolute(requestedPath)) throw badRequest('图片路径必须是本机绝对路径。')
+    let realPath
+    try {
+      realPath = fs.realpathSync(requestedPath)
+    } catch (cause) {
+      if (['ENOENT', 'ENOTDIR'].includes(cause.code)) return reply.code(404).send({ error: 'image_not_found', message: '图片不存在或已被清理。' })
+      throw cause
+    }
+    const file = openWorkspaceFileStream(path.dirname(realPath), path.basename(realPath))
+    reply.header('Content-Type', file.mimeType)
+    reply.header('Content-Length', String(file.size))
+    reply.header('Cache-Control', 'no-store')
+    reply.header('X-Content-Type-Options', 'nosniff')
+    reply.header('Content-Security-Policy', "default-src 'none'; sandbox")
+    return reply.send(file.stream)
   })
   app.get('/api/v2/tasks/:taskId/file/content', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)

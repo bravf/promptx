@@ -1,6 +1,6 @@
 import MarkdownIt from 'markdown-it'
 import { renderHighlightedCodeLines, resolvePreviewLanguage } from './sourceCodePreview.js'
-import { workspaceLinkForHref } from './timelineWorkspaceLinks.js'
+import { workspaceLinkForHref, timelineImageForHref } from './timelineWorkspaceLinks.js'
 
 const markdownUtils = new MarkdownIt()
 const FENCE_PLACEHOLDER_PREFIX = '__PROMPTX_FENCE__'
@@ -148,14 +148,17 @@ function createMarkdownRenderer(options = {}) {
 
   instance.renderer.rules.image = (tokens, idx, renderOptions, env = {}, self) => {
     const token = tokens[idx]
-    const target = workspaceLinkForHref(token.attrGet('src'), env.workspaceCwd)
+    token.attrSet('tabindex', '0')
+    token.attrSet('role', 'button')
+    token.attrSet('title', '点击查看大图')
+    const target = timelineImageForHref(token.attrGet('src'), env.workspaceCwd)
     const renderImage = () => typeof defaultImageRule === 'function'
       ? defaultImageRule(tokens, idx, renderOptions, env, self)
       : self.renderToken(tokens, idx, renderOptions)
     if (!target) return renderImage()
 
     token.attrSet('src', TRANSPARENT_IMAGE_SRC)
-    return `<span class="workspace-image-preview" data-workspace-image-path="${escapeHtml(target.path)}" data-workspace-image-state="loading" role="status"><span class="workspace-image-status">图片加载中</span>${renderImage()}</span>`
+    return `<span class="workspace-image-preview" data-workspace-image-path="${escapeHtml(target.path)}" data-local-image="${target.local ? '1' : '0'}" data-workspace-image-state="loading" role="status"><span class="workspace-image-status">图片加载中</span>${renderImage()}</span>`
   }
 
   if (options.captureFences) {

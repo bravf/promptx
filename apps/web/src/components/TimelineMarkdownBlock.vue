@@ -3,6 +3,7 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { renderCodexMarkdown, renderPlainCodexMarkdown } from '../lib/codexMarkdown.js'
 import { workspaceLinkForHref } from '../lib/timelineWorkspaceLinks.js'
 import { writeClipboardText } from '../lib/clipboard.js'
+import TimelineImagePreview from './TimelineImagePreview.vue'
 import { v2Api } from '../lib/v2Api.js'
 
 const props = defineProps({
@@ -29,6 +30,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['rendered', 'open-workspace-path'])
 
+const preview = ref(null)
 const html = ref('')
 const contentElement = ref(null)
 let renderTimer = null
@@ -37,6 +39,7 @@ let imageLoadController = null
 const imageObjectUrls = new Set()
 
 function releaseWorkspaceImages() {
+  preview.value = null
   imageLoadController?.abort()
   imageLoadController = null
   imageObjectUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -45,7 +48,7 @@ function releaseWorkspaceImages() {
 
 async function hydrateWorkspaceImages(version) {
   await nextTick()
-  if (version !== renderVersion || !props.taskId || !props.workspaceCwd) return
+  if (version !== renderVersion || !props.taskId) return
 
   const previews = [...(contentElement.value?.querySelectorAll('[data-workspace-image-path]') || [])]
     .filter((preview) => preview.dataset.workspaceImageState !== 'ready')
@@ -62,7 +65,7 @@ async function hydrateWorkspaceImages(version) {
     preview.removeAttribute('tabindex')
     if (status) status.textContent = '图片加载中'
     try {
-      const objectUrl = await v2Api.taskFileObjectUrl(props.taskId, preview.dataset.workspaceImagePath, { signal: controller.signal })
+      const objectUrl = await (preview.dataset.localImage === '1' ? v2Api.taskLocalImageObjectUrl : v2Api.taskFileObjectUrl)(props.taskId, preview.dataset.workspaceImagePath, { signal: controller.signal })
       if (controller.signal.aborted || version !== renderVersion || !preview.isConnected) {
         URL.revokeObjectURL(objectUrl)
         return
@@ -147,7 +150,23 @@ async function copyCode(event) {
   }
 }
 
+function openImage(target) {
+  const image = target?.closest?.('img')
+  if (!image || !contentElement.value?.contains(image)) return false
+  const wrapper = image.closest('[data-workspace-image-state]')
+  if (wrapper && wrapper.dataset.workspaceImageState !== 'ready') return false
+  if (!image.complete || !image.naturalWidth) return false
+  image.focus()
+  preview.value = { src: image.currentSrc || image.src, alt: image.alt }
+  return true
+}
+
 function handleContentClick(event) {
+  if (openImage(event.target)) {
+    event.preventDefault()
+    event.stopPropagation()
+    return
+  }
   const failedImage = event.target?.closest?.('[data-workspace-image-state="error"]')
   if (failedImage) {
     event.preventDefault()
@@ -167,6 +186,10 @@ function handleContentClick(event) {
 }
 
 function handleContentKeydown(event) {
+  if (['Enter', ' '].includes(event.key) && openImage(event.target)) {
+    event.preventDefault()
+    return
+  }
   if (!['Enter', ' '].includes(event.key) || !event.target?.matches?.('[data-workspace-image-state="error"]')) return
   event.preventDefault()
   void hydrateWorkspaceImages(renderVersion)
@@ -183,4 +206,5 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="contentElement" class="prose-like codex-markdown" @click="handleContentClick" @keydown="handleContentKeydown" v-html="html" />
+  <TimelineImagePreview :src="preview?.src || ''" :alt="preview?.alt || ''" @close="preview = null" />
 </template>

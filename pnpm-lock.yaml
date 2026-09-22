@@ -83,9 +83,6 @@ importers:
       '@fontsource/geist-mono':
         specifier: ^5.2.7
         version: 5.2.7
-      '@fontsource/geist-sans':
-        specifier: ^5.2.5
-        version: 5.2.5
       '@promptx/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -427,9 +424,6 @@ packages:
 
   '@fontsource/geist-mono@5.2.7':
     resolution: {integrity: sha512-xVPVFISJg/K0VVd+aQN0Y7X/sw9hUcJPyDWFJ5GpyU3bHELhoRsJkPSRSHXW32mOi0xZCUQDOaPj1sqIFJ1FGg==}
-
-  '@fontsource/geist-sans@5.2.5':
-    resolution: {integrity: sha512-anllOHyJbElRs9fV15TeDRqAeb1IKm4bSknPl6ZMoyPTx1BBy7logudcUwpNjmQLkzn4Q0JGQLRCUKJYoyST6A==}
 
   '@hono/node-server@2.1.1':
     resolution: {integrity: sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg==}
@@ -2173,8 +2167,6 @@ snapshots:
       glob: 13.0.6
 
   '@fontsource/geist-mono@5.2.7': {}
-
-  '@fontsource/geist-sans@5.2.5': {}
 
   '@hono/node-server@2.1.1(hono@4.13.5)':
     dependencies:

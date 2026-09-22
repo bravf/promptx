@@ -4,7 +4,7 @@
 
 :root {
   color-scheme: light;
-  --theme-fontSans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
+  --theme-fontSans: "MiSans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --theme-fontMono: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Monaco, monospace;
   --theme-codeViewFontSize: 12px;
   --theme-codeViewLineHeight: 1.5;
@@ -269,6 +269,7 @@ body {
   .px-button-secondary { background: var(--theme-buttonBg); color: var(--theme-buttonText); }
   .px-button-secondary:hover:not(:disabled) { background: var(--theme-buttonHover); }
   .px-button-primary { border-color: var(--theme-primaryBorder); background: var(--theme-primaryBg); color: var(--theme-primaryText); }
+  .px-button-primary > svg { color: var(--theme-primaryIcon, currentColor); }
   .px-button-primary:hover:not(:disabled) { background: var(--theme-primaryHover); }
   .px-button-danger { border-color: var(--theme-danger); background: var(--theme-danger); color: var(--theme-textInverse); }
   .px-button-danger:hover:not(:disabled) { background: color-mix(in srgb, black 8%, var(--theme-danger)); }
@@ -1007,7 +1008,6 @@ body {
   }
 
   :root[data-theme='promptx-aqua-classic'] {
-    --theme-fontSans: "Lucida Grande", "Helvetica Neue", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", Arial, system-ui, sans-serif;
     --theme-fontMono: Menlo, Monaco, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
     --theme-processDetailRadius: 0.4rem;
     --theme-processDetailBadgeRadius: 0.35rem;
@@ -1468,3 +1468,5 @@ body {
     transform: translateY(0.75rem) scale(0.995);
   }
 }
+
+.codex-markdown img[role="button"] { cursor: zoom-in; }

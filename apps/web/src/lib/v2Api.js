@@ -35,6 +35,7 @@ export const v2Api = {
   listTaskFiles: (taskId, filePath = '') => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/files?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
   readTaskFile: (taskId, filePath) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/file?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
   taskFileObjectUrl: (taskId, filePath, options = {}) => transportObjectUrl(`${getApiBase()}/api/v2/tasks/${encodeURIComponent(taskId)}/file/content?${new URLSearchParams({ path: filePath })}`, options),
+  taskLocalImageObjectUrl: (taskId, filePath, options = {}) => transportObjectUrl(`${getApiBase()}/api/v2/tasks/${encodeURIComponent(taskId)}/local-image/content?${new URLSearchParams({ path: filePath })}`, options),
   getTaskGitStatus: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/git/status`, { cache: 'no-store' }),
   getTaskGitDiff: (taskId, filePath = '') => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/git/diff?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
   getTaskCommits: (taskId, limit = 50) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/git/commits?limit=${encodeURIComponent(limit)}`, { cache: 'no-store' }),
