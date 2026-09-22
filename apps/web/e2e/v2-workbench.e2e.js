@@ -13,6 +13,7 @@ const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../d
 const themeCases = [
   ['promptx-stone-light', 'light'],
   ['promptx-paper-orange', 'light'],
+  ['promptx-berry-pink', 'light'],
   ['promptx-glass-light', 'light'],
   ['promptx-aqua-classic', 'light'],
   ['promptx-stone-dark', 'dark'],
