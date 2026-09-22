@@ -70,6 +70,7 @@ export class AcpRuntime extends EventEmitter {
     env = process.env,
     readHistorySnapshot = null,
     capabilities = {},
+    allowUndeclaredImages = false,
     extensionNotification = null,
     emptyResponseText = 'ACP Agent 已结束本轮，但没有返回可显示的内容。',
   } = {}) {
@@ -81,6 +82,7 @@ export class AcpRuntime extends EventEmitter {
     this.env = env
     this.historyReader = readHistorySnapshot
     this.capabilities = { ...ACP_CAPABILITIES, ...capabilities }
+    this.allowUndeclaredImages = allowUndeclaredImages
     this.extensionNotification = extensionNotification
     this.agentCapabilities = null
     this.emptyResponseText = emptyResponseText
@@ -211,6 +213,10 @@ export class AcpRuntime extends EventEmitter {
     this.reasoningEffort = findConfigOption(this.sessionControls.configOptions, 'thought_level')?.currentValue || ''
   }
 
+  supportsImages() {
+    return this.capabilities.images && (this.allowUndeclaredImages || Boolean(this.agentCapabilities?.promptCapabilities?.image))
+  }
+
   refreshControlState() {
     this.controlState = normalizeAcpControls(
       this.sessionControls,
@@ -224,7 +230,7 @@ export class AcpRuntime extends EventEmitter {
       this.emit('capabilities', {
         ...this.capabilities,
         resume: this.capabilities.resume && Boolean(this.agentCapabilities.loadSession),
-        images: this.capabilities.images && Boolean(this.agentCapabilities.promptCapabilities?.image),
+        images: this.supportsImages(),
         models: this.capabilities.models && this.controlState.models.length > 0,
         reasoningEffort: this.capabilities.reasoningEffort && this.controlState.reasoningEfforts.length > 0,
       })
@@ -273,7 +279,7 @@ export class AcpRuntime extends EventEmitter {
 
   async startTurn(content, clientMessageId) {
     await this.connect()
-    if (content.some(block => block.type === 'image') && (!this.capabilities.images || !this.agentCapabilities?.promptCapabilities?.image)) {
+    if (content.some(block => block.type === 'image') && !this.supportsImages()) {
       throw Object.assign(new Error('该 ACP Agent 不支持图片输入。'), { code: 'acp_images_unsupported' })
     }
     this.hasTurnOutput = false
@@ -376,6 +382,7 @@ export function createAcpProvider({
   args = [],
   env,
   capabilities = {},
+  allowUndeclaredImages = false,
   readHistorySnapshot = null,
   listHistorySessions = null,
   emptyResponseText,
@@ -394,6 +401,7 @@ export function createAcpProvider({
         args: typeof args === 'function' ? args() : args,
         readHistorySnapshot,
         capabilities: { ...ACP_CAPABILITIES, ...capabilities },
+        allowUndeclaredImages,
         extensionNotification,
       }
       const resolvedEnv = typeof env === 'function' ? env() : env

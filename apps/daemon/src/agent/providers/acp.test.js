@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { AcpRuntime, createAcpProvider } from './acp.js'
 import { grokProvider, GROK_ACP_ARGS } from './grok.js'
 import { kimiProvider } from './kimi.js'
@@ -86,7 +89,7 @@ test('ACP 默认不宣称可选能力，握手不支持恢复时不发送 loadSe
 })
 
 test('ACP 根据握手和会话选项收窄能力，并拒绝不支持的图片和设置', async () => {
-  const runtime = grokProvider.createRuntime()
+  const runtime = kimiProvider.createRuntime()
   runtime.connect = async () => {}
   runtime.agentCapabilities = { loadSession: true, promptCapabilities: {} }
   let capabilities
@@ -100,6 +103,34 @@ test('ACP 根据握手和会话选项收窄能力，并拒绝不支持的图片�
   await assert.rejects(runtime.updateSettings({ modelId: 'unknown' }), /不支持所选模型/)
   await assert.rejects(runtime.updateSettings({ reasoningEffort: 'high' }), /不支持所选思考强度/)
   runtime.close()
+})
+
+test('Grok 即使声明不支持图片也发送图片块，能力事件与发送行为一致', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'promptx-grok-image-'))
+  const runtime = grokProvider.createRuntime()
+  try {
+    const absolutePath = path.join(dir, 'test.png')
+    const bytes = Buffer.from('test image bytes')
+    await fs.writeFile(absolutePath, bytes)
+    runtime.connect = async () => {}
+    runtime.sessionId = 'image-session'
+    runtime.agentCapabilities = { promptCapabilities: { image: false } }
+    let capabilities
+    let request
+    runtime.on('capabilities', value => { capabilities = value })
+    runtime.connection = { prompt: async value => { request = value; return { stopReason: 'end_turn' } } }
+    runtime.refreshControlState()
+    assert.equal(capabilities.images, true)
+    await runtime.startTurn([{ type: 'image', absolutePath, mimeType: 'image/png' }], 'image-message')
+    assert.deepEqual(request, {
+      sessionId: 'image-session',
+      messageId: 'image-message',
+      prompt: [{ type: 'image', data: bytes.toString('base64'), mimeType: 'image/png' }],
+    })
+  } finally {
+    runtime.close()
+    await fs.rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('通用 ACP Runtime 不解释 Grok 扩展，Grok 只接受明确的方法', () => {

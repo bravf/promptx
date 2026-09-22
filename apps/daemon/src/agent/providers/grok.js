@@ -16,6 +16,8 @@ export const grokProvider = createAcpProvider({
   command: () => process.env.GROK_BIN || 'grok',
   args: () => GROK_ACP_ARGS,
   capabilities: { resume: true, images: true, models: true, reasoningEffort: true, contextUsage: false },
+  // Grok CLI 声明 image: false；参考 Paseo 直接发送标准图片块，由接口决定是否接受。
+  allowUndeclaredImages: true,
   extensionNotification: grokExtensionNotification,
   readHistorySnapshot: readGrokHistorySnapshot,
   listHistorySessions: listGrokHistorySessions,
