@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import { capTimelineMarkdown, splitTimelineMarkdownBlocks, TIMELINE_MARKDOWN_CHARACTER_LIMIT } from '../lib/timelineMarkdown.js'
 import TimelineMarkdownBlock from './TimelineMarkdownBlock.vue'
 
+defineOptions({ inheritAttrs: false })
+
 const props = defineProps({
   text: {
     type: String,
@@ -33,7 +35,7 @@ const formattedLimit = new Intl.NumberFormat('zh-CN').format(TIMELINE_MARKDOWN_C
 </script>
 
 <template>
-  <div class="timeline-markdown min-w-0">
+  <div v-bind="$attrs" class="timeline-markdown min-w-0">
     <TimelineMarkdownBlock
       v-for="(block, index) in blocks"
       :key="index"

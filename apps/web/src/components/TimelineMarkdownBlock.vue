@@ -6,6 +6,8 @@ import { writeClipboardText } from '../lib/clipboard.js'
 import TimelineImagePreview from './TimelineImagePreview.vue'
 import { v2Api } from '../lib/v2Api.js'
 
+defineOptions({ inheritAttrs: false })
+
 const props = defineProps({
   text: {
     type: String,
@@ -205,6 +207,6 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="contentElement" class="prose-like codex-markdown" @click="handleContentClick" @keydown="handleContentKeydown" v-html="html" />
+  <div v-bind="$attrs" ref="contentElement" class="prose-like codex-markdown" @click="handleContentClick" @keydown="handleContentKeydown" v-html="html" />
   <TimelineImagePreview :src="preview?.src || ''" :alt="preview?.alt || ''" @close="preview = null" />
 </template>
