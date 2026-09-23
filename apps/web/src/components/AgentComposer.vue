@@ -12,6 +12,7 @@ const IMAGE_MIME_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image
 
 const props = defineProps({
   taskId: { type: String, required: true },
+  mobile: { type: Boolean, default: false },
   running: { type: Boolean, default: false },
   sending: { type: Boolean, default: false },
   blockedReason: { type: String, default: '' },
@@ -186,7 +187,7 @@ function handleDrop(event) {
 }
 
 function handleKeydown(event) {
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+  if (event.key === 'Enter' && !props.mobile && !window.matchMedia('(pointer: coarse)').matches && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
     event.preventDefault()
     submit()
   }
@@ -289,6 +290,7 @@ onBeforeUnmount(() => {
       v-model="text"
       class="composer-input block w-full resize-none bg-transparent px-3 pb-1 pt-3 text-sm leading-6 outline-none"
       rows="1"
+      enterkeyhint="enter"
       placeholder="向 Agent 发送消息"
       @keydown="handleKeydown"
       @paste="handlePaste"

@@ -603,7 +603,7 @@ onBeforeUnmount(() => {
       <footer class="composer-wrap shrink-0 p-3 sm:p-4">
         <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
         <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex max-w-3xl items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs"><span>{{ sendBlockedReason }}</span><PxButton variant="ghost" size="sm" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</PxButton></div>
-        <AgentComposer :key="activeTaskId" :task-id="task.id" :running="isRunning" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="v2Api.cancelTask(activeTaskId)" @draft-change="saveTaskDraft" />
+        <AgentComposer :mobile="mobile" :key="activeTaskId" :task-id="task.id" :running="isRunning" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="v2Api.cancelTask(activeTaskId)" @draft-change="saveTaskDraft" />
       </footer>
       <TaskTerminal v-if="terminalOpen && !drawerMode" :key="task.id" :task-id="task.id" @close="terminalOpen = false" />
     </template>

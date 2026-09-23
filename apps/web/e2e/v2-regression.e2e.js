@@ -921,3 +921,27 @@ test('移动端长 JSON 错误在提示框内换行，不产生 Timeline 横向�
     await page.close()
   }
 })
+
+
+test('手机 Enter 换行并通过按钮发送，桌面保留 Enter 发送和 Shift+Enter 换行', async (t) => {
+  const fixture = await createFixture(t)
+  for (const mobile of [true, false]) {
+    const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1440, height: 900 }, isMobile: mobile, hasTouch: mobile })
+    await page.goto(fixture.baseUrl)
+    if (mobile) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    await page.getByText('回归基线已经准备完成。').waitFor()
+    const input = page.getByPlaceholder('向 Agent 发送消息')
+    const before = fixture.runtimeRecords.turns.length
+    await input.fill('第一行')
+    await input.press(mobile ? 'Enter' : 'Shift+Enter')
+    await input.pressSequentially('第二行')
+    assert.equal(await input.inputValue(), '第一行\n第二行')
+    assert.equal(fixture.runtimeRecords.turns.length, before)
+    if (mobile) await page.getByRole('button', { name: '发送', exact: true }).click()
+    else await input.press('Enter')
+    await page.waitForFunction(() => document.querySelector('textarea[placeholder="向 Agent 发送消息"]').value === '')
+    assert.equal(fixture.runtimeRecords.turns.length, before + 1)
+    await page.getByText('已处理：第一行\n第二行', { exact: true }).last().waitFor()
+    await page.close()
+  }
+})
