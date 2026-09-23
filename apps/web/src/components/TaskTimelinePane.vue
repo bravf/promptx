@@ -36,6 +36,7 @@ const timelineSyncing = ref(false)
 const timelineSyncError = ref('')
 const sending = ref(false)
 const agentControl = ref(null)
+const controlLoading = ref(false)
 const sendBlockedReason = ref('')
 const settingsLoading = ref(false)
 const error = ref('')
@@ -215,6 +216,7 @@ async function selectTask(taskId) {
   hasNewTimelineItems.value = false
   closeEvents()
   if (cachedTimeline) openEvents(taskId, cachedTimeline.epoch, cachedTimeline.maxSeq)
+  loadTaskControl(taskId, requestVersion)
   try {
     const [result, turnResult] = await Promise.all([
       v2Api.getTaskTimeline(taskId, { limit: INITIAL_TIMELINE_LIMIT, mode: 'presented' }),
@@ -233,7 +235,6 @@ async function selectTask(taskId) {
     positioningTimeline = false
     closeEvents()
     openEvents(taskId, result.timeline.epoch, result.timeline.window.maxSeq)
-    loadTaskControl(taskId, requestVersion)
     fillTimelineViewport()
   } catch (cause) {
     if (requestVersion === timelineRequestVersion) {
@@ -256,11 +257,14 @@ async function selectTask(taskId) {
 }
 
 async function loadTaskControl(taskId, requestVersion = timelineRequestVersion) {
+  controlLoading.value = true
   try {
     const result = await v2Api.getTaskControl(taskId)
     if (requestVersion === timelineRequestVersion && activeTaskId.value === taskId) agentControl.value = result.control
   } catch (cause) {
     if (requestVersion === timelineRequestVersion && activeTaskId.value === taskId) error.value = cause.message
+  } finally {
+    if (requestVersion === timelineRequestVersion && activeTaskId.value === taskId) controlLoading.value = false
   }
 }
 
@@ -603,7 +607,7 @@ onBeforeUnmount(() => {
       <footer class="composer-wrap shrink-0 p-3 sm:p-4">
         <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
         <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex max-w-3xl items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs"><span>{{ sendBlockedReason }}</span><PxButton variant="ghost" size="sm" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</PxButton></div>
-        <AgentComposer :mobile="mobile" :key="activeTaskId" :task-id="task.id" :running="isRunning" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="v2Api.cancelTask(activeTaskId)" @draft-change="saveTaskDraft" />
+        <AgentComposer :mobile="mobile" :key="activeTaskId" :task-id="task.id" :running="isRunning" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :control-loading="controlLoading" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="v2Api.cancelTask(activeTaskId)" @draft-change="saveTaskDraft" />
       </footer>
       <TaskTerminal v-if="terminalOpen && !drawerMode" :key="task.id" :task-id="task.id" @close="terminalOpen = false" />
     </template>

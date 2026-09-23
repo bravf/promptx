@@ -4,6 +4,10 @@ import { filePromptText, imageBase64 } from '../promptAttachments.js'
 import { createControlState, effortLabel, normalizeContextUsage } from '../controlState.js'
 import { readClaudeHistorySnapshot, listClaudeHistorySessions } from '../history/providers/claudeHistory.js'
 
+// 只缓存工作区的选项目录，不共享会话选择或上下文用量。
+const modelCatalogs = new Map()
+const MODEL_CATALOG_TTL = 5 * 60 * 1000
+
 class AsyncMessageQueue {
   constructor() {
     this.values = []
@@ -86,9 +90,10 @@ function normalizeClaudeModels(items = []) {
 }
 
 export class ClaudeRuntime extends EventEmitter {
-  constructor({ cwd, nativeHandle = {}, modelId = '', config = {} }) {
+  constructor({ cwd, nativeHandle = {}, modelId = '', config = {}, queryFactory = query }) {
     super()
     this.cwd = cwd
+    this.queryFactory = queryFactory
     this.sessionId = nativeHandle.sessionId || ''
     this.modelId = modelId
     this.reasoningEffort = config.reasoningEffort || ''
@@ -119,7 +124,7 @@ export class ClaudeRuntime extends EventEmitter {
     this.controller = controller
     this.inputQueue = inputQueue
     this.closing = false
-    const runningQuery = query({
+    const runningQuery = this.queryFactory({
       prompt: inputQueue,
       options: {
         cwd: this.cwd,
@@ -135,6 +140,12 @@ export class ClaudeRuntime extends EventEmitter {
     this.consume(runningQuery, controller)
     try {
       const models = normalizeClaudeModels(await runningQuery.supportedModels())
+      if (this.runningQuery !== runningQuery || controller.signal.aborted) throw new Error('Claude 连接已关闭。')
+      if (models.length) {
+        modelCatalogs.delete(this.cwd)
+        modelCatalogs.set(this.cwd, { models, expiresAt: Date.now() + MODEL_CATALOG_TTL })
+        if (modelCatalogs.size > 32) modelCatalogs.delete(modelCatalogs.keys().next().value)
+      }
       this.controlState = createControlState({
         models,
         requestedModelId: this.modelId,
@@ -143,9 +154,9 @@ export class ClaudeRuntime extends EventEmitter {
       })
       this.modelId = this.controlState.currentModelId
       this.reasoningEffort = this.controlState.currentReasoningEffort
-      await this.refreshContextUsage()
       this.connected = true
       this.emit('controlState', this.controlState)
+      void this.refreshContextUsage()
     } catch (error) {
       if (this.runningQuery === runningQuery) {
         this.runningQuery = null
@@ -162,6 +173,17 @@ export class ClaudeRuntime extends EventEmitter {
   }
 
   async getControlState() {
+    if (this.connected) return this.controlState
+    const cached = modelCatalogs.get(this.cwd)
+    if (cached?.expiresAt > Date.now()) {
+      this.controlState = createControlState({
+        models: cached.models,
+        requestedModelId: this.modelId,
+        requestedReasoningEffort: this.reasoningEffort,
+        contextUsage: this.controlState.contextUsage,
+      })
+      return this.controlState
+    }
     await this.connect()
     return this.controlState
   }
@@ -202,9 +224,11 @@ export class ClaudeRuntime extends EventEmitter {
   }
 
   async refreshContextUsage() {
-    if (!this.runningQuery) return
+    const runningQuery = this.runningQuery
+    if (!runningQuery) return
     try {
-      const usage = await this.runningQuery.getContextUsage()
+      const usage = await runningQuery.getContextUsage()
+      if (this.runningQuery !== runningQuery || this.closing) return
       this.controlState = {
         ...this.controlState,
         contextUsage: normalizeContextUsage(usage.totalTokens, usage.maxTokens),

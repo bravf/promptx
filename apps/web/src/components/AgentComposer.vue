@@ -17,6 +17,7 @@ const props = defineProps({
   sending: { type: Boolean, default: false },
   blockedReason: { type: String, default: '' },
   control: { type: Object, default: null },
+  controlLoading: { type: Boolean, default: false },
   settingsLoading: { type: Boolean, default: false },
   onSubmit: { type: Function, required: true },
   onSettingsChange: { type: Function, required: true },
@@ -301,6 +302,9 @@ onBeforeUnmount(() => {
         <input ref="fileInput" class="hidden" type="file" multiple @change="handleFileInput" />
         <PxIconButton class="composer-control-button h-7 w-7" label="添加图片或文件" :disabled="running || attachments.length >= MAX_ATTACHMENTS" @click="chooseFiles"><Paperclip class="h-4 w-4" /></PxIconButton>
         <span v-if="dragging" class="theme-muted-text text-[10px]">松开以添加附件</span>
+        <span v-if="controlLoading && !control" role="status" class="theme-muted-text flex items-center gap-1 text-xs">
+          <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin" />正在加载模型与强度
+        </span>
         <div v-if="control?.models?.length" class="composer-select-wrap model-select min-w-0 max-w-48 rounded-full">
           <PxSelect
             :model-value="control.currentModelId"
