@@ -80,7 +80,7 @@ let resolveDialogHistoryClose = null
 const attentionClearPending = new Set()
 
 const providerOptions = computed(() => providers.value.map((provider) => ({ value: provider.id, label: provider.label })))
-const executionOptions = [{ value: 'worktree', label: '新建 Worktree' }, { value: 'local', label: '当前目录' }]
+const executionOptions = [{ value: 'local', label: '当前目录' }, { value: 'worktree', label: '新建 Worktree' }]
 const baseRefOptions = [
   { value: 'HEAD', label: 'HEAD（当前提交）' },
   { value: 'origin/main', label: 'origin/main' },
@@ -557,23 +557,46 @@ onBeforeUnmount(() => {
     <div v-if="error" class="shell-error error-row absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-sm border px-3 py-2 text-xs"><span>{{ error }}</span><PxIconButton class="h-6 w-6" label="关闭错误提示" @click="error = ''"><X class="h-3.5 w-3.5" /></PxIconButton></div>
     <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" @changed="refreshProjects" />
 
-    <PxDialog :open="dialog === 'conversation'" panel-class="new-conversation-panel h-[100dvh] max-h-[100dvh] max-w-none border-0 sm:h-[min(44rem,calc(100dvh-1.5rem))] sm:max-h-[min(44rem,calc(100dvh-1.5rem))] sm:max-w-md sm:border" header-class="h-14 px-4 sm:px-5" body-class="flex min-h-0 flex-1 flex-col" @close="closeDialog">
+    <PxDialog :open="dialog === 'conversation'" panel-class="new-conversation-panel max-h-[calc(100dvh-1.5rem)] max-w-none border-0 sm:max-h-[calc(100dvh-3rem)] sm:max-w-md sm:border" header-class="h-14 shrink-0 px-4 sm:px-5" body-class="flex min-h-0 flex-col" @close="closeDialog">
       <template #title><h2 class="text-sm font-semibold">新会话</h2></template>
-      <form class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4 pt-4 sm:pt-5" @submit.prevent="createConversation">
-        <PxField label="路径" for-id="workspace-path" :error="directorySearchError">
-          <DirectorySearchInput ref="projectPathInput" v-model="projectPath" class="mt-1" :loading="directorySearchLoading" :open="directorySuggestionsOpen" :suggestions="directorySuggestions" :error="directorySearchError" :selected-index="selectedDirectoryIndex" :disabled="creating || directoryPicking" :picking="directoryPicking" @input="scheduleDirectorySearch" @keydown="handleDirectoryKeydown" @mouseenter="selectedDirectoryIndex = $event" @select="selectDirectory" @browse="browseDirectory" />
-        </PxField>
-        <PxAlert v-if="conversationError" class="mt-3 shrink-0">{{ conversationError }}</PxAlert>
-        <div class="shrink-0">
-          <PxField class="mt-4" label="Provider" for-id="conversation-provider"><PxSelect id="conversation-provider" v-model="taskProvider" :options="providerOptions" :disabled="creating" aria-label="Provider" /></PxField>
-          <PxField class="mt-4" label="任务标题" for-id="task-title"><input id="task-title" v-model="taskTitle" class="tool-input mt-1" placeholder="任务标题" :disabled="creating" /></PxField>
-          <PxField class="mt-4" label="执行位置" for-id="execution-kind"><PxSelect id="execution-kind" v-model="executionKind" :options="executionOptions" :disabled="creating" aria-label="执行位置" /></PxField>
-          <div v-if="executionKind === 'worktree'" class="grid grid-cols-1 gap-2">
-            <PxField class="mt-2" label="基线" for-id="task-base-ref"><PxSelect id="task-base-ref" v-model="taskBaseRef" :options="baseRefOptions" :disabled="creating" aria-label="基线" /></PxField>
-            <PxField label="Worktree 名称" hint="可选，例如 fix-login"><input v-model="taskSlug" class="tool-input mt-1" placeholder="Worktree 名称，例如 fix-login" :disabled="creating" /></PxField>
+      <form class="flex min-h-0 flex-col" @submit.prevent="createConversation">
+        <div class="min-h-0 overflow-y-auto px-4 pt-4 sm:pt-5">
+          <PxField label="任务标题（可选）" for-id="task-title"><input id="task-title" v-model="taskTitle" class="tool-input" placeholder="任务标题" :disabled="creating" /></PxField>
+          <PxField class="mt-4" label="目录" for-id="workspace-path" :error="directorySearchError">
+            <DirectorySearchInput ref="projectPathInput" v-model="projectPath" :loading="directorySearchLoading" :open="directorySuggestionsOpen" :suggestions="directorySuggestions" :error="directorySearchError" :selected-index="selectedDirectoryIndex" :disabled="creating || directoryPicking" :picking="directoryPicking" @input="scheduleDirectorySearch" @keydown="handleDirectoryKeydown" @mouseenter="selectedDirectoryIndex = $event" @select="selectDirectory" @browse="browseDirectory" />
+          </PxField>
+          <PxAlert v-if="conversationError" class="mt-3 shrink-0">{{ conversationError }}</PxAlert>
+          <div class="shrink-0">
+            <fieldset class="mt-4 min-w-0" :disabled="creating">
+              <legend class="theme-muted-text mb-1.5 text-xs">智能体</legend>
+              <div class="flex flex-wrap gap-2">
+                <label v-for="provider in providerOptions" :key="provider.value" class="conversation-radio relative cursor-pointer">
+                  <input v-model="taskProvider" class="peer sr-only" type="radio" name="conversation-provider" :value="provider.value" />
+                  <span class="conversation-radio-option flex min-h-10 items-center justify-center gap-2 rounded-sm border px-3 py-2 text-xs">
+                    <AgentProviderIcon :provider-id="provider.value" :label="provider.label" aria-hidden="true" />{{ provider.label }}
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+            <fieldset class="mt-4 min-w-0" :disabled="creating">
+              <legend class="theme-muted-text mb-1.5 text-xs">执行位置</legend>
+              <div class="flex flex-wrap gap-2">
+                <label v-for="option in executionOptions" :key="option.value" class="conversation-radio relative cursor-pointer">
+                  <input v-model="executionKind" class="peer sr-only" type="radio" name="execution-kind" :value="option.value" />
+                  <span class="conversation-radio-option flex min-h-10 items-center justify-center rounded-sm border px-3 py-2 text-xs">{{ option.label }}</span>
+                </label>
+              </div>
+            </fieldset>
+            <div v-if="executionKind === 'worktree'" class="mt-4 grid grid-cols-1 gap-4">
+              <PxField label="基线" for-id="task-base-ref"><PxSelect id="task-base-ref" v-model="taskBaseRef" :options="baseRefOptions" :disabled="creating" aria-label="基线" /></PxField>
+              <PxField label="Worktree 名称（可选）"><input v-model="taskSlug" class="tool-input" placeholder="Worktree 名称" :disabled="creating" /></PxField>
+            </div>
           </div>
         </div>
-        <div class="sticky bottom-0 mt-4 flex shrink-0 justify-end border-t px-0 pb-0 pt-3" style="background: var(--theme-appPanel);"><PxButton type="submit" variant="primary" size="sm" :loading="creating" :disabled="!projectPath.trim() || !taskProvider">创建会话</PxButton></div>
+        <div class="flex shrink-0 justify-end gap-2 px-4 pb-4 pt-6">
+          <PxButton size="sm" :disabled="creating" @click="closeDialog">取消</PxButton>
+          <PxButton type="submit" variant="primary" size="sm" :loading="creating" :disabled="!projectPath.trim() || !taskProvider">创建会话</PxButton>
+        </div>
       </form>
     </PxDialog>
 
@@ -641,6 +664,11 @@ onBeforeUnmount(() => {
 .agent-dot-finished { background: var(--theme-success); }
 .agent-dot-failed { background: var(--theme-danger); }
 .row-active { background: var(--theme-appPanelActive); }
+.conversation-radio-option { border-color: var(--theme-inputBorder); background: var(--theme-inputBg); color: var(--theme-textMuted); }
+.conversation-radio:hover .conversation-radio-option { background: var(--theme-appPanelHover); }
+.conversation-radio input:checked + .conversation-radio-option { border-color: var(--theme-primaryBorder); background: var(--theme-primaryBg); color: var(--theme-primaryText); }
+.conversation-radio input:focus-visible + .conversation-radio-option { outline: 2px solid var(--theme-focusRing); outline-offset: 2px; }
+.conversation-radio input:disabled + .conversation-radio-option { opacity: 0.5; cursor: not-allowed; }
 .session-view-button { color: var(--theme-textMuted); }
 .session-view-button:hover { background: var(--theme-appPanelHover); }
 .session-view-button.is-active { background: var(--theme-appPanelActive); color: var(--theme-textPrimary); }
