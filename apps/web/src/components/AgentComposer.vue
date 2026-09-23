@@ -305,7 +305,7 @@ onBeforeUnmount(() => {
         <span v-if="controlLoading && !control" role="status" class="theme-muted-text flex items-center gap-1 text-xs">
           <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin" />正在加载模型与强度
         </span>
-        <div v-if="control?.models?.length" class="composer-select-wrap model-select min-w-0 max-w-48 rounded-full">
+        <div v-if="control?.models?.length" class="composer-select-wrap model-select min-w-0 rounded-full">
           <PxSelect
             :model-value="control.currentModelId"
             :options="modelOptions"
@@ -378,7 +378,10 @@ onBeforeUnmount(() => {
 .composer-select-wrap :deep(.px-select-trigger) { min-height: 1.75rem; border-color: transparent; background: transparent; color: var(--theme-textMuted); }
 .composer-select-wrap :deep(.px-select-trigger:hover:not(:disabled)), .composer-select-wrap :deep(.px-select-trigger:focus-visible) { border-color: transparent; background: transparent; }
 .effort-select :deep(.px-select-trigger) { padding-left: 2rem; }
-.model-select :deep(.px-select-trigger) { max-width: min(7.5rem, 34vw); }
+.model-select { width: max-content; max-width: 100%; flex: 0 1 auto; }
+.model-select :deep(.px-select) { width: max-content; max-width: 100%; }
+.model-select :deep(.px-select-trigger) { width: max-content; min-width: 7.5rem; max-width: 100%; }
+.model-select :deep(.px-select-trigger > span) { overflow: visible; text-overflow: clip; white-space: nowrap; }
 .context-usage { color: var(--theme-textMuted); }
 .context-ring { transform: rotate(-90deg); }
 .context-ring-track { stroke: var(--theme-appPanelMuted); }
@@ -391,7 +394,10 @@ onBeforeUnmount(() => {
   .composer-input { min-height: 38px; padding-top: 0.5rem; }
   .composer-toolbar { flex-wrap: nowrap; }
   .composer-controls { flex-basis: auto; }
-  .model-select { width: auto; max-width: min(7.5rem, 34vw); flex: 0 1 auto; }
+  .model-select { width: max-content; max-width: 100%; flex: 0 1 auto; }
+  .model-select :deep(.px-select-trigger) { width: max-content; min-width: 0; max-width: 100%; }
+  .model-select :deep(.px-select) { width: max-content; max-width: 100%; }
+  .model-select :deep(.px-select-trigger > span) { overflow: hidden; text-overflow: ellipsis; }
   .effort-control { flex: 0 0 auto; }
   .composer-actions { gap: 0.25rem; margin-left: auto; }
 }
