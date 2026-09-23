@@ -34,10 +34,32 @@ echo "构建 PromptX Relay 发布包..."
 cd "$ROOT_DIR"
 pnpm build
 
-PACKAGE_NAME="$(npm pack --ignore-scripts --pack-destination "$TMP_DIR" | tail -n 1)"
+# 阿里云只运行 Relay。单独组装发布包，避免服务器解析本机 Agent（Claude、Codex 等）依赖。
+RELAY_STAGE="$TMP_DIR/promptx-relay-package"
+mkdir -p "$RELAY_STAGE/packages/relay" "$RELAY_STAGE/packages/shared/src" "$RELAY_STAGE/apps/web" "$RELAY_STAGE/scripts"
+cp -R "$ROOT_DIR/packages/relay/src" "$RELAY_STAGE/packages/relay/"
+cp "$ROOT_DIR/packages/shared/src/dailyLogStream.js" "$RELAY_STAGE/packages/shared/src/"
+cp -R "$ROOT_DIR/apps/web/dist" "$RELAY_STAGE/apps/web/"
+cp "$ROOT_DIR/scripts/relay.mjs" "$RELAY_STAGE/scripts/"
+RELAY_VERSION="$(node -p "require('./package.json').version")"
+cat > "$RELAY_STAGE/package.json" <<EOF
+{
+  "name": "@muyichengshayu/promptx",
+  "version": "$RELAY_VERSION",
+  "private": false,
+  "type": "module",
+  "dependencies": {
+    "@fastify/static": "^9.0.0",
+    "fastify": "^5.8.2",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.18.3"
+  }
+}
+EOF
+PACKAGE_NAME="$(cd "$RELAY_STAGE" && npm pack --ignore-scripts --pack-destination "$TMP_DIR" | tail -n 1)"
 PACKAGE_PATH="$TMP_DIR/$PACKAGE_NAME"
 if [ ! -f "$PACKAGE_PATH" ]; then
-  echo "发布包生成失败: $PACKAGE_PATH"
+  echo "Relay 发布包生成失败: $PACKAGE_PATH"
   exit 1
 fi
 
