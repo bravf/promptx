@@ -894,3 +894,30 @@ test('Timeline 加载工作区外绝对路径图片，支持重试且拒绝非�
   await mobileViewer.waitFor({ state: 'detached' })
 
 })
+
+
+test('移动端长 JSON 错误在提示框内换行，不产生 Timeline 横向溢出', async (t) => {
+  const fixture = await createFixture(t)
+  const repository = fixture.app.sqliteRepository
+  const turn = repository.createTurn(fixture.task.id, 'long-error')
+  repository.updateTurn(turn.id, { status: 'failed' })
+  const message = JSON.stringify({ error: { message: "Missing namespace for function_call 'js'.", param: 'input[18].namespace', type: 'invalid_request_error', detail: 'unbroken'.repeat(80) } })
+  repository.appendTimeline(fixture.task.id, turn.id, { type: 'error', message })
+  for (const width of [320, 390]) {
+    const page = await fixture.browser.newPage({ viewport: { width, height: 844 }, isMobile: true, hasTouch: true })
+    await page.goto(fixture.baseUrl)
+    await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    const error = page.locator('.error-row').filter({ hasText: message })
+    await error.waitFor()
+    assert.equal(await error.textContent(), message)
+    assert.ok(await error.evaluate(el => el.scrollWidth <= el.clientWidth))
+    assert.ok(await error.evaluate(el => {
+      for (let node = el.parentElement; node && !node.classList.contains('timeline-workspace'); node = node.parentElement) {
+        if (node.scrollWidth > node.clientWidth + 1) return false
+      }
+      return true
+    }))
+    await assertNoHorizontalOverflow(page)
+    await page.close()
+  }
+})

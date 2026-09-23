@@ -649,7 +649,7 @@ onBeforeUnmount(() => {
 .timeline-generating-dot:nth-child(2) { animation-delay: 160ms; }
 .timeline-generating-dot:nth-child(3) { animation-delay: 320ms; }
 @keyframes timeline-generating-pulse { 0%, 55%, 100% { opacity: 0.28; } 25% { opacity: 1; } }
-.error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
+.error-row { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .writer-blocked-row { border-color: var(--theme-warning); background: var(--theme-warningSoft); color: var(--theme-warningText); }
 .drawer-trigger.is-active { background: var(--theme-accentSoft); color: var(--theme-accentText); }
 .workspace-drawer-enter-active { transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease; }

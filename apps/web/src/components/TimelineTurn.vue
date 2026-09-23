@@ -94,7 +94,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
                   <span class="truncate">{{ link.path }}<template v-if="link.line">:{{ link.line }}</template></span>
                 </button>
               </div>
-              <div v-if="entry.item.error?.message" class="theme-danger-text mt-1">{{ entry.item.error.message }}</div>
+              <div v-if="entry.item.error?.message" class="theme-danger-text mt-1 [overflow-wrap:anywhere]">{{ entry.item.error.message }}</div>
             </div>
           </div>
           <div v-else-if="entry.item.type === 'todo'" class="space-y-1">
@@ -131,7 +131,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
 <style scoped>
 .process-toggle { border: 0; background: transparent; }
 .process-toggle:hover { color: var(--theme-textPrimary); }
-.error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
+.error-row { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .workspace-path-link { color: var(--theme-accentText); }
 .workspace-path-link:hover { text-decoration: underline; }
 </style>
