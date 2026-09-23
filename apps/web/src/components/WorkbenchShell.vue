@@ -647,7 +647,7 @@ onBeforeUnmount(() => {
 .sidebar-primary-action { justify-content: flex-start; background: var(--theme-primaryBg); color: var(--theme-primaryText); }
 .sidebar-primary-action:hover { filter: brightness(0.96); }
 .sidebar-secondary-action, .settings-entry { justify-content: flex-start; color: var(--theme-textMuted); }
-.sidebar-secondary-action:hover, .settings-entry:hover, .workspace-heading:hover, .agent-row:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
+.sidebar-secondary-action:hover, .settings-entry:hover, .workspace-heading:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 .workspace-active { color: var(--theme-text); }
 .task-navigation:focus-visible { outline: 1px solid var(--theme-focusRing); outline-offset: -1px; }
 .agent-row .agent-provider-icon { color: var(--theme-textMuted); }
@@ -663,7 +663,10 @@ onBeforeUnmount(() => {
 .task-rename-input:focus { border-color: var(--theme-borderStrong); box-shadow: 0 0 0 1px var(--theme-focusRing); }
 .agent-dot-finished { background: var(--theme-success); }
 .agent-dot-failed { background: var(--theme-danger); }
-.row-active { background: var(--theme-appPanelActive); }
+.agent-row.row-active { background: var(--theme-appPanelActive); }
+@media (hover: hover) and (pointer: fine) {
+  .agent-row:not(.row-active):hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
+}
 .conversation-radio-option { border-color: var(--theme-inputBorder); background: var(--theme-inputBg); color: var(--theme-textMuted); }
 .conversation-radio:hover .conversation-radio-option { background: var(--theme-appPanelHover); }
 .conversation-radio input:checked + .conversation-radio-option { border-color: var(--theme-primaryBorder); background: var(--theme-primaryBg); color: var(--theme-primaryText); }
