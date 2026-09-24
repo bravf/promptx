@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { Archive, Folder, FolderOpen, LoaderCircle, Pencil, Pin, PinOff, Plus, Settings, TerminalSquare, X } from 'lucide-vue-next'
+import { sessionActivity } from '../lib/backgroundTaskPresentation.js'
 import { v2Api, globalEventsUrl } from '../lib/v2Api.js'
 import { readActiveTaskId, writeActiveTaskId } from '../lib/activeTaskStorage.js'
 import { createEventSource } from '../lib/eventSource.js'
@@ -509,12 +510,12 @@ onBeforeUnmount(() => {
               <div class="agent-list">
                 <div v-for="task in tasksForProject(project.id)" :key="task.id" class="agent-row group flex h-8 min-w-0 items-center overflow-hidden rounded-sm pl-6" :class="task.id === focusedTaskId ? 'row-active' : ''">
                   <input v-if="renamingTaskId === task.id" :ref="(element) => { if (element) taskRenameInput = element }" v-model="taskRenameDraft" class="task-rename-input mx-1 h-8 min-w-0 max-w-full flex-[1_1_0%] rounded-sm border px-2 text-xs outline-none" maxlength="120" :disabled="taskRenameSaving" :aria-label="`重命名 ${task.title}`" @click.stop @blur="saveTaskRename(task)" @keydown.enter.prevent="$event.currentTarget.blur()" @keydown.esc.prevent="cancelTaskRename" />
-                  <div v-else role="link" tabindex="0" class="task-navigation flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 text-left" :aria-current="task.id === focusedTaskId ? 'page' : undefined" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })" @keydown.enter.prevent="selectTask(task.id, { navigate: true })">
+                  <div v-else role="link" :aria-label="task.title" tabindex="0" class="task-navigation flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 text-left" :aria-current="task.id === focusedTaskId ? 'page' : undefined" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })" @keydown.enter.prevent="selectTask(task.id, { navigate: true })">
                     <AgentProviderIcon :provider-id="task.providerId" :label="providerLabel(task.providerId)" />
                     <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="task.title" :active="task.id === focusedTaskId" />
                     <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
                     <Pin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
-                    <LoaderCircle v-if="task.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
+                    <LoaderCircle v-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
                   </div>
                   <PxActionMenu class="agent-action" :label="`${task.title} 的更多操作`" :items="taskMenuItems(task)" @select="handleTaskMenu($event, task)" />
                 </div>
@@ -530,13 +531,13 @@ onBeforeUnmount(() => {
             <h3 class="theme-muted-text px-2 pb-1 pt-3 text-[11px] font-medium">{{ group.label }}</h3>
             <div v-for="task in group.tasks" :key="task.id" class="agent-row recent-session-row group flex min-w-0 items-center rounded-sm" :class="{ 'row-active': task.id === focusedTaskId }">
               <input v-if="renamingTaskId === task.id" :ref="(element) => { if (element) taskRenameInput = element }" v-model="taskRenameDraft" class="task-rename-input mx-1 h-8 min-w-0 max-w-full flex-[1_1_0%] rounded-sm border px-2 text-xs outline-none" maxlength="120" :disabled="taskRenameSaving" :aria-label="`重命名 ${task.title}`" @click.stop @blur="saveTaskRename(task)" @keydown.enter.prevent="$event.currentTarget.blur()" @keydown.esc.prevent="cancelTaskRename" />
-              <div v-else role="link" tabindex="0" class="task-navigation min-w-0 flex-1 cursor-pointer px-2 py-2 text-left" :aria-current="task.id === focusedTaskId ? 'page' : undefined" :title="`${task.title} · ${projectForTask(task)?.displayName || ''} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })" @keydown.enter.prevent="selectTask(task.id, { navigate: true })">
+              <div v-else role="link" :aria-label="task.title" tabindex="0" class="task-navigation min-w-0 flex-1 cursor-pointer px-2 py-2 text-left" :aria-current="task.id === focusedTaskId ? 'page' : undefined" :title="`${task.title} · ${projectForTask(task)?.displayName || ''} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })" @keydown.enter.prevent="selectTask(task.id, { navigate: true })">
                 <div class="flex min-w-0 items-center gap-2">
                   <AgentProviderIcon :provider-id="task.providerId" :label="providerLabel(task.providerId)" />
                   <SessionTitleMarquee class="min-w-0 flex-1 text-xs font-medium" :title="task.title" :active="task.id === focusedTaskId" />
                   <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
                   <Pin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
-                  <LoaderCircle v-if="task.lifecycle === 'running'" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" aria-label="运行中" />
+                  <LoaderCircle v-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" aria-label="运行中" />
                 </div>
                 <div class="theme-muted-text mt-1 flex min-w-0 items-center gap-2 text-[11px]" :title="projectForTask(task)?.repositoryRoot"><Folder class="h-[1em] w-[1em] shrink-0" /><span class="truncate">{{ projectForTask(task)?.displayName || '未知工作区' }}</span></div>
               </div>

@@ -113,6 +113,8 @@ onBeforeUnmount(() => clearInterval(clockTimer))
       </div>
     </section>
 
+    <slot name="subagents" />
+
     <article v-for="entry in turn.outputEntries" :key="entry.seqStart" class="mb-5" :class="entry.item.type === 'assistant_message' ? 'timeline-message' : ''" :data-timeline-seq="entry.seqEnd">
       <div v-if="entry.item.type === 'assistant_message'" class="flex gap-3">
         <Bot class="mt-1 h-4 w-4 shrink-0" />

@@ -18,6 +18,8 @@ export class AgentManager {
     this.preparingTurns = new Set()
     this.exclusiveOperations = new Set()
     this.controlStates = new Map()
+    this.toolOwners = new Map()
+    this.toolOwnerSessions = new Set()
     this.coalescer = new TimelineCoalescer((payload) => this.commitTimeline(payload))
     this.timelineSync = new TimelineSyncCoordinator({
       assetsDir,
@@ -58,19 +60,67 @@ export class AgentManager {
     runtime.on('capabilities', (capabilities) => {
       if (this.repository.getAgent(agent.id)) this.repository.updateAgent(agent.id, { capabilities })
     })
-    runtime.on('timeline', (item) => {
+    runtime.on('backgroundTask', (task) => {
+      if (this.runtimes.get(agent.id) !== runtime) return
+      const previous = this.repository.getAgent(agent.id)?.backgroundTasks?.find(item => item.id === task.id)
+      this.repository.upsertProviderTask(agent.id, { ...task, originTurnId: previous?.originTurnId || this.activeTurns.get(agent.id)?.id || null })
+      const updated = this.repository.getAgent(agent.id)
+      if (updated.backgroundTasks.some(item => ['running', 'pending'].includes(item.status) && !item.ambient)) {
+        this.repository.updateAgent(agent.id, { requiresAttention: false, attentionReason: null, attentionAt: null })
+      } else if (!this.activeTurns.has(agent.id) && !task.ambient && previous?.status !== task.status) {
+        const related = updated.backgroundTasks.filter(item => !item.ambient && item.originTurnId === previous?.originTurnId)
+        const failed = related.some(item => ['failed', 'interrupted'].includes(item.status))
+        if (failed || task.status === 'completed') this.repository.updateAgent(agent.id, {
+          requiresAttention: true, attentionReason: failed ? 'error' : 'finished', attentionAt: nowIso(),
+        })
+      }
+      this.eventHub.publish(agent.id, { type: 'agent', agent: this.repository.getAgent(agent.id) })
+    })
+    runtime.on('timeline', (item, context = {}) => {
+      if (this.runtimes.get(agent.id) !== runtime) return
       const turn = this.activeTurns.get(agent.id)
+      if (item.type === 'tool_call' && item.callId) {
+        if (!this.toolOwnerSessions.has(agent.id)) {
+          for (const row of this.repository.listTimelineRows(agent.taskId)) if (row.item.type === 'tool_call') this.toolOwners.set(`${agent.id}:${row.item.callId}`, row.turnId || null)
+          this.toolOwnerSessions.add(agent.id)
+        }
+        const key = `${agent.id}:${item.callId}`
+        if (!this.toolOwners.has(key)) {
+          this.toolOwners.set(key, turn?.id || null)
+        }
+        const owner = this.toolOwners.get(key)
+        if (owner !== turn?.id) { this.commitTimeline({ agentId: agent.id, turnId: owner, item }); return }
+      }
+      if (context.nativeTurnId && turn?.nativeTurnId && context.nativeTurnId !== turn.nativeTurnId) return
       if (turn) this.coalescer.push(agent.id, { agentId: agent.id, turnId: turn.id, item })
+      else this.commitTimeline({ agentId: agent.id, turnId: null, item })
     })
-    runtime.on('turnStarted', ({ nativeTurnId } = {}) => this.markStarted(agent.id, nativeTurnId))
-    runtime.on('turnCompleted', ({ usage } = {}) => this.finish(agent.id, 'completed', { usage }))
-    runtime.on('turnFailed', (error) => this.finish(agent.id, 'failed', { error }))
-    runtime.on('turnCanceled', () => this.finish(agent.id, 'canceled'))
+    runtime.on('turnStarted', ({ nativeTurnId, autonomous = false } = {}) => {
+      if (this.runtimes.get(agent.id) !== runtime) return
+      const pending = this.activeTurns.get(agent.id)
+      if (autonomous && pending && !pending.nativeTurnId) {
+        this.finish(agent.id, 'failed', { error: new Error('后台自动续跑先于本次提交开始，请稍后重试。'), runId: pending.clientMessageId })
+      }
+      if (!this.activeTurns.has(agent.id) && autonomous) {
+        const turn = this.repository.createTurn(agent.taskId, `autonomous:${nativeTurnId || randomUUID()}`)
+        this.activeTurns.set(agent.id, turn)
+        this.commitTimeline({ agentId: agent.id, turnId: turn.id, item: { type: 'system_notice', code: 'autonomous_turn', text: '后台任务触发自动续跑' } })
+      }
+      this.markStarted(agent.id, nativeTurnId)
+    })
+    runtime.on('turnCompleted', ({ usage, nativeTurnId, runId } = {}) => this.finish(agent.id, 'completed', { usage, nativeTurnId, runId, runtime }))
+    runtime.on('turnFailed', (error) => this.finish(agent.id, 'failed', { error, nativeTurnId: error.nativeTurnId, runId: error.runId, runtime }))
+    runtime.on('turnCanceled', ({ nativeTurnId, runId } = {}) => this.finish(agent.id, 'canceled', { nativeTurnId, runId, runtime }))
     runtime.on('runtimeExit', () => {
-      if (this.runtimes.get(agent.id) === runtime) this.runtimes.delete(agent.id)
+      if (this.runtimes.get(agent.id) !== runtime) return
+      this.runtimes.delete(agent.id)
       if (this.activeTurns.has(agent.id)) this.finish(agent.id, 'failed', { error: new Error('Agent 运行时意外退出。') })
+      else {
+        const updated = this.repository.updateAgent(agent.id, { lifecycle: 'failed', lastError: 'Agent 运行时意外退出。', requiresAttention: true, attentionReason: 'error', attentionAt: nowIso() })
+        this.eventHub.publish(agent.id, { type: 'agent', agent: updated })
+      }
     })
-    runtime.on('error', (error) => this.finish(agent.id, 'failed', { error }))
+    runtime.on('error', (error) => this.finish(agent.id, 'failed', { error, runtime }))
     this.runtimes.set(agent.id, runtime)
     return runtime
   }
@@ -89,7 +139,7 @@ export class AgentManager {
     }
     const existing = this.repository.getTurnByClientMessage(agent.taskId, input.clientMessageId)
     if (existing) return existing
-    if (this.isBusy(agentId)) {
+    if (this.isBusy(agentId, { includeBackground: false })) {
       const error = new Error('Agent 正在运行，请等待当前任务完成后再发送。')
       error.statusCode = 409
       throw error
@@ -124,6 +174,11 @@ export class AgentManager {
         error.statusCode = 409
         throw error
       }
+      if (this.activeTurns.has(agentId)) {
+        const error = new Error('Agent 已开始自动续跑，请稍后重试。')
+        error.statusCode = 409
+        throw error
+      }
       agent = currentAgent
 
       const timelineContent = providerContent.map(({ absolutePath, ...block }) => block)
@@ -154,10 +209,10 @@ export class AgentManager {
       this.markStarted(agentId)
       try {
         const result = await runtime.startTurn(providerContent, input.clientMessageId)
-        if (result?.nativeTurnId) this.markStarted(agentId, result.nativeTurnId)
+        if (result?.nativeTurnId && this.activeTurns.get(agentId)?.id === turn.id) this.markStarted(agentId, result.nativeTurnId)
         return this.repository.getTurn(turn.id)
       } catch (error) {
-        this.finish(agentId, 'failed', { error })
+        this.finish(agentId, 'failed', { error, runId: input.clientMessageId })
         throw error
       }
     } finally {
@@ -166,6 +221,7 @@ export class AgentManager {
         !this.activeTurns.has(agentId)
         && runtime
         && this.runtimes.get(agentId) === runtime
+        && !runtime.backgroundTasks?.running.length
         && typeof runtime.releaseThreadWriter === 'function'
       ) {
         this.runtimes.delete(agentId)
@@ -249,15 +305,18 @@ export class AgentManager {
       startedAt: turn.startedAt || nowIso(),
     })
     this.activeTurns.set(agentId, updated)
-    this.repository.updateAgent(agentId, { lifecycle: 'running', lastActiveAt: nowIso() })
+    this.repository.updateAgent(agentId, { lifecycle: 'running', lastActiveAt: nowIso(), requiresAttention: false, attentionReason: null, attentionAt: null })
     this.repository.updateTask(updated.taskId, { lastActiveAt: nowIso() })
     this.eventHub.publish(agentId, { type: 'turn', turn: updated })
     this.eventHub.publish(agentId, { type: 'agent', agent: this.repository.getAgent(agentId) })
   }
 
-  finish(agentId, status, { usage = {}, error = null } = {}) {
+  finish(agentId, status, { usage = {}, error = null, nativeTurnId = '', runId = '', runtime: sourceRuntime = null } = {}) {
     const turn = this.activeTurns.get(agentId)
     if (!turn) return
+    if (runId && turn.clientMessageId !== runId) return
+    if (sourceRuntime && this.runtimes.get(agentId) !== sourceRuntime) return
+    if (nativeTurnId && turn.nativeTurnId && turn.nativeTurnId !== nativeTurnId) return
     this.coalescer.flush(agentId)
     const message = error?.message || ''
     const updated = this.repository.updateTurn(turn.id, {
@@ -270,8 +329,14 @@ export class AgentManager {
       this.commitTimeline({ agentId, turnId: turn.id, item: { type: 'error', code: 'provider_error', message } })
     }
     this.activeTurns.delete(agentId)
-    const attention = status === 'completed'
-      ? { requiresAttention: true, attentionReason: 'finished', attentionAt: nowIso() }
+    const backgroundTasks = this.repository.getAgent(agentId)?.backgroundTasks || []
+    const hasBackground = backgroundTasks.some(task => ['running', 'pending'].includes(task.status) && !task.ambient)
+    const requestTurn = this.repository.listTurns(turn.taskId).find(item => !item.clientMessageId.startsWith('autonomous:'))
+    const hasBackgroundError = backgroundTasks.some(task => !task.ambient
+      && ['failed', 'interrupted'].includes(task.status)
+      && [turn.id, requestTurn?.id].includes(task.originTurnId))
+    const attention = status === 'completed' && !hasBackground
+      ? { requiresAttention: true, attentionReason: hasBackgroundError ? 'error' : 'finished', attentionAt: nowIso() }
       : status === 'failed'
         ? { requiresAttention: true, attentionReason: 'error', attentionAt: nowIso() }
         : {}
@@ -285,7 +350,8 @@ export class AgentManager {
     this.eventHub.publish(agentId, { type: 'turn', turn: updated })
     this.eventHub.publish(agentId, { type: 'agent', agent })
     const runtime = this.runtimes.get(agentId)
-    if (runtime && typeof runtime.releaseThreadWriter === 'function') {
+    if (runtime && !runtime.backgroundTasks?.running.length
+        && typeof runtime.releaseThreadWriter === 'function') {
       this.runtimes.delete(agentId)
       runtime.releaseThreadWriter()
     }
@@ -300,15 +366,24 @@ export class AgentManager {
     return row
   }
 
-  async cancel(agentId) {
+  async cancel(agentId, { all = false } = {}) {
     const runtime = this.runtimes.get(agentId)
-    if (!runtime || !this.activeTurns.has(agentId)) return false
-    await runtime.cancel()
-    return true
+    if (!runtime) return false
+    const errors = []
+    if (all && runtime.stopBackgroundTasks) {
+      try { await runtime.stopBackgroundTasks() } catch (error) { errors.push(error) }
+    }
+    const active = this.activeTurns.has(agentId)
+    if (active) {
+      try { await runtime.cancel() } catch (error) { errors.push(error) }
+    }
+    if (errors.length) throw new AggregateError(errors, `部分任务停止失败：${errors.map(error => error.message).join('；')}`)
+    return active || all
   }
 
-  isBusy(agentId) {
-    return this.activeTurns.has(agentId) || this.preparingTurns.has(agentId) || this.exclusiveOperations.has(agentId)
+  isBusy(agentId, { includeBackground = true } = {}) {
+    const background = includeBackground && this.repository.getAgent?.(agentId)?.backgroundTasks?.some(task => !task.ambient && ['pending', 'running'].includes(task.status))
+    return Boolean(background) || this.activeTurns.has(agentId) || this.preparingTurns.has(agentId) || this.exclusiveOperations.has(agentId)
   }
 
   async runExclusive(agentId, callback) {
@@ -356,6 +431,8 @@ export class AgentManager {
 
   async shutdown() {
     this.coalescer.flushAll()
+    this.toolOwners.clear()
+    this.toolOwnerSessions.clear()
     for (const runtime of this.runtimes.values()) runtime.close()
     this.runtimes.clear()
     this.preparingTurns.clear()

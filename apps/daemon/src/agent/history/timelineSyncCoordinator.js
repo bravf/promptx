@@ -132,7 +132,36 @@ export class TimelineSyncCoordinator {
     return sync
   }
 
+  mergeBackgroundTasks(agent, runtime, tasks = []) {
+    if (!tasks.length) return
+    const savedTasks = this.repository.getAgent?.(agent.id)?.backgroundTasks || []
+    const turns = this.repository.listTurns(agent.taskId, 10000)
+    const rows = this.repository.listTimelineRows(agent.taskId)
+    for (const task of tasks) {
+      const saved = savedTasks.find(item => item.id === task.id)
+      const live = runtime.backgroundTasks?.tasks.get(task.id)
+      const call = rows.find(row => row.turnId && row.item.type === 'tool_call' && (
+        (task.callId && row.item.callId === task.callId)
+        || row.item.detail?.agentThreadId === task.id
+        || row.item.detail?.receiverThreadIds?.includes(task.id)
+      ))
+      const source = turns.find(turn => task.originSourceTurnId && [turn.providerPromptId, turn.nativeTurnId].includes(task.originSourceTurnId))
+      const originTurnId = saved?.originTurnId || call?.turnId || source?.id || null
+      if (live) {
+        if (originTurnId && originTurnId !== saved?.originTurnId) this.repository.upsertProviderTask?.(agent.id, { id: task.id, originTurnId })
+        continue
+      }
+      const patch = { ...task, originTurnId }
+      if (!task.summary?.trim() && saved?.summary) delete patch.summary
+      if (saved && ['completed', 'failed', 'canceled'].includes(saved.status)
+        && ['interrupted', 'running', 'pending'].includes(task.status)) patch.status = saved.status
+      this.repository.upsertProviderTask?.(agent.id, patch)
+    }
+    this.eventHub.publish(agent.id, { type: 'agent', agent: this.repository.getAgent?.(agent.id) })
+  }
+
   async runOnce(agent, operation) {
+    if (this.getActiveTurnId?.(agent.id)) return this.publishSynced(agent.id, agent.taskId, { status: 'running' })
     const beforeState = this.repository.getTimelineState(agent.taskId)
     const syncState = this.repository.getTimelineSyncState(agent.taskId)
     const runtime = this.getRuntime(agent)
@@ -162,6 +191,9 @@ export class TimelineSyncCoordinator {
       return this.publishSynced(agent.id, agent.taskId, { status: 'unavailable' })
     }
     if (snapshot.status === 'unchanged') {
+      if (snapshot.sourceId && [agent.nativeHandle?.sessionId, runtime.sessionId].includes(snapshot.sourceId)) {
+        this.mergeBackgroundTasks(agent, runtime, snapshot.backgroundTasks)
+      }
       return this.publishSynced(agent.id, agent.taskId, { syncedAt: syncState?.syncedAt })
     }
     const expectedSourceIds = new Set([
@@ -187,6 +219,7 @@ export class TimelineSyncCoordinator {
       checkedTurnIds,
     })
     if (plan.mode === 'noop') {
+      this.mergeBackgroundTasks(agent, runtime, snapshot.backgroundTasks)
       return this.publishSynced(agent.id, agent.taskId, { syncedAt: syncState?.syncedAt })
     }
     const applied = this.repository.applyTimelineSync(agent.taskId, {
@@ -195,6 +228,7 @@ export class TimelineSyncCoordinator {
       sourceId: snapshot.sourceId,
       expectedNextSeq: beforeState.nextSeq,
     })
+    this.mergeBackgroundTasks(agent, runtime, snapshot.backgroundTasks)
     const timelineChanged = applied.mode === 'rebuild' || applied.rows.length > 0 || applied.updatedRows > 0
     if (applied.mode === 'rebuild' || applied.updatedRows > 0) {
       this.eventHub.publish(agent.id, {

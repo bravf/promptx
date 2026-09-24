@@ -18,6 +18,7 @@ export async function listCodexHistorySessions() {
     // Codex 当前版本只支持单次非分页查询；带 cursor 会返回 paginated_threads 错误。
     const page = await rpc.request('thread/list', { limit: 500 })
     for (const thread of page.data || []) {
+      if (thread.parentThreadId || thread.source?.subAgent || thread.source?.sub_agent) continue
       const preview = String(thread.preview || thread.name || '').trim()
       sessions.push({
         providerId: 'codex',

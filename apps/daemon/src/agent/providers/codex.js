@@ -1,3 +1,4 @@
+import { BackgroundTasks, taskStatus } from './backgroundTasks.js'
 import { EventEmitter } from 'node:events'
 import { JsonRpcProcess } from '../jsonRpcProcess.js'
 import { filePromptText } from '../promptAttachments.js'
@@ -28,6 +29,8 @@ function normalizeItem(item, status = 'running') {
     return text ? { type: 'reasoning', messageId: item.id, text } : null
   }
   const toolNames = {
+    subAgentActivity: '子 Agent 活动',
+    collabAgentToolCall: '子 Agent 协作',
     commandExecution: '终端命令',
     fileChange: '文件修改',
     mcpToolCall: item.tool || item.name || 'MCP 工具',
@@ -111,6 +114,8 @@ export class CodexRuntime extends EventEmitter {
     this.threadId = nativeHandle.threadId || ''
     this.threadLoaded = false
     this.turnId = ''
+    this.backgroundTasks = new BackgroundTasks(this)
+    this.pendingChildren = new Map()
     this.historyOnly = false
     this.messagePhases = new Map()
     this.messageTextSeen = new Set()
@@ -142,6 +147,7 @@ export class CodexRuntime extends EventEmitter {
     })
     rpc.on('exit', () => {
       if (this.rpc !== rpc) return
+      this.backgroundTasks.interrupt('Codex 进程退出，后台任务已中断')
       this.rpc = null
       this.connected = false
       this.emit('runtimeExit')
@@ -250,7 +256,9 @@ export class CodexRuntime extends EventEmitter {
     this.messagePhases.clear()
     this.messageTextSeen.clear()
     const input = buildCodexInput(content)
-    const result = await this.rpc.request('turn/start', {
+    this.pendingUserStart = true
+    let result
+    try { result = await this.rpc.request('turn/start', {
       threadId: this.threadId,
       input,
       clientUserMessageId: clientMessageId,
@@ -259,6 +267,7 @@ export class CodexRuntime extends EventEmitter {
       ...(this.modelId ? { model: this.modelId } : {}),
       ...(this.reasoningEffort ? { effort: this.reasoningEffort } : {}),
     })
+    } finally { this.pendingUserStart = false }
     this.turnId = result.turn?.id || result.turnId || ''
     return { nativeTurnId: this.turnId }
   }
@@ -272,6 +281,42 @@ export class CodexRuntime extends EventEmitter {
   }
 
   onNotification({ method, params = {} }) {
+    const threadId = params.threadId || params.thread?.id
+    if (threadId && this.threadId && threadId !== this.threadId) {
+      if (!this.backgroundTasks.tasks.has(threadId)) {
+        if (!this.pendingChildren.has(threadId) && this.pendingChildren.size >= 32) return
+        const pending = this.pendingChildren.get(threadId) || []
+        if (pending.length < 100) pending.push({ method, params })
+        this.pendingChildren.set(threadId, pending)
+        return
+      }
+      if (method === 'turn/started') this.backgroundTasks.update({ id: threadId, status: 'running' })
+      if (method === 'turn/completed') this.backgroundTasks.update({ id: threadId, status: taskStatus(params.turn?.status), summary: params.turn?.error?.message || this.backgroundTasks.tasks.get(threadId).summary || '' })
+      if (method === 'item/completed' && params.item?.type === 'agentMessage') this.backgroundTasks.update({ id: threadId, summary: params.item.text || '' })
+      return
+    }
+    if (params.turnId && this.turnId && params.turnId !== this.turnId && method !== 'turn/started') return
+    if (method === 'item/completed' && params.item?.type === 'subAgentActivity') {
+      const item = params.item
+      const id = item.agentThreadId
+      if (id && id !== this.threadId) {
+        this.backgroundTasks.update({ id, title: item.agentPath || 'Codex 子 Agent', kind: 'local_agent', status: item.kind === 'started' ? 'running' : taskStatus(item.kind), background: true })
+        const pending = this.pendingChildren.get(id) || []
+        this.pendingChildren.delete(id)
+        for (const event of pending) this.onNotification(event)
+      }
+    }
+    if ((method === 'item/started' || method === 'item/completed') && params.item?.type === 'collabAgentToolCall') {
+      const item = params.item
+      for (const id of item.receiverThreadIds || []) {
+        if (id === this.threadId) continue
+        const state = item.agentsStates?.[id]
+        this.backgroundTasks.update({ id, callId: item.id, title: item.prompt || 'Codex 子 Agent', kind: 'local_agent', status: state ? taskStatus(state.status) : this.backgroundTasks.tasks.get(id)?.status || 'running', summary: state?.message || '', background: true })
+        const pending = this.pendingChildren.get(id) || []
+        this.pendingChildren.delete(id)
+        for (const event of pending) this.onNotification(event)
+      }
+    }
     if (method === 'error') {
       if (
         (params.threadId && this.threadId && params.threadId !== this.threadId)
@@ -332,14 +377,16 @@ export class CodexRuntime extends EventEmitter {
     }
     if (method === 'turn/started') {
       this.turnId = params.turn?.id || this.turnId
-      this.emit('turnStarted', { nativeTurnId: this.turnId })
+      this.emit('turnStarted', { nativeTurnId: this.turnId, autonomous: !this.pendingUserStart })
       return
     }
     if (method === 'turn/completed') {
+      const nativeTurnId = params.turn?.id || this.turnId
+      if (this.turnId && nativeTurnId !== this.turnId) return
       const status = params.turn?.status
-      if (status === 'failed') this.emit('turnFailed', new Error(params.turn?.error?.message || 'Codex Turn 失败'))
-      else if (status === 'interrupted') this.emit('turnCanceled')
-      else this.emit('turnCompleted', { usage: params.turn?.usage || {} })
+      if (status === 'failed') this.emit('turnFailed', Object.assign(new Error(params.turn?.error?.message || 'Codex Turn 失败'), { nativeTurnId }))
+      else if (status === 'interrupted') this.emit('turnCanceled', { nativeTurnId })
+      else this.emit('turnCompleted', { nativeTurnId, usage: params.turn?.usage || {} })
     }
   }
 
@@ -349,7 +396,19 @@ export class CodexRuntime extends EventEmitter {
     }
   }
 
+  async stopBackgroundTasks() {
+    const results = await Promise.allSettled(this.backgroundTasks.running.map(async task => {
+      const result = await this.rpc.request('thread/read', { threadId: task.id, includeTurns: true })
+      const turn = result.thread?.turns?.findLast(turn => turn.status === 'inProgress')
+      if (turn) await this.rpc.request('turn/interrupt', { threadId: task.id, turnId: turn.id })
+    }))
+    const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
+    if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join('；'))
+  }
+
   close() {
+    this.backgroundTasks.interrupt()
+    this.pendingChildren.clear()
     const rpc = this.rpc
     this.rpc = null
     this.connected = false
@@ -367,7 +426,7 @@ export const codexProvider = {
   id: 'codex',
   listHistorySessions: listCodexHistorySessions,
   label: 'Codex',
-  capabilities: { resume: true, cancel: true, images: true, models: true, reasoningEffort: true, contextUsage: true },
+  capabilities: { backgroundTasks: true, backgroundTaskDetails: true, stopBackgroundTasks: true, autonomousTurns: true, resume: true, cancel: true, images: true, models: true, reasoningEffort: true, contextUsage: true },
   createRuntime(options) {
     return new CodexRuntime(options)
   },

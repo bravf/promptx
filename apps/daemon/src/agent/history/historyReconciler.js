@@ -88,6 +88,7 @@ function itemIdentities(entry) {
 function shouldImportProviderItem(entry, rows) {
   const typeRows = rows.filter((row) => row.item.type === entry.item.type)
   if (entry.item.type === 'user_message') return typeRows.length === 0
+  if (entry.item.type === 'system_notice') return !typeRows.some(row => row.item.code === entry.item.code && row.item.text === entry.item.text)
 
   const identities = new Set(itemIdentities(entry))
   const sameItem = identities.size > 0 && typeRows.some((row) => (

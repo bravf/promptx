@@ -37,3 +37,19 @@ test('有业务表的旧版本数据库会拒绝启动', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   }
 })
+
+test('V7 增量升级保留现有业务记录', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v7-upgrade-'))
+  const file = path.join(root, 'data.sqlite')
+  const db = openDatabase(file)
+  db.exec("CREATE TABLE migration_fixture (value TEXT); INSERT INTO migration_fixture VALUES ('keep'); DROP TABLE provider_tasks")
+  db.pragma('user_version = 7')
+  db.close()
+  try {
+    const upgraded = openDatabase(file)
+    assert.equal(upgraded.prepare('SELECT value FROM migration_fixture').get().value, 'keep')
+    assert.equal(upgraded.pragma('user_version', { simple: true }), DATABASE_VERSION)
+    assert.equal(upgraded.prepare('SELECT count(*) AS n FROM provider_tasks').get().n, 0)
+    upgraded.close()
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})

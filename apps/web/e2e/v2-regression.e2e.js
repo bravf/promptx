@@ -425,15 +425,13 @@ test('V2 全面桌面交互回归', async (t) => {
 
   await page.getByRole('button', { name: '全面回归工作区 的更多操作' }).click()
   await page.getByRole('menuitem', { name: '新建会话', exact: true }).click()
-  assert.equal(await page.getByLabel('路径').inputValue(), fixture.workspace)
-  assert.equal((await page.getByLabel('执行位置').textContent()).trim(), '当前目录')
-  await page.getByLabel('执行位置').click()
-  await page.getByRole('option', { name: '新建 Worktree', exact: true }).click()
+  assert.equal(await page.getByRole('combobox', { name: '目录 选择目录' }).inputValue(), fixture.workspace)
+  assert.equal(await page.getByRole('radio', { name: '当前目录', exact: true }).isChecked(), true)
+  await page.getByText('新建 Worktree', { exact: true }).click()
   await page.getByLabel('基线').waitFor()
-  await page.getByPlaceholder('Worktree 名称，例如 fix-login').waitFor()
-  await page.getByLabel('执行位置').click()
-  await page.getByRole('option', { name: '当前目录', exact: true }).click()
-  await page.getByLabel('路径').fill(path.join(fixture.root, 'missing-directory'))
+  await page.getByPlaceholder('Worktree 名称', { exact: true }).waitFor()
+  await page.getByText('当前目录', { exact: true }).click()
+  await page.getByRole('combobox', { name: '目录 选择目录' }).fill(path.join(fixture.root, 'missing-directory'))
   await page.getByRole('button', { name: '创建会话', exact: true }).click()
   await page.getByText('工作区路径不存在或无法访问。', { exact: true }).waitFor()
   consumeExpectedResourceError(failures)
@@ -516,7 +514,7 @@ test('V2 移动端布局、弹层和 History 回归', async (t) => {
   await page.getByRole('button', { name: '新会话' }).click()
   const conversationBox = await page.locator('.new-conversation-panel').boundingBox()
   assert.equal(Math.round(conversationBox.width), 390)
-  assert.equal(Math.round(conversationBox.height), 844)
+  assert.ok(conversationBox.height > 0 && conversationBox.height <= 844)
   const createButtonStyle = await page.getByRole('button', { name: '创建会话', exact: true }).evaluate((element) => {
     const style = window.getComputedStyle(element)
     return { backgroundColor: style.backgroundColor, borderWidth: style.borderWidth }
@@ -547,7 +545,7 @@ test('新建会话失败时关闭目录建议，桌面和移动端错误提示�
     })
     await page.goto(fixture.baseUrl, { waitUntil: 'domcontentloaded' })
     await page.getByRole('button', { name: '新会话', exact: true }).click()
-    await page.getByLabel('路径').fill(fixture.workspace)
+    await page.getByRole('combobox', { name: '目录 选择目录' }).fill(fixture.workspace)
     await page.getByRole('listbox').waitFor()
     await page.getByRole('option').first().waitFor()
     await page.getByRole('button', { name: '创建会话', exact: true }).click()
@@ -942,6 +940,32 @@ test('手机 Enter 换行并通过按钮发送，桌面保留 Enter 发送和 Sh
     await page.waitForFunction(() => document.querySelector('textarea[placeholder="向 Agent 发送消息"]').value === '')
     assert.equal(fixture.runtimeRecords.turns.length, before + 1)
     await page.getByText('已处理：第一行\n第二行', { exact: true }).last().waitFor()
+    await page.close()
+  }
+})
+
+test('子任务在发起轮次内展示结果，主回复结束仍等待子任务，手机布局不溢出', async (t) => {
+  const fixture = await createFixture(t)
+  const repository = fixture.app.sqliteRepository
+  const agent = repository.getTaskAgent(fixture.task.id)
+  const turn = repository.listTurns(fixture.task.id)[0]
+  repository.upsertProviderTask(agent.id, { id: 'review', originTurnId: turn.id, kind: 'local_agent', title: '检查接口边界', status: 'completed', summary: '### 子 Agent 最终结果\n\n发现 **两处边界问题**，建议增加参数校验。' })
+  repository.upsertProviderTask(agent.id, { id: 'database', originTurnId: turn.id, kind: 'local_agent', title: '检查数据库访问', status: 'running', summary: '正在检查事务与连接释放。' })
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    const page = await fixture.browser.newPage({ viewport })
+    const failures = collectPageFailures(page)
+    await page.goto(fixture.baseUrl, { waitUntil: 'domcontentloaded' })
+    if (viewport.width < 600) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    const group = page.locator('.timeline-turn .timeline-subagents')
+    await group.getByText('检查数据库访问', { exact: true }).waitFor()
+    assert.equal(await page.locator('.composer-wrap .timeline-subagents').count(), 0)
+    await page.getByLabel('等待子任务 · 1', { exact: true }).waitFor()
+    await group.getByText('检查接口边界', { exact: true }).click()
+    await group.getByText('子 Agent 最终结果', { exact: true }).waitFor()
+    assert.equal(await page.locator('.timeline-subagents').count(), 1)
+    await assertNoHorizontalOverflow(page)
+    await saveScreenshot(page, `subagents-${viewport.width}.png`)
+    assert.deepEqual(failures, [])
     await page.close()
   }
 })

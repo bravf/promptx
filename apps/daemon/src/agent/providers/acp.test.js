@@ -169,7 +169,7 @@ test('ACP 工具部分更新保留名称、输入和终态，且不同工具互�
   runtime.close()
 })
 
-test('ACP 主动取消不显示空回复提示，正常空回复仍提示，新轮次清理工具缓存', async () => {
+test('ACP 主动取消不显示空回复提示，正常空回复仍提示，新轮次保留工具缓存用于迟到更新', async () => {
   const runtime = new AcpRuntime()
   runtime.connect = async () => {}
   const notices = []
@@ -180,7 +180,7 @@ test('ACP 主动取消不显示空回复提示，正常空回复仍提示，新�
     const done = new Promise(resolve => runtime.once(stopReason === 'cancelled' ? 'turnCanceled' : 'turnCompleted', resolve))
     await runtime.startTurn([{ type: 'text', text: '测试' }], 'message')
     await done
-    assert.equal(runtime.toolCalls.size, 0)
+    assert.equal(runtime.toolCalls.size, 1)
     assert.equal(notices.length, stopReason === 'cancelled' ? 0 : 1)
   }
   assert.equal(notices[0].code, 'empty_provider_response')

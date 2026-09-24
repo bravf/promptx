@@ -3,6 +3,7 @@ import {
   readStableHistoryFileRange,
   toIsoTimestamp,
 } from '../historySnapshot.js'
+import { taskStatus } from '../../providers/backgroundTasks.js'
 import { acpContentText, mergeAcpToolCall } from '../../providers/acpEvents.js'
 
 export function extractAcpUpdate(record) {
@@ -51,6 +52,7 @@ function nativeTurnId(meta = {}) {
 // Grok updates.jsonl：轮次边界和 prompt 元数据是 Grok 的存储约定。
 export function mapGrokHistorySnapshot(sessionId, content, revision = '', { baseOffset = 0 } = {}) {
   const turns = []
+  const backgroundTasks = new Map()
   let turn = null
   let tools = new Map()
   const itemOrdinal = { value: 0 }
@@ -76,6 +78,15 @@ export function mapGrokHistorySnapshot(sessionId, content, revision = '', { base
     const { update, timestamp: rawTimestamp, meta } = extracted
     const timestamp = toIsoTimestamp(meta.agentTimestampMs || rawTimestamp)
     const kind = update.sessionUpdate
+    if (extracted.sessionId && extracted.sessionId !== sessionId) continue
+    const taskId = update.subagent_id
+    if (kind === 'subagent_spawned' && taskId) backgroundTasks.set(taskId, { id: taskId, originSourceTurnId: turn?.sourceTurnId || update.parent_prompt_id, title: update.description || 'Grok 子 Agent', childSessionId: update.child_session_id, kind: 'local_agent', status: 'interrupted', background: true, historyOnly: true })
+    if (kind === 'subagent_finished' && backgroundTasks.has(taskId)) backgroundTasks.set(taskId, { ...backgroundTasks.get(taskId), status: taskStatus(update.status), summary: update.output || '' })
+    if (!turn && ['agent_message_chunk', 'agent_thought_chunk', 'tool_call'].includes(kind)) {
+      const id = `grok:auto:${meta.eventId || offset}`
+      turn = { sourceTurnId: id, providerPromptId: id, runtimeTurnId: id, status: 'running', startedAt: timestamp, finishedAt: null, startOffset: offset, items: [{ providerMessageId: `${id}:notice`, timestamp, item: { type: 'system_notice', code: 'autonomous_turn', text: '后台任务触发自动续跑' } }] }
+      itemOrdinal.value = 0
+    }
 
     if (kind === 'user_message_chunk') {
       const text = acpContentText(update.content)
@@ -174,6 +185,7 @@ export function mapGrokHistorySnapshot(sessionId, content, revision = '', { base
     sourceId: sessionId,
     revision,
     turns: turns.map(({ startOffset, ...item }) => item),
+    backgroundTasks: [...backgroundTasks.values()],
     runningTurnStartOffset,
   }
 }

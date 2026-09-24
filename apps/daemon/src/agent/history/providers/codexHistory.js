@@ -68,6 +68,8 @@ export function mapCodexHistoryItem(item) {
     return text ? [{ providerMessageId: item.id, item: { type: 'reasoning', messageId: item.id, text } }] : []
   }
   const names = {
+    subAgentActivity: '子 Agent 活动',
+    collabAgentToolCall: '子 Agent 协作',
     commandExecution: '终端命令',
     fileChange: '文件修改',
     mcpToolCall: item.tool || 'MCP 工具',
@@ -90,7 +92,18 @@ export function mapCodexHistoryItem(item) {
 }
 
 export function mapCodexHistorySnapshot(thread, revision = '') {
+  const backgroundTasks = new Map()
+  for (const turn of thread.turns || []) for (const item of turn.items || []) {
+    if (normalizedItemType(item.type) === 'subAgentActivity' && item.agentThreadId) {
+      backgroundTasks.set(item.agentThreadId, { id: item.agentThreadId, originSourceTurnId: turn.id, title: item.agentPath || 'Codex 子 Agent', kind: 'local_agent', status: item.kind === 'completed' ? 'completed' : item.kind === 'failed' ? 'failed' : 'interrupted', historyOnly: true })
+    }
+    if (normalizedItemType(item.type) === 'collabAgentToolCall') for (const id of item.receiverThreadIds || []) {
+      const state = item.agentsStates?.[id]
+      backgroundTasks.set(id, { id, originSourceTurnId: backgroundTasks.get(id)?.originSourceTurnId || turn.id, title: item.prompt || backgroundTasks.get(id)?.title || 'Codex 子 Agent', kind: 'local_agent', status: ['completed', 'failed'].includes(state?.status) ? state.status : 'interrupted', summary: state?.message || '', historyOnly: true })
+    }
+  }
   return {
+    backgroundTasks: [...backgroundTasks.values()],
     sourceId: thread.id,
     revision: revision || threadRevision(thread),
     turns: (thread.turns || []).map((turn) => {

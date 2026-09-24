@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import { BackgroundTasks, taskStatus } from './backgroundTasks.js'
 import { EventEmitter } from 'node:events'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { filePromptText, imageBase64 } from '../promptAttachments.js'
@@ -104,6 +106,9 @@ export class ClaudeRuntime extends EventEmitter {
     this.closing = false
     this.cancelRequested = false
     this.connectPromise = null
+    this.activeRunId = null
+    this.backgroundTasks = new BackgroundTasks(this)
+    this.toolCalls = new Map()
     this.controlState = createControlState({ requestedModelId: modelId, requestedReasoningEffort: this.reasoningEffort })
   }
 
@@ -195,8 +200,12 @@ export class ClaudeRuntime extends EventEmitter {
   async startTurn(content, clientMessageId) {
     await this.connect()
     this.cancelRequested = false
-    this.inputQueue.push(await buildClaudeUserMessage(content, clientMessageId))
+    if (this.toolCalls.size > 1000) this.toolCalls.clear()
+    const message = await buildClaudeUserMessage(content, clientMessageId)
+    if (this.activeRunId) throw new Error('Claude 已开始自动续跑，请稍后重试。')
+    this.activeRunId = clientMessageId
     this.emit('turnStarted', { nativeTurnId: clientMessageId })
+    this.inputQueue.push(message)
     return { nativeTurnId: clientMessageId }
   }
 
@@ -207,20 +216,75 @@ export class ClaudeRuntime extends EventEmitter {
           this.sessionId = message.session_id
           this.emit('handle', { sessionId: this.sessionId })
         }
-        if (message.type === 'assistant') this.consumeAssistant(message)
+        if (this.runningQuery !== stream || this.closing) return
+        if (message.type === 'system') this.consumeTask(message)
+        if (message.type === 'user' && !message.parent_tool_use_id && Array.isArray(message.message?.content)) {
+          for (const block of message.message.content) {
+            const tool = this.toolCalls.get(block.tool_use_id)
+            if (block.type === 'tool_result' && tool) this.emit('timeline', { ...tool, status: block.is_error ? 'failed' : 'completed', detail: { ...tool.detail, output: block.content } })
+          }
+        }
+        if (message.type === 'assistant' && !message.parent_tool_use_id) {
+          if (!this.activeRunId && !this.cancelRequested) {
+            this.activeRunId = `claude:${message.uuid || randomUUID()}`
+            this.emit('turnStarted', { nativeTurnId: this.activeRunId, autonomous: true })
+          }
+          if (this.activeRunId) this.consumeAssistant(message)
+        } else if (message.type === 'assistant' && message.parent_tool_use_id) {
+          const task = [...this.backgroundTasks.tasks.values()].find(task => task.callId === message.parent_tool_use_id)
+          if (task) {
+            const text = (message.message?.content || []).filter(block => block.type === 'text').map(block => block.text).join('\n')
+            if (text) this.backgroundTasks.update({ id: task.id, summary: text })
+          }
+        }
         if (message.type === 'result') {
-          await this.refreshContextUsage()
+          const nativeTurnId = this.activeRunId
+          this.activeRunId = null
+          if (!nativeTurnId) { this.cancelRequested = false; continue }
+          void this.refreshContextUsage()
           if (this.cancelRequested) {
             this.cancelRequested = false
-            this.emit('turnCanceled')
-          } else if (message.subtype === 'success' && !message.is_error) this.emit('turnCompleted', { usage: message.usage || {} })
-          else this.emit('turnFailed', new Error(message.errors?.join('\n') || message.result || 'Claude Turn 失败'))
+            this.emit('turnCanceled', { nativeTurnId })
+          } else if (message.subtype === 'success' && !message.is_error) this.emit('turnCompleted', { nativeTurnId, usage: message.usage || {} })
+          else this.emit('turnFailed', Object.assign(new Error(message.errors?.join('\n') || message.result || 'Claude Turn 失败'), { nativeTurnId }))
         }
       }
+      if (!this.closing && this.runningQuery === stream) throw new Error('Claude 消息流意外结束。')
     } catch (error) {
       if (this.closing || controller.signal.aborted || this.runningQuery !== stream) return
       this.emit('turnFailed', error)
+      this.backgroundTasks.interrupt('Claude 进程退出，后台任务已中断')
+      this.connected = false
+      this.runningQuery = null
+      this.activeRunId = null
+      this.emit('runtimeExit')
     }
+  }
+
+  consumeTask(message) {
+    const id = message.task_id
+    if (message.subtype === 'task_started') {
+      this.backgroundTasks.update({ id, callId: message.tool_use_id, title: message.description || '后台任务', kind: message.task_type || 'task', status: 'running', background: Boolean(message.is_backgrounded), ambient: Boolean(message.ambient || message.skip_transcript), depth: message.spawn_depth || 1 })
+    } else if (id && this.backgroundTasks.tasks.has(id)) {
+      if (message.subtype === 'task_notification') this.backgroundTasks.update({ id, status: taskStatus(message.status), summary: message.summary || '', usage: message.usage })
+      if (message.subtype === 'task_updated') {
+        const patch = message.patch || {}
+        this.backgroundTasks.update({ id, ...(patch.status ? { status: taskStatus(patch.status) } : {}), ...(patch.is_backgrounded !== undefined ? { background: patch.is_backgrounded } : {}) })
+      }
+      if (message.subtype === 'task_progress') this.backgroundTasks.update({ id, summary: message.summary || message.description || '', usage: message.usage })
+    }
+    if (message.subtype === 'background_tasks_changed') {
+      // 集合事件可能先于 started；只补充声明，不根据消失猜测成功/失败。
+      for (const task of message.tasks || []) if (!this.backgroundTasks.tasks.has(task.task_id)) {
+        this.backgroundTasks.update({ id: task.task_id, title: task.description || '后台任务', kind: task.task_type, status: 'running', background: true, ambient: Boolean(task.ambient) })
+      }
+    }
+  }
+
+  async stopBackgroundTasks() {
+    const results = await Promise.allSettled(this.backgroundTasks.running.map(task => this.runningQuery.stopTask(task.id)))
+    const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
+    if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join('；'))
   }
 
   async refreshContextUsage() {
@@ -249,10 +313,9 @@ export class ClaudeRuntime extends EventEmitter {
       } else if (block.type === 'thinking') {
         this.emit('timeline', { type: 'reasoning', messageId: message.message.id, text: block.thinking || '' })
       } else if (block.type === 'tool_use') {
-        this.emit('timeline', {
-          type: 'tool_call', callId: block.id, name: block.name, status: 'running',
-          detail: { type: 'claude_tool', input: block.input },
-        })
+        const item = { type: 'tool_call', callId: block.id, name: block.name, status: 'running', detail: { type: 'claude_tool', input: block.input } }
+        this.toolCalls.set(block.id, item)
+        this.emit('timeline', item)
       }
     }
   }
@@ -269,6 +332,8 @@ export class ClaudeRuntime extends EventEmitter {
   }
 
   close() {
+    this.backgroundTasks.interrupt()
+    this.activeRunId = null
     this.closing = true
     this.connected = false
     this.cancelRequested = false
@@ -285,7 +350,7 @@ export const claudeProvider = {
   id: 'claude',
   listHistorySessions: listClaudeHistorySessions,
   label: 'Claude',
-  capabilities: { resume: true, cancel: true, images: true, models: true, reasoningEffort: true, contextUsage: true },
+  capabilities: { backgroundTasks: true, backgroundTaskDetails: true, stopBackgroundTasks: true, autonomousTurns: true, resume: true, cancel: true, images: true, models: true, reasoningEffort: true, contextUsage: true },
   createRuntime(options) {
     return new ClaudeRuntime(options)
   },

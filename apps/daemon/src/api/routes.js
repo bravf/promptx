@@ -306,7 +306,7 @@ export function registerRoutes(app, context) {
   })
   app.post('/api/v2/tasks/:taskId/cancel', async (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)
-    return agent ? { canceled: await agentManager.cancel(agent.id) } : reply.code(404).send({ error: 'agent_not_found' })
+    return agent ? { canceled: await agentManager.cancel(agent.id, { all: request.body?.all === true }) } : reply.code(404).send({ error: 'agent_not_found' })
   })
   app.post('/api/v2/tasks/:taskId/attention/clear', async (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)

@@ -111,10 +111,11 @@ test('Claude 主动中断的结果会记为取消而不是失败', async () => {
   const stream = interruptedResult()
   runtime.runningQuery = stream
   runtime.cancelRequested = true
+  runtime.activeRunId = 'cancel-test'
   runtime.refreshContextUsage = async () => {}
   let canceled = 0
   let failed = 0
-  runtime.on('turnCanceled', () => { canceled += 1 })
+  runtime.on('turnCanceled', () => { canceled += 1; runtime.closing = true })
   runtime.on('turnFailed', () => { failed += 1 })
 
   await runtime.consume(stream, new AbortController())

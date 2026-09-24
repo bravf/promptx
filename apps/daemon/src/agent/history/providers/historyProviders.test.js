@@ -269,12 +269,12 @@ test('Claude 增量游标保留运行中 Turn 的完整上下文', () => {
     const first = readClaudeHistorySnapshot({ cwd, sessionId: 'session-1' })
     fs.appendFileSync(file, `${JSON.stringify({ type: 'user', uuid: 'user-2', timestamp: '2026-09-04T10:01:00Z', message: { content: '第二轮' } })}\n`)
     const running = readClaudeHistorySnapshot({ cwd, sessionId: 'session-1', cursor: first.cursor })
-    assert.equal(running.turns[0].status, 'running')
-    assert.equal(running.cursor, first.cursor)
+    assert.equal(running.turns.at(-1).status, 'running')
+    assert.ok(running.cursor > first.cursor)
     fs.appendFileSync(file, `${JSON.stringify({ type: 'assistant', uuid: 'answer-2', timestamp: '2026-09-04T10:01:01Z', message: { id: 'message-2', stop_reason: 'end_turn', content: [{ type: 'text', text: '完成二' }] } })}\n`)
     const completed = readClaudeHistorySnapshot({ cwd, sessionId: 'session-1', cursor: running.cursor })
     assert.equal(completed.turns[0].status, 'completed')
-    assert.equal(completed.turns[0].items.at(-1).item.text, '完成二')
+    assert.equal(completed.turns.at(-1).items.at(-1).item.text, '完成二')
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = previous

@@ -18,6 +18,17 @@ export const AgentLifecycleSchema = z.enum([
   'closing',
 ])
 
+export const ProviderTaskSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().optional(),
+  kind: z.string().optional(),
+  status: z.enum(['pending', 'running', 'completed', 'failed', 'canceled', 'interrupted']),
+  summary: z.string().optional(),
+  originTurnId: z.string().nullable().optional(),
+  background: z.boolean().optional(),
+  ambient: z.boolean().optional(),
+}).passthrough()
+
 export const AgentSessionSchema = z.object({
   id: z.string().min(1),
   taskId: z.string().min(1),
@@ -28,6 +39,7 @@ export const AgentSessionSchema = z.object({
   modelId: z.string(),
   modeId: z.string(),
   capabilities: z.record(z.string(), z.unknown()),
+  backgroundTasks: z.array(ProviderTaskSchema).optional().default([]),
   lastError: z.string(),
   requiresAttention: z.boolean(),
   attentionReason: z.enum(['finished', 'error', 'permission']).nullable(),

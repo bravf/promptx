@@ -12,6 +12,8 @@ const TaskTerminal = defineAsyncComponent(() => import('./TaskTerminal.vue'))
 import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
 import TimelineTurn from './TimelineTurn.vue'
+import TimelineSubagents from './TimelineSubagents.vue'
+import { groupBackgroundTasks, sessionActivity } from '../lib/backgroundTaskPresentation.js'
 import WorkspaceInspector from './WorkspaceInspector.vue'
 import TaskDetailsDrawer from './TaskDetailsDrawer.vue'
 
@@ -67,7 +69,10 @@ const INITIAL_TIMELINE_LIMIT = 30
 const TIMELINE_SYNC_RETRY_DELAY = 500
 
 const activeTaskId = computed(() => props.task?.id || '')
+const activity = computed(() => sessionActivity(props.task))
 const isRunning = computed(() => props.task?.lifecycle === 'running')
+const backgroundGroups = computed(() => groupBackgroundTasks(props.task?.backgroundTasks))
+const stoppingTasks = ref(false)
 const entries = computed(() => groupTimelineTurns(projectTimelineRows(rows.value)))
 const turnTimings = computed(() => createTurnTimingMap(rows.value, turns.value))
 const latestTurnId = computed(() => rows.value.findLast((row) => row.turnId)?.turnId || '')
@@ -183,6 +188,14 @@ function applyTaskAgentEvent(agent) {
     pinTimelineToBottom(timelineRequestVersion)
     scrollToBottom({ force: true })
   }
+}
+
+async function stopAllTasks() {
+  if (stoppingTasks.value) return
+  stoppingTasks.value = true
+  try { await v2Api.cancelTask(activeTaskId.value, true) }
+  catch (cause) { error.value = cause.message || '停止后台任务失败' }
+  finally { stoppingTasks.value = false }
 }
 
 async function selectTask(taskId) {
@@ -569,7 +582,7 @@ onBeforeUnmount(() => {
       <div v-else class="theme-muted-text min-w-0 flex-1 truncate text-xs">选择会话</div>
       <div class="ml-auto flex shrink-0 items-center gap-1">
         <div v-if="timelineSyncing" class="timeline-sync-status theme-muted-text flex h-8 w-8 items-center justify-center" title="正在同步 Timeline" aria-label="正在同步 Timeline"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
-        <div v-if="task" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="isRunning ? 'status-dot-running' : ''" /><span class="status-text">{{ isRunning ? '运行中' : '已连接' }}</span></div>
+        <div v-if="task" :title="activity.label" :aria-label="activity.label" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="activity.running ? 'status-dot-running' : ''" /><span class="status-text">{{ activity.label }}</span></div>
         <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="terminalOpen ? 'is-active' : ''" label="终端" :aria-pressed="terminalOpen" @click="terminalOpen = !terminalOpen"><TerminalSquare class="h-4 w-4" /></PxIconButton>
         <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :label="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></PxIconButton>
         <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :label="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></PxIconButton>
@@ -585,10 +598,14 @@ onBeforeUnmount(() => {
           <div v-else-if="!entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">开始一段新的协作</p><p class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
-              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" @rendered="handleMarkdownRendered" @open-workspace-path="openProjectPath" />
+              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="turnTimings.get(entry.turnId)" :running="processIsRunning(entry)" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" @rendered="handleMarkdownRendered" @open-workspace-path="openProjectPath">
+                <template #subagents><TimelineSubagents :tasks="backgroundGroups.get(entry.turnId) || []" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" :stopping="stoppingTasks" @stop-all="stopAllTasks" @rendered="handleMarkdownRendered" @open-workspace-path="openProjectPath" /></template>
+              </TimelineTurn>
               <article v-else-if="entry.item?.type === 'error'" class="error-row mb-5 ml-7 rounded-sm border px-3 py-2 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.message }}</article>
               <article v-else-if="entry.item?.type === 'system_notice'" class="theme-muted-text mb-5 ml-7 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.text }}</article>
             </template>
+            <TimelineSubagents :tasks="backgroundGroups.get('') || []" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" :stopping="stoppingTasks" @stop-all="stopAllTasks" @rendered="handleMarkdownRendered" @open-workspace-path="openProjectPath" />
+            <div v-if="!isRunning && activity.count" class="theme-muted-text mb-3 ml-7 flex items-center gap-2 text-xs" role="status"><LoaderCircle class="h-3.5 w-3.5 animate-spin" />等待 {{ activity.count }} 个子任务结束</div>
             <div class="timeline-generating-slot ml-7 flex h-8 items-start">
               <div class="timeline-generating-indicator flex items-center gap-1" :class="isRunning || sending ? 'is-visible' : ''" role="status" :aria-hidden="!(isRunning || sending)" :aria-label="isRunning || sending ? '正在生成' : undefined">
                 <span class="timeline-generating-dot" aria-hidden="true">.</span><span class="timeline-generating-dot" aria-hidden="true">.</span><span class="timeline-generating-dot" aria-hidden="true">.</span>
@@ -607,7 +624,7 @@ onBeforeUnmount(() => {
       <footer class="composer-wrap shrink-0 p-3 sm:p-4">
         <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
         <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex max-w-3xl items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs"><span>{{ sendBlockedReason }}</span><PxButton variant="ghost" size="sm" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</PxButton></div>
-        <AgentComposer :mobile="mobile" :key="activeTaskId" :task-id="task.id" :running="isRunning" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :control-loading="controlLoading" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="v2Api.cancelTask(activeTaskId)" @draft-change="saveTaskDraft" />
+        <AgentComposer :mobile="mobile" :key="activeTaskId" :task-id="task.id" :running="activity.running" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :control-loading="controlLoading" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="stopAllTasks" @draft-change="saveTaskDraft" />
       </footer>
       <TaskTerminal v-if="terminalOpen && !drawerMode" :key="task.id" :task-id="task.id" @close="terminalOpen = false" />
     </template>

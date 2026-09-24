@@ -22,7 +22,7 @@ export const v2Api = {
   updateTaskSettings: (taskId, input) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/settings`, { method: 'PATCH', body: JSON.stringify(input) }),
   listTaskTurns: (taskId, limit = 300) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/turns?limit=${encodeURIComponent(limit)}`, { cache: 'no-store' }),
   startTaskTurn: (taskId, content, clientMessageId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/turns`, { method: 'POST', body: JSON.stringify({ clientMessageId, input: { content } }) }),
-  cancelTask: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' }),
+  cancelTask: (taskId, all = false) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST', body: JSON.stringify({ all }) }),
   clearTaskAttention: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/attention/clear`, { method: 'POST' }),
   getTaskTimeline: (taskId, options = {}) => {
     const query = new URLSearchParams({ direction: options.direction || 'tail', limit: String(options.limit || 300) })

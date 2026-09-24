@@ -262,3 +262,23 @@ test('归档会话清除会话置顶，归档工作区只清除工作区置顶',
     db.close()
   }
 })
+
+test('历史同步不按查看时间置顶，仅真实历史新活动推进活跃时间', () => {
+  const { db, repository, task } = setup()
+  try {
+    const original = '2026-09-18T01:00:00.000Z'
+    repository.updateTask(task.id, { lastActiveAt: original })
+    const sync = (turns, rows) => repository.applyTimelineSync(task.id, {
+      mode: 'append', providerId: 'codex', sourceId: 'thread', turns, rows, manifest: {},
+    })
+    sync([providerTurn('old')], [row('old', 'old-message')])
+    assert.equal(repository.getTask(task.id).lastActiveAt, original)
+    sync([providerTurn('unknown')], [{ ...row('unknown', 'unknown-message'), timestamp: undefined }])
+    assert.equal(repository.getTask(task.id).lastActiveAt, original)
+    const newer = '2026-09-22T12:19:20.393Z'
+    sync([{ ...providerTurn('new'), finishedAt: newer }], [])
+    assert.equal(repository.getTask(task.id).lastActiveAt, newer)
+    sync([], [])
+    assert.equal(repository.getTask(task.id).lastActiveAt, newer)
+  } finally { db.close() }
+})

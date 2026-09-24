@@ -307,3 +307,52 @@ test('Turn 完成后未落盘会退避重试，Provider 确认后停止', async 
   assert.equal(localTurn.historyState, 'confirmed')
   await coordinator.shutdown()
 })
+
+test('错误来源的后台历史不能写入当前会话，残缺历史不能覆盖完成状态', async () => {
+  const writes = []
+  let sourceId = 'wrong-thread'
+  const coordinator = new TimelineSyncCoordinator({
+    repository: {
+      getTimelineState: () => ({ epoch: 'epoch-1', nextSeq: 1 }),
+      getTimelineSyncState: () => null,
+      getAgent: () => ({ backgroundTasks: [{ id: 'child', status: 'completed' }] }),
+      listTimelineRows: () => [],
+      listTurns: () => [],
+      upsertProviderTask: (_id, task) => writes.push(task),
+      applyTimelineSync: () => ({ mode: 'noop', epoch: 'epoch-1', rows: [] }),
+    },
+    eventHub: { publish() {} },
+    timelineStore: { fetch: () => ({ epoch: 'epoch-1', rows: [] }) },
+    getRuntime: () => ({ readHistorySnapshot: async () => ({
+      sourceId, turns: [], backgroundTasks: [{ id: 'child', status: 'interrupted' }],
+    }) }),
+  })
+  const agent = { id: 'agent', taskId: 'task', nativeHandle: { sessionId: 'correct-thread' } }
+  await assert.rejects(coordinator.runOnce(agent, { checkedTurnIds: new Set() }), { code: 'HISTORY_SOURCE_CONFLICT' })
+  assert.equal(writes.length, 0)
+  sourceId = 'correct-thread'
+  await coordinator.runOnce(agent, { checkedTurnIds: new Set() })
+  assert.equal(writes[0].status, 'completed')
+  await coordinator.shutdown()
+})
+
+test('历史补齐子任务轮次归属，空结果不覆盖已有摘要，实时任务同样补齐归属', () => {
+  const saved = [{ id: 'claude', status: 'completed', summary: '完整结果' }, { id: 'grok', status: 'running' }]
+  const coordinator = new TimelineSyncCoordinator({
+    repository: {
+      getAgent: () => ({ backgroundTasks: saved }),
+      listTurns: () => [{ id: 'local-grok', providerPromptId: 'native-grok' }],
+      listTimelineRows: () => [{ turnId: 'local-claude', item: { type: 'tool_call', callId: 'spawn' } }],
+      upsertProviderTask: (_id, task) => Object.assign(saved.find(item => item.id === task.id), task),
+    },
+    eventHub: { publish() {} },
+  })
+  coordinator.mergeBackgroundTasks({ id: 'agent', taskId: 'task' }, { backgroundTasks: { tasks: new Map([['grok', {}]]) } }, [
+    { id: 'claude', callId: 'spawn', status: 'completed', summary: '' },
+    { id: 'grok', originSourceTurnId: 'native-grok', status: 'interrupted' },
+  ])
+  assert.equal(saved[0].originTurnId, 'local-claude')
+  assert.equal(saved[0].summary, '完整结果')
+  assert.equal(saved[1].originTurnId, 'local-grok')
+  assert.equal(saved[1].status, 'running')
+})

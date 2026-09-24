@@ -27,6 +27,7 @@ function mapAgent(row) {
     modelId: row.model_id,
     modeId: row.mode_id,
     config: parseJson(row.config_json),
+    backgroundTasks: parseJson(row.background_tasks_json, []),
     capabilities: parseJson(row.capabilities_json),
     nativeHandle: parseJson(row.native_handle_json),
     timelineEpoch: row.timeline_epoch,
@@ -103,7 +104,8 @@ export function directoryKey(value) {
 }
 
 const AGENT_SELECT = `SELECT a.*, t.project_id, t.title, t.last_active_at, t.archived_at,
-  t.timeline_epoch, t.timeline_next_seq FROM agent_sessions a JOIN tasks t ON t.id = a.task_id`
+  t.timeline_epoch, t.timeline_next_seq,
+  (SELECT json_group_array(json(data_json)) FROM provider_tasks WHERE agent_id = a.id) AS background_tasks_json FROM agent_sessions a JOIN tasks t ON t.id = a.task_id`
 
 function mapProject(row) {
   return row ? { id: row.id, repositoryRoot: row.repository_root, displayName: row.display_name,
@@ -295,8 +297,15 @@ export function createRepository(db) {
       JSON.stringify(input.manifest || {}),
       syncedAt,
     )
+    // 对账发生时间不是会话活动时间；只使用 Provider 明确提供的业务时间。
+    const activityTimes = [
+      ...(input.turns || []).flatMap(turn => [turn.startedAt, turn.finishedAt]),
+      ...(input.rows || []).map(row => row.timestamp),
+    ].map(value => Date.parse(value || '')).filter(Number.isFinite)
+    const lastActiveAt = activityTimes.length ? new Date(Math.max(...activityTimes)).toISOString() : null
     db.prepare(`UPDATE tasks SET timeline_epoch = ?, timeline_next_seq = ?,
-      updated_at = ?, last_active_at = ? WHERE id = ?`).run(epoch, nextSeq, syncedAt, syncedAt, taskId)
+      updated_at = ?, last_active_at = MAX(last_active_at, COALESCE(?, last_active_at)) WHERE id = ?`)
+      .run(epoch, nextSeq, syncedAt, lastActiveAt, taskId)
     return { mode: input.mode, epoch, rows: inserted, updatedRows, updatedTurns, syncedAt }
   })
 
@@ -490,6 +499,13 @@ export function createRepository(db) {
     clearAgentAttention(id) {
       return this.updateAgent(id, { requiresAttention: false, attentionReason: null, attentionAt: null })
     },
+    upsertProviderTask(agentId, task) {
+      const previous = db.prepare('SELECT data_json FROM provider_tasks WHERE agent_id = ? AND native_id = ?').get(agentId, task.id)
+      const next = { ...parseJson(previous?.data_json), ...task, updatedAt: nowIso() }
+      db.prepare('INSERT INTO provider_tasks (agent_id, native_id, data_json) VALUES (?, ?, ?) ON CONFLICT(agent_id, native_id) DO UPDATE SET data_json = excluded.data_json')
+        .run(agentId, task.id, JSON.stringify(next))
+      return next
+    },
     getTurn(id) { return mapTurn(db.prepare('SELECT * FROM agent_turns WHERE id = ?').get(id)) },
     getTurnByClientMessage(taskId, clientMessageId) {
       return mapTurn(db.prepare('SELECT * FROM agent_turns WHERE task_id = ? AND client_message_id = ?').get(taskId, clientMessageId))
@@ -528,6 +544,8 @@ export function createRepository(db) {
     },
     failActiveTurnsOnStartup() {
       const now = nowIso()
+      db.prepare(`UPDATE agent_sessions SET requires_attention = 1, attention_reason = 'error', attention_at = ? WHERE id IN (SELECT agent_id FROM provider_tasks WHERE json_extract(data_json, '$.status') IN ('running', 'pending'))`).run(now)
+      db.prepare(`UPDATE provider_tasks SET data_json = json_set(data_json, '$.status', 'interrupted', '$.summary', '服务已重启，后台任务状态需要核实') WHERE json_extract(data_json, '$.status') IN ('running', 'pending')`).run()
       db.prepare(`UPDATE agent_sessions SET lifecycle = 'ready', updated_at = ?, requires_attention = 1,
         attention_reason = 'error', attention_at = ? WHERE task_id IN
         (SELECT task_id FROM agent_turns WHERE status IN ('queued', 'running')) OR lifecycle IN ('running', 'stopping')`).run(now, now)

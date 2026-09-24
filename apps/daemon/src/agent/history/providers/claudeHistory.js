@@ -155,6 +155,7 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
   const turns = []
   let turn = null
   let tools = new Map()
+  let lastAssistantId = null
   for (const entry of parseLines(content)) {
     if (visibleUser(entry)) {
       if (turn) {
@@ -184,6 +185,14 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
       continue
     }
     if (!turn) continue
+    if (entry.type === 'assistant' && !entry.isSidechain && turn.lastStopReason === 'end_turn' && lastAssistantId && entry.message?.id !== lastAssistantId) {
+      turn.status = turn.providerError ? 'failed' : 'completed'
+      turns.push(turn)
+      const id = `claude:${entry.uuid || entry.message?.id}`
+      turn = { sourceTurnId: id, providerPromptId: id, runtimeTurnId: id, status: 'running', startedAt: toIsoTimestamp(entry.timestamp), finishedAt: null, lastStopReason: '', items: [{ providerMessageId: `${id}:notice`, timestamp: toIsoTimestamp(entry.timestamp), item: { type: 'system_notice', code: 'autonomous_turn', text: '后台任务触发自动续跑' } }] }
+      tools = new Map()
+    }
+    if (entry.type === 'assistant' && !entry.isSidechain) lastAssistantId = entry.message?.id
     appendAssistant(entry, turn, tools)
     toolResult(entry, tools)
   }
@@ -199,23 +208,39 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
   }
 }
 
+function readClaudeBackgroundTasks(file) {
+  const directory = file.slice(0, -'.jsonl'.length) + '/subagents'
+  if (!fs.existsSync(directory)) return []
+  return fs.readdirSync(directory).filter(name => /^agent-[a-zA-Z0-9_-]+\.meta\.json$/.test(name)).flatMap(name => {
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'))
+      if (meta.spawnDepth !== 1 || !meta.toolUseId) return []
+      const records = parseLines(readStableHistoryFile(path.join(directory, name.replace('.meta.json', '.jsonl'))).content || '')
+      const last = records.filter(entry => entry.type === 'assistant').at(-1)
+      const finished = last?.message?.stop_reason === 'end_turn'
+      return [{ id: name.slice(6, -10), callId: meta.toolUseId, title: meta.description || 'Claude 子 Agent', kind: 'local_agent', status: finished ? 'completed' : 'interrupted', summary: textContent(last?.message?.content), background: meta.requestShape === 'background', historyOnly: true }]
+    } catch { return [] }
+  })
+}
+
 export function readClaudeHistorySnapshot({ cwd, sessionId, knownRevision = '', cursor = 0 }) {
   if (!sessionId) return { status: 'unsupported' }
   const file = resolveHistoryPath(cwd, sessionId)
   if (!file) return { status: 'unavailable' }
   const result = readStableHistoryFileRange(file, { knownRevision, cursor })
-  if (result.status !== 'ready') return result
+  if (result.status !== 'ready') return result.status === 'unchanged' ? { ...result, sourceId: sessionId, backgroundTasks: readClaudeBackgroundTasks(file) } : result
   const records = parseJsonLinesWithOffsets(result.content, result.baseOffset)
   const snapshot = mapClaudeHistorySnapshot(sessionId, result.content, result.revision)
   let safeCursor = result.content.endsWith('\n')
     ? result.endOffset
     : result.baseOffset + Buffer.byteLength(result.content.slice(0, Math.max(0, result.content.lastIndexOf('\n') + 1)))
-  if (snapshot.turns.at(-1)?.status === 'running') {
+  if (snapshot.turns.length) {
     const start = [...records].reverse().find(({ value }) => visibleUser(value))
     if (start) safeCursor = start.offset
   }
   return {
     ...snapshot,
+    backgroundTasks: readClaudeBackgroundTasks(file),
     completeness: result.baseOffset > 0 && !result.reset ? 'incremental' : 'full',
     cursor: safeCursor,
   }

@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 
-export const DATABASE_VERSION = 7
+export const DATABASE_VERSION = 8
 
 export function resolveDaemonPaths() {
   const homeDir = path.resolve(process.env.PROMPTX_HOME || path.join(os.homedir(), '.promptx'))
@@ -20,8 +20,18 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
   if (databasePath !== ':memory:') fs.mkdirSync(path.dirname(databasePath), { recursive: true })
   const db = new Database(databasePath)
   try {
-    const version = db.pragma('user_version', { simple: true })
+    let version = db.pragma('user_version', { simple: true })
     const hasTables = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get()
+    // V7 -> V8 为增量升级，保留现有会话与历史。
+    if (hasTables && version === 7 && db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'agent_sessions'").get()) db.transaction(() => {
+      db.exec(`CREATE TABLE provider_tasks (
+        agent_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+        native_id TEXT NOT NULL, data_json TEXT NOT NULL,
+        PRIMARY KEY(agent_id, native_id)
+      )`)
+      db.pragma('user_version = 8')
+      version = 8
+    })()
     if (hasTables && version !== DATABASE_VERSION) {
       const error = new Error('数据库模型已更新，不支持旧数据。请停止服务后运行 pnpm data:reset，再重新启动。')
       error.code = 'DATABASE_VERSION_MISMATCH'
@@ -68,6 +78,11 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
           last_error TEXT NOT NULL DEFAULT '', requires_attention INTEGER NOT NULL DEFAULT 0,
           attention_reason TEXT, attention_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
           UNIQUE(provider_id, native_source_id), UNIQUE(id, task_id)
+        );
+        CREATE TABLE provider_tasks (
+          agent_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+          native_id TEXT NOT NULL, data_json TEXT NOT NULL,
+          PRIMARY KEY(agent_id, native_id)
         );
         CREATE TABLE task_assets (
           id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,

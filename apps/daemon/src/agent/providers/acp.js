@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { BackgroundTasks } from './backgroundTasks.js'
 import { EventEmitter } from 'node:events'
 import { Readable, Writable } from 'node:stream'
 import { ClientSideConnection, PROTOCOL_VERSION, ndJsonStream } from '@agentclientprotocol/sdk'
@@ -72,6 +73,7 @@ export class AcpRuntime extends EventEmitter {
     capabilities = {},
     allowUndeclaredImages = false,
     extensionNotification = null,
+    runtimeExtension = null,
     emptyResponseText = 'ACP Agent 已结束本轮，但没有返回可显示的内容。',
   } = {}) {
     super()
@@ -84,6 +86,8 @@ export class AcpRuntime extends EventEmitter {
     this.capabilities = { ...ACP_CAPABILITIES, ...capabilities }
     this.allowUndeclaredImages = allowUndeclaredImages
     this.extensionNotification = extensionNotification
+    this.runtimeExtension = runtimeExtension
+    this.backgroundTasks = new BackgroundTasks(this)
     this.agentCapabilities = null
     this.emptyResponseText = emptyResponseText
     this.modelId = modelId
@@ -130,6 +134,7 @@ export class AcpRuntime extends EventEmitter {
     child.stderr.on('data', (chunk) => this.emit('stderr', chunk.toString()))
     child.on('exit', () => {
       if (this.child !== child) return
+      this.backgroundTasks.interrupt('ACP 进程退出，后台任务已中断')
       this.connection = null
       this.child = null
       this.connected = false
@@ -283,18 +288,30 @@ export class AcpRuntime extends EventEmitter {
       throw Object.assign(new Error('该 ACP Agent 不支持图片输入。'), { code: 'acp_images_unsupported' })
     }
     this.hasTurnOutput = false
-    this.toolCalls.clear()
+    if (this.toolCalls.size > 1000) for (const [id, item] of this.toolCalls) {
+      if (this.toolCalls.size <= 1000) break
+      if (!['running', 'pending'].includes(item.status)) this.toolCalls.delete(id)
+    }
     const prompt = await buildAcpPrompt(content)
+    if (this.autonomousRun) throw new Error('Agent 已开始自动续跑，请稍后重试。')
+    const connection = this.connection
+    this.activeRunId = clientMessageId
     this.emit('turnStarted')
     this.connection.prompt({ sessionId: this.sessionId, prompt, messageId: clientMessageId })
       .then((result) => {
+        if (this.connection !== connection || this.activeRunId !== clientMessageId) return
+        this.activeRunId = null
         if (!this.hasTurnOutput && result.stopReason !== 'cancelled') {
           this.emit('timeline', { type: 'system_notice', code: 'empty_provider_response', text: this.emptyResponseText })
         }
-        if (result.stopReason === 'cancelled') this.emit('turnCanceled')
-        else this.emit('turnCompleted', { usage: result.usage || {} })
+        if (result.stopReason === 'cancelled') this.emit('turnCanceled', { runId: clientMessageId })
+        else this.emit('turnCompleted', { runId: clientMessageId, usage: result.usage || {} })
       })
-      .catch((error) => this.emit('turnFailed', error))
+      .catch((error) => {
+        if (this.connection !== connection || this.activeRunId !== clientMessageId) return
+        this.activeRunId = null
+        this.emit('turnFailed', Object.assign(error, { runId: clientMessageId }))
+      })
     return {}
   }
 
@@ -312,6 +329,7 @@ export class AcpRuntime extends EventEmitter {
 
   onExtNotification(method, params = {}) {
     if (params.sessionId && params.sessionId !== this.sessionId) return
+    this.runtimeExtension?.(this, method, params)
     const item = this.extensionNotification?.(method, params)
     if (item) this.emit('timeline', item)
   }
@@ -321,10 +339,11 @@ export class AcpRuntime extends EventEmitter {
     if (sessionId && this.sessionId && sessionId !== this.sessionId) return
     const update = params.update || params
     if (!update?.sessionUpdate) return
-    this.onSessionUpdate(update)
+    this.onSessionUpdate(update, params)
   }
 
-  onSessionUpdate(update) {
+  onSessionUpdate(update, params = {}) {
+    this.runtimeExtension?.(this, 'session/update', { ...params, update })
     if (update.sessionUpdate === 'usage_update') {
       this.controlState = { ...this.controlState, contextUsage: normalizeContextUsage(update.used, update.size) }
       this.emit('controlState', this.controlState)
@@ -359,12 +378,20 @@ export class AcpRuntime extends EventEmitter {
     }
   }
 
+  async stopBackgroundTasks() {
+    if (!this.backgroundTasks.running.length) return
+    const operation = this.runtimeExtension?.(this, 'stopBackgroundTasks', {})
+    if (!operation) throw new Error('此 Agent 未提供后台任务停止接口。')
+    await operation
+  }
+
   async cancel() {
     if (!this.capabilities.cancel) throw new Error('该 ACP Agent 不支持取消。')
     if (this.connection && this.sessionId) await this.connection.cancel({ sessionId: this.sessionId })
   }
 
   close() {
+    this.backgroundTasks.interrupt()
     this.toolCalls.clear()
     const child = this.child
     this.child = null
@@ -387,6 +414,7 @@ export function createAcpProvider({
   listHistorySessions = null,
   emptyResponseText,
   extensionNotification = null,
+  runtimeExtension = null,
 } = {}) {
   if (!id || !label) throw new Error('ACP Provider 需要 id 和 label。')
   return {
@@ -403,6 +431,7 @@ export function createAcpProvider({
         capabilities: { ...ACP_CAPABILITIES, ...capabilities },
         allowUndeclaredImages,
         extensionNotification,
+        runtimeExtension,
       }
       const resolvedEnv = typeof env === 'function' ? env() : env
       if (resolvedEnv) runtimeOptions.env = resolvedEnv

@@ -788,3 +788,82 @@ test('Runtime 发送前预检失败时不创建 Turn 或用户 Timeline', async 
     await app.close()
   }
 })
+
+test('后台任务跨 Turn 持久化，自动续跑无用户气泡，旧结束不能结束新轮次', async () => {
+  const { registry, runtimes } = createControlTestRegistry()
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
+  try {
+    const response = await createLocalTask(app, { cwd: process.cwd(), providerId: 'codex', title: '后台测试' })
+    const { task } = response.json()
+    const send = id => app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/turns`, payload: { clientMessageId: id, input: { content: [{ type: 'text', text: id }] } } })
+    const first = await send('first')
+    assert.equal(first.statusCode, 202)
+    const runtime = runtimes.at(-1)
+    runtime.emit('backgroundTask', { id: 'child', title: '分析', status: 'running' })
+    runtime.emit('turnCompleted', { nativeTurnId: 'first' })
+    let agent = app.sqliteRepository.getTaskAgent(task.id)
+    assert.equal(agent.backgroundTasks[0].status, 'running')
+    assert.equal(agent.requiresAttention, false)
+    runtime.emit('turnStarted', { nativeTurnId: 'automatic', autonomous: true })
+    runtime.emit('timeline', { type: 'assistant_message', messageId: 'auto-answer', phase: 'final_answer', text: '汇总' })
+    runtime.emit('turnCompleted', { nativeTurnId: 'automatic' })
+    const turns = app.sqliteRepository.listTurns(task.id)
+    assert.equal(turns.length, 2)
+    const automatic = turns.find(turn => turn.nativeTurnId === 'automatic')
+    assert.ok(automatic)
+    const rows = app.sqliteRepository.listTimelineRows(task.id).filter(row => row.turnId === automatic.id)
+    assert.equal(rows.some(row => row.item.type === 'user_message'), false)
+    assert.equal(rows.some(row => row.item.text === '汇总'), true)
+    await send('second')
+    runtime.emit('turnCompleted', { nativeTurnId: 'first' })
+    assert.equal(app.sqliteRepository.getTurnByClientMessage(task.id, 'second').status, 'running')
+    runtime.emit('backgroundTask', { id: 'child', status: 'completed', summary: '完成' })
+    agent = app.sqliteRepository.getTaskAgent(task.id)
+    assert.equal(agent.backgroundTasks[0].originTurnId, first.json().turn.id)
+    assert.equal(agent.backgroundTasks[0].summary, '完成')
+    runtime.emit('turnCompleted', { nativeTurnId: 'second' })
+  } finally { await app.close() }
+})
+
+test('重启后保留后台任务与摘要，运行中任务标记中断并提示异常', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-background-restart-'))
+  const options = { databasePath: path.join(root, 'data.sqlite'), logger: false, webRoot: false, relay: false, providerRegistry: createControlTestRegistry().registry }
+  let app = await createApp(options)
+  try {
+    const { task } = (await createLocalTask(app, { cwd: process.cwd(), providerId: 'codex', title: '恢复测试' })).json()
+    const agent = app.sqliteRepository.getTaskAgent(task.id)
+    app.sqliteRepository.upsertProviderTask(agent.id, { id: 'running', title: '仍在分析', status: 'running' })
+    app.sqliteRepository.upsertProviderTask(agent.id, { id: 'done', title: '已完成', status: 'completed', summary: '保留报告' })
+    await app.close()
+    app = await createApp(options)
+    const restored = (await app.inject({ method: 'GET', url: `/api/v2/tasks/${task.id}/agent` })).json().agent
+    assert.equal(restored.backgroundTasks.find(item => item.id === 'running').status, 'interrupted')
+    assert.equal(restored.backgroundTasks.find(item => item.id === 'done').summary, '保留报告')
+    assert.equal(restored.attentionReason, 'error')
+  } finally { await app.close(); fs.rmSync(root, { recursive: true, force: true }) }
+})
+
+test('最后一个后台任务结束才提示完成，自动汇总开始清除完成提醒', async () => {
+  const { registry, runtimes } = createControlTestRegistry()
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
+  try {
+    const { task } = (await createLocalTask(app, { cwd: process.cwd(), providerId: 'codex' })).json()
+    await app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/turns`, payload: { clientMessageId: 'work', input: { content: [{ type: 'text', text: 'work' }] } } })
+    const runtime = runtimes.at(-1)
+    runtime.emit('backgroundTask', { id: 'a', status: 'running' })
+    runtime.emit('backgroundTask', { id: 'b', status: 'running' })
+    runtime.emit('turnCompleted', {})
+    runtime.emit('backgroundTask', { id: 'a', status: 'completed' })
+    assert.equal(app.sqliteRepository.getTaskAgent(task.id).requiresAttention, false)
+    runtime.emit('backgroundTask', { id: 'b', status: 'completed' })
+    assert.equal(app.sqliteRepository.getTaskAgent(task.id).attentionReason, 'finished')
+    runtime.emit('turnStarted', { nativeTurnId: 'summary', autonomous: true })
+    assert.equal(app.sqliteRepository.getTaskAgent(task.id).requiresAttention, false)
+    runtime.emit('turnCompleted', { nativeTurnId: 'summary' })
+    assert.equal(app.sqliteRepository.getTaskAgent(task.id).attentionReason, 'finished')
+    runtime.emit('turnStarted', { nativeTurnId: 'summary-failure', autonomous: true })
+    runtime.emit('backgroundTask', { id: 'b', status: 'failed', summary: '子任务失败' })
+    runtime.emit('turnCompleted', { nativeTurnId: 'summary-failure' })
+    assert.equal(app.sqliteRepository.getTaskAgent(task.id).attentionReason, 'error')
+  } finally { await app.close() }
+})

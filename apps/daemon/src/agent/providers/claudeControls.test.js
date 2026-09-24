@@ -5,14 +5,16 @@ import { ClaudeRuntime } from './claude.js'
 function fakeQuery() {
   let resolveUsage
   const usage = new Promise(resolve => { resolveUsage = resolve })
+  let releaseStream
+  const streamDone = new Promise(resolve => { releaseStream = resolve })
   const stream = {
-    async *[Symbol.asyncIterator]() {},
+    async *[Symbol.asyncIterator]() { await streamDone },
     supportedModels: async () => [
       { value: 'opus', displayName: 'Opus', supportedEffortLevels: ['low', 'high'] },
       { value: 'sonnet', displayName: 'Sonnet', supportedEffortLevels: ['low', 'high'] },
     ],
     getContextUsage: () => usage,
-    close() {},
+    close() { releaseStream() },
   }
   return { stream, resolveUsage }
 }
