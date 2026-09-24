@@ -161,3 +161,18 @@ test('工作区内的 Markdown 图片首次渲染为加载占位', async () => {
     assert.doesNotMatch(rendered, /src="\/Users\/bravf/)
   }
 })
+
+test('文件名不自动变成网址，显式网址和文件链接保持可点击', async () => {
+  const input = 'AGENTS.md README.md index.html package.json src/main.js\n\nhttps://example.com/docs http://example.com\n\n[项目说明](AGENTS.md) [网站](https://example.com)'
+  for (const render of [renderCodexMarkdown, renderPlainCodexMarkdown]) {
+    const html = await render(input)
+    assert.doesNotMatch(html, /href="http:\/\/(?:AGENTS|README|index|package|src)/i)
+    assert.match(html, /AGENTS\.md README\.md index\.html package\.json src\/main\.js/)
+    assert.match(html, /href="https:\/\/example\.com\/docs"/)
+    assert.match(html, /href="http:\/\/example\.com"/)
+    assert.match(html, /href="AGENTS\.md"/)
+    assert.match(html, />项目说明<\/a>/)
+    assert.match(html, />网站<\/a>/)
+    assert.equal((html.match(/<a /g) || []).length, 4)
+  }
+})

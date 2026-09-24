@@ -112,6 +112,9 @@ function createMarkdownRenderer(options = {}) {
     typographer: false,
   })
 
+  // 无协议的域名形态也可能是项目文件（如 AGENTS.md、index.html）。
+  instance.linkify.set({ fuzzyLink: false })
+
   const defaultLinkOpenRule = instance.renderer.rules.link_open
   const defaultTableOpenRule = instance.renderer.rules.table_open
   const defaultTableCloseRule = instance.renderer.rules.table_close
