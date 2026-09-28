@@ -497,6 +497,47 @@ test('V2 全面桌面交互回归', async (t) => {
   assert.deepEqual(failures, [])
 })
 
+test('归档确认长网址不遮挡关闭按钮，窄屏与横屏保持操作可见', async (t) => {
+  const fixture = await createFixture(t)
+  const title = 'https://docs.volcengine.com/docs/ark/seedance-model-activation?reference=' + 'a'.repeat(160)
+  fixture.app.sqliteRepository.updateTask(fixture.task.id, { title })
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 844, height: 390 }, { width: 498, height: 229 }]) {
+    const page = await fixture.browser.newPage({ viewport })
+    const failures = collectPageFailures(page)
+    await page.addInitScript(() => localStorage.setItem('promptx:theme-id', 'promptx-paper-orange'))
+    await page.goto(fixture.baseUrl)
+    const more = page.getByRole('button', { name: `${title} 的更多操作`, exact: true })
+    await more.click()
+    await page.getByRole('menuitem', { name: '归档会话', exact: true }).click()
+    const dialog = page.locator('.confirm-dialog-panel')
+    await dialog.waitFor()
+    // 点击校验同时等待过渡结束，并确认所有操作按钮都可命中。
+    for (const name of ['关闭', '取消', '归档']) await dialog.getByRole('button', { name, exact: true }).click({ trial: true })
+    const layout = await dialog.evaluate(element => {
+      const box = element.getBoundingClientRect()
+      const titleBox = element.querySelector('h2').getBoundingClientRect()
+      const closeBox = element.querySelector('[aria-label="关闭"]').getBoundingClientRect()
+      return {
+        fits: box.left >= 0 && box.right <= innerWidth + 1 && box.top >= 0 && box.bottom <= innerHeight + 1,
+        overflow: [...element.querySelectorAll('h2, p')].some(node => node.scrollWidth > node.clientWidth + 1),
+        overlap: titleBox.right > closeBox.left,
+        topAligned: Math.abs(titleBox.top - closeBox.top) < 2,
+      }
+    })
+    assert.deepEqual(layout, { fits: true, overflow: false, overlap: false, topAligned: true })
+    await saveScreenshot(page, `confirm-long-title-${viewport.width}.png`)
+    await dialog.getByRole('button', { name: '取消', exact: true }).click()
+    await dialog.waitFor({ state: 'detached' })
+    assert.equal(fixture.app.sqliteRepository.getTask(fixture.task.id).lifecycle, 'active')
+    await more.click()
+    await page.getByRole('menuitem', { name: '归档会话', exact: true }).click()
+    await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+    await dialog.waitFor({ state: 'detached' })
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
+})
+
 test('V2 移动端布局、弹层和 History 回归', async (t) => {
   const fixture = await createFixture(t)
   const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
@@ -1050,6 +1091,63 @@ test('Timeline 加载工作区外绝对路径图片，支持重试且拒绝非�
 
 })
 
+
+test('手机视频全屏后横竖屏切换保留播放器、进度，退出后仍可关闭与返回', async (t) => {
+  const fixture = await createFixture(t)
+  fs.copyFileSync(new URL('./fixtures/preview.mp4', import.meta.url), path.join(fixture.workspace, 'preview.mp4'))
+  const repository = fixture.app.sqliteRepository
+  const turn = repository.createTurn(fixture.task.id, 'rotation-video')
+  repository.updateTurn(turn.id, { status: 'completed' })
+  repository.appendTimeline(fixture.task.id, turn.id, {
+    type: 'assistant_message', messageId: 'rotation-video', phase: 'final_answer',
+    text: '[播放测试视频](preview.mp4)',
+  })
+  const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const failures = collectPageFailures(page)
+  let videoRequests = 0
+  page.on('request', request => { if (request.url().includes('/file/content?path=preview.mp4')) videoRequests += 1 })
+  await page.goto(fixture.baseUrl)
+  await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+  await page.getByRole('link', { name: '播放测试视频', exact: true }).click()
+  const viewer = page.getByRole('dialog', { name: '视频预览' })
+  await viewer.waitFor()
+  await page.waitForFunction(() => document.querySelector('[aria-label="视频预览"] video')?.readyState >= 2)
+  const video = viewer.locator('video')
+  await video.evaluate(element => {
+    element.pause()
+    element.currentTime = 1
+    window.rotationVideo = element
+    window.rotationVideoUrl = element.src
+    element.addEventListener('click', () => { void element.requestFullscreen() }, { once: true })
+  })
+  await video.click({ position: { x: 15, y: 15 } })
+  await page.waitForFunction(() => document.fullscreenElement === window.rotationVideo)
+  await video.evaluate(element => element.pause())
+  const currentTime = await video.evaluate(element => element.currentTime)
+  const device = await page.context().newCDPSession(page)
+  for (const viewport of [{ width: 844, height: 390 }, { width: 390, height: 844 }]) {
+    // 全屏窗口不能直接改大小，使用设备旋转指标模拟手机横竖屏。
+    await device.send('Emulation.setDeviceMetricsOverride', {
+      ...viewport, screenWidth: viewport.width, screenHeight: viewport.height,
+      mobile: true, deviceScaleFactor: 1,
+      screenOrientation: viewport.width > viewport.height
+        ? { type: 'landscapePrimary', angle: 90 } : { type: 'portraitPrimary', angle: 0 },
+    })
+    await page.waitForFunction(mobile => Boolean(document.querySelector('.timeline-workspace > .task-timeline-pane')) === mobile, viewport.width <= 720)
+    assert.equal(await video.evaluate(element => element === window.rotationVideo && element.src === window.rotationVideoUrl), true)
+    assert.equal(await video.evaluate(element => element.currentTime), currentTime)
+    assert.equal(await page.evaluate(() => document.fullscreenElement === window.rotationVideo), true)
+  }
+  assert.equal(videoRequests, 1)
+  await page.evaluate(() => document.exitFullscreen())
+  await viewer.getByRole('button', { name: '关闭预览' }).click()
+  await viewer.waitFor({ state: 'detached' })
+  await page.getByRole('link', { name: '播放测试视频', exact: true }).click()
+  await viewer.waitFor()
+  await page.goBack()
+  await viewer.waitFor({ state: 'detached' })
+  assert.deepEqual(failures, [])
+})
 
 test('移动端长 JSON 错误在提示框内换行，不产生 Timeline 横向溢出', async (t) => {
   const fixture = await createFixture(t)

@@ -77,6 +77,11 @@ public class MainActivity extends Activity {
   private Button siteSwitchButton;
   private ProgressBar progressBar;
   private WebView webView;
+  private LinearLayout rootLayout;
+  private FrameLayout fullscreenContainer;
+  private WebChromeClient.CustomViewCallback fullscreenCallback;
+  private int previousSystemUiVisibility;
+  private int previousWindowFlags;
   private LinearLayout overlay;
   private TextView overlayTitle;
   private TextView overlayMessage;
@@ -189,6 +194,7 @@ public class MainActivity extends Activity {
 
   private void buildLayout() {
     LinearLayout root = new LinearLayout(this);
+    rootLayout = root;
     root.setOrientation(LinearLayout.VERTICAL);
     root.setBackgroundColor(Color.rgb(250, 250, 249));
     root.setFitsSystemWindows(true);
@@ -764,8 +770,55 @@ public class MainActivity extends Activity {
     return Math.round(value * density);
   }
 
+  private void showVideoFullscreen(View view, WebChromeClient.CustomViewCallback callback) {
+    if (fullscreenContainer != null) {
+      callback.onCustomViewHidden();
+      return;
+    }
+    Window window = getWindow();
+    View decor = window.getDecorView();
+    previousSystemUiVisibility = decor.getSystemUiVisibility();
+    previousWindowFlags = window.getAttributes().flags;
+    fullscreenCallback = callback;
+    fullscreenContainer = new FrameLayout(this);
+    fullscreenContainer.setBackgroundColor(Color.BLACK);
+    fullscreenContainer.addView(view, new FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER
+    ));
+    ((ViewGroup) decor).addView(fullscreenContainer, new ViewGroup.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+    ));
+    rootLayout.setVisibility(View.GONE);
+    window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    decor.setSystemUiVisibility(
+      View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+    );
+  }
+
+  private void hideVideoFullscreen() {
+    if (fullscreenContainer == null) return;
+    FrameLayout container = fullscreenContainer;
+    WebChromeClient.CustomViewCallback callback = fullscreenCallback;
+    fullscreenContainer = null;
+    fullscreenCallback = null;
+    container.removeAllViews();
+    ((ViewGroup) getWindow().getDecorView()).removeView(container);
+    rootLayout.setVisibility(View.VISIBLE);
+    getWindow().setFlags(previousWindowFlags,
+      WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    getWindow().getDecorView().setSystemUiVisibility(previousSystemUiVisibility);
+    rootLayout.requestApplyInsets();
+    if (callback != null) callback.onCustomViewHidden();
+  }
+
   @Override
   public void onBackPressed() {
+    if (fullscreenContainer != null) {
+      hideVideoFullscreen();
+      return;
+    }
     if (webView != null && webView.canGoBack()) {
       webView.goBack();
       return;
@@ -796,6 +849,7 @@ public class MainActivity extends Activity {
   @Override
   protected void onDestroy() {
     handler.removeCallbacks(loadTimeoutRunnable);
+    hideVideoFullscreen();
     if (webView != null) {
       webView.destroy();
     }
@@ -873,6 +927,16 @@ public class MainActivity extends Activity {
   }
 
   private final class PromptXWebChromeClient extends WebChromeClient {
+    @Override
+    public void onShowCustomView(View view, CustomViewCallback callback) {
+      showVideoFullscreen(view, callback);
+    }
+
+    @Override
+    public void onHideCustomView() {
+      hideVideoFullscreen();
+    }
+
     @Override
     public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
       if (fileChooserCallback != null) {

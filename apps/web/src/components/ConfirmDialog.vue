@@ -47,23 +47,23 @@ const resolvedCancelText = computed(() => props.cancelText || '取消')
   <DialogShell
     :open="open"
     :stack-level="4"
-    panel-class="max-w-md"
-    header-class="px-5 py-4"
-    body-class="flex flex-col"
+    panel-class="confirm-dialog-panel max-w-md"
+    header-class="!items-start px-5 py-4"
+    body-class="flex shrink-0 flex-col"
     :close-disabled="loading"
     :close-on-backdrop="!loading"
     :close-on-escape="!loading"
     @close="emit('cancel')"
   >
     <template #title>
-      <div class="flex items-start gap-3">
+      <div class="flex min-w-0 items-start gap-3">
         <span
           class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-sm border border-dashed"
           :class="danger ? 'theme-status-danger' : 'theme-status-neutral'"
         >
           <TriangleAlert class="h-4 w-4" />
         </span>
-        <div>
+        <div class="min-w-0 max-h-[calc(100dvh-9rem)] flex-1 overflow-y-auto [overflow-wrap:anywhere]">
           <h2 class="theme-heading text-base font-semibold">{{ resolvedTitle }}</h2>
           <p v-if="description" class="theme-muted-text mt-1 text-sm leading-6">{{ description }}</p>
         </div>

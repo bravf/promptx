@@ -1,5 +1,5 @@
 <script setup>
-import { inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import MediaPreviewPlaceholder from './MediaPreviewPlaceholder.vue'
 import PxIconButton from './PxIconButton.vue'
@@ -7,7 +7,6 @@ import { v2Api } from '../lib/v2Api.js'
 
 const props = defineProps({ taskId: String, path: String, label: String })
 const emit = defineEmits(['close'])
-const timelineVisible = inject('timelineVisible', ref(true))
 const dialog = ref(null)
 const video = ref(null)
 const src = ref('')
@@ -32,6 +31,7 @@ function close() {
 }
 function handleKey(event) {
   if (event.key !== 'Escape') return
+  if (document.fullscreenElement || video.value?.webkitDisplayingFullscreen) return
   event.preventDefault()
   event.stopImmediatePropagation()
   close()
@@ -56,7 +56,6 @@ async function load() {
   }
 }
 watch(() => [props.taskId, props.path], load, { immediate: true })
-watch(timelineVisible, visible => { if (!visible) close() })
 onMounted(() => {
   dialog.value?.focus()
   window.addEventListener('keydown', handleKey, true)
@@ -64,7 +63,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   release()
   window.removeEventListener('keydown', handleKey, true)
-  if (timelineVisible.value && previousFocus?.isConnected) previousFocus.focus()
+  if (previousFocus?.isConnected && previousFocus.getClientRects().length && !previousFocus.closest('[inert]')) previousFocus.focus()
 })
 </script>
 
