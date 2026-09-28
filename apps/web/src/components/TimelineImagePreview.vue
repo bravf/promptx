@@ -1,6 +1,7 @@
 <script setup>
 import { inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { ImageOff, LoaderCircle, X } from 'lucide-vue-next'
+import { X } from 'lucide-vue-next'
+import MediaPreviewPlaceholder from './MediaPreviewPlaceholder.vue'
 import PxIconButton from './PxIconButton.vue'
 import { useImageZoom } from '../composables/useImageZoom.js'
 
@@ -48,14 +49,7 @@ onBeforeUnmount(() => {
   <Teleport to="body">
   <div v-if="src" ref="previewElement" role="dialog" aria-modal="true" aria-label="图片预览" tabindex="-1" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-6" @wheel.prevent="handleWheel" @click.self="closePreview">
     <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 z-10 h-9 w-9" label="关闭预览" @click="closePreview"><X class="h-4 w-4" /></PxIconButton>
-    <div v-if="previewLoading" class="theme-muted-text pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-xs">
-      <LoaderCircle class="h-4 w-4 animate-spin" />
-      <span>正在加载大图</span>
-    </div>
-    <div v-if="previewError" class="theme-muted-text flex flex-col items-center gap-2 text-xs">
-      <ImageOff class="h-6 w-6" />
-      <span>图片加载失败</span>
-    </div>
+    <MediaPreviewPlaceholder v-if="previewLoading || previewError" :error="previewError ? '图片加载失败，请关闭后重试' : ''" />
     <img
       v-if="src"
       :key="src"

@@ -1,6 +1,7 @@
 <script setup>
 import { inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { LoaderCircle, X } from 'lucide-vue-next'
+import { X } from 'lucide-vue-next'
+import MediaPreviewPlaceholder from './MediaPreviewPlaceholder.vue'
 import PxIconButton from './PxIconButton.vue'
 import { v2Api } from '../lib/v2Api.js'
 
@@ -71,12 +72,10 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <div ref="dialog" role="dialog" aria-modal="true" aria-label="视频预览" tabindex="-1" class="video-preview-backdrop fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-4 sm:p-6" @click.self="close">
       <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 z-10 h-9 w-9" label="关闭预览" @click="close"><X class="h-4 w-4" /></PxIconButton>
-      <div v-if="loading" role="status" class="theme-muted-text pointer-events-none absolute flex items-center gap-2 text-xs"><LoaderCircle class="h-4 w-4 animate-spin" />正在加载视频</div>
-      <div v-if="error" role="alert" class="theme-muted-text flex flex-col items-center gap-3 text-xs">
-        <span>{{ error }}</span>
-        <button class="tool-button rounded-sm px-3 py-2" @click="load">重试</button>
-      </div>
-      <video v-if="src" v-show="!error" ref="video" :src="src" :aria-label="label" controls playsinline preload="metadata" class="max-w-full object-contain" style="max-height: calc(100dvh - 112px)" @loadeddata="loading = false" @error="loading = false; error = '视频无法播放，请重试'" />
+      <MediaPreviewPlaceholder v-if="loading || error" kind="video" :error="error">
+        <button v-if="error" class="tool-button rounded-sm px-3 py-2" @click="load">重试</button>
+      </MediaPreviewPlaceholder>
+      <video v-if="src" v-show="!error" ref="video" :src="src" :aria-label="label" controls playsinline preload="metadata" class="max-w-full object-contain" :class="{ 'opacity-0': loading }" style="max-height: calc(100dvh - 112px)" @loadeddata="loading = false" @error="loading = false; error = '视频无法播放，请重试'" />
     </div>
   </Teleport>
 </template>
