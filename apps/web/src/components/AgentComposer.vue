@@ -260,7 +260,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="composer mx-auto max-w-3xl rounded-sm"
+    class="composer mx-auto max-w-3xl rounded-lg"
     :class="dragging ? 'composer-dragging' : ''"
     @dragenter.prevent="dragging = true"
     @dragover.prevent="dragging = true"
