@@ -318,3 +318,35 @@ test('已同步的 Claude 中断假用户消息原位修正，保留真实本地
     assert.equal(apply(updated).mode, 'noop')
   } finally { db.close() }
 })
+
+test('Claude 通知历史与实时续跑合并身份并修复已导入重复，保留本地输入', () => {
+  const { db, repository, task } = setup()
+  try {
+    const time = '2026-09-28T09:23:22.153Z'
+    const notification = { type: 'user', uuid: 'notice', timestamp: time, message: { content: '<task-notification>child finished</task-notification>' } }
+    const assistant = { type: 'assistant', uuid: 'answer', timestamp: time, message: { id: 'message', stop_reason: 'end_turn', content: [{ type: 'text', text: '后台完成，继续工作' }] } }
+    const apply = snapshot => {
+      const plan = reconcileHistory({ snapshot, localRows: repository.listTimelineRows(task.id), localTurns: repository.listTurns(task.id), syncState: repository.getTimelineSyncState(task.id) })
+      if (plan.mode !== 'noop') repository.applyTimelineSync(task.id, { ...plan, providerId: 'claude', sourceId: snapshot.sourceId })
+      return plan
+    }
+    apply(mapClaudeHistorySnapshot('session', [notification, assistant].map(JSON.stringify).join('\n')))
+    const legacyId = repository.listTurns(task.id)[0].id
+    const live = repository.createTurn(task.id, 'autonomous:claude:answer')
+    repository.updateTurn(live.id, { status: 'completed', nativeTurnId: 'claude:answer' })
+    repository.appendTimeline(task.id, live.id, { type: 'system_notice', code: 'autonomous_turn', text: '后台任务触发自动续跑' })
+    repository.appendTimeline(task.id, live.id, { type: 'assistant_message', messageId: 'message', phase: 'final_answer', text: '后台完成，继续工作' })
+    const real = repository.createTurn(task.id, 'real-user')
+    repository.appendTimeline(task.id, real.id, { type: 'user_message', clientMessageId: 'real-user', content: [{ type: 'text', text: notification.message.content }] })
+    const snapshot = mapClaudeHistorySnapshot('session', [{ ...notification, origin: { kind: 'task-notification' }, promptSource: 'system' }, assistant].map(JSON.stringify).join('\n'))
+    assert.equal(apply(snapshot).mode, 'rebuild')
+    const rows = repository.listTimelineRows(task.id)
+    assert.equal(rows.filter(row => row.item.type === 'assistant_message').length, 1)
+    assert.equal(rows.filter(row => row.item.type === 'user_message').length, 1)
+    assert.equal(rows.find(row => row.item.type === 'user_message').turnId, real.id)
+    assert.equal(repository.getTurn(legacyId), null)
+    assert.equal(repository.getTurn(live.id).historyState, 'confirmed')
+    assert.equal(apply(snapshot).mode, 'noop')
+    assert.equal(repository.listTimelineRows(task.id).length, rows.length)
+  } finally { db.close() }
+})

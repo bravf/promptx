@@ -1226,6 +1226,42 @@ test('子任务在发起轮次内展示结果，主回复结束仍等待子任�
 })
 
 
+test('后台自动续跑与原请求合并显示，子任务保留归属，新用户请求独立显示', async t => {
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    const fixture = await createFixture(t)
+    const repository = fixture.app.sqliteRepository
+    const agent = repository.getTaskAgent(fixture.task.id)
+    const auto = repository.createTurn(fixture.task.id, 'autonomous:notification-test')
+    repository.updateTurn(auto.id, { status: 'completed', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() })
+    repository.appendTimeline(fixture.task.id, auto.id, { type: 'system_notice', code: 'autonomous_turn', text: '后台任务触发自动续跑' })
+    repository.appendTimeline(fixture.task.id, auto.id, { type: 'assistant_message', messageId: 'auto-answer', phase: 'final_answer', text: '后台续跑结果已完成。' })
+    repository.upsertProviderTask(agent.id, { id: 'auto-child', originTurnId: auto.id, kind: 'local_agent', title: '续跑中的子任务', status: 'completed', summary: '检查完成。' })
+
+    const page = await fixture.browser.newPage({ viewport })
+    const failures = collectPageFailures(page)
+    await page.goto(fixture.baseUrl, { waitUntil: 'domcontentloaded' })
+    if (viewport.width < 600) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    await page.getByText('后台续跑结果已完成。', { exact: true }).waitFor()
+    const turns = page.locator('.timeline-turn')
+    assert.equal(await turns.count(), 1)
+    assert.equal(await turns.locator('.timeline-message').count(), 2)
+    assert.equal(await page.getByText('后台续跑结果已完成。', { exact: true }).count(), 1)
+    await turns.locator('.timeline-subagents > button').click()
+    await turns.locator('.timeline-subagents').getByText('续跑中的子任务', { exact: true }).waitFor()
+    await turns.locator('.process-toggle').click()
+    await turns.locator('.process-content').getByText('后台任务触发自动续跑', { exact: true }).waitFor()
+    await assertNoHorizontalOverflow(page)
+    // 用实际发送路径确认后续输入不会被并入上一个请求。
+    await page.getByPlaceholder('向 Agent 发送消息').fill('新的独立请求')
+    await page.getByRole('button', { name: '发送', exact: true }).click()
+    await page.getByText('已处理：新的独立请求', { exact: true }).waitFor()
+    assert.equal(await turns.count(), 2)
+    assert.equal(await turns.first().getByText('新的独立请求', { exact: true }).count(), 0)
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
+})
+
 test('多个会话分栏共享事件连接，五栏可发送取消且不阻塞 API', async t => {
   const fixture = await createFixture(t)
   const ids = [fixture.task.id, fixture.secondaryTask.id]

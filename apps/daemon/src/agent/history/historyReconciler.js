@@ -158,6 +158,19 @@ export function reconcileHistory({
   syncState = null,
   checkedTurnIds = [],
 }) {
+  // 旧版把系统任务通知导入成用户轮次，同时实时流另存了自动续跑。
+  // 只清理完全由 Provider 导入、且有相同 runtime 身份的重复轮次；真实本地输入不受影响。
+  const supersededTurnIds = snapshot.turns.filter(turn => turn.taskNotification && TERMINAL_HISTORY_STATUSES.has(turn.status)).flatMap(turn => {
+    const live = localTurns.find(local => local.nativeTurnId === turn.runtimeTurnId && local.clientMessageId?.startsWith('autonomous:'))
+    if (!live) return []
+    return localTurns.filter(local => local.id !== live.id && local.providerPromptId === turn.providerPromptId
+      && TERMINAL_HISTORY_STATUSES.has(local.status)
+      && localRows.filter(row => row.turnId === local.id).every(row => row.source === 'provider')).map(local => local.id)
+  })
+  if (supersededTurnIds.length) {
+    localTurns = localTurns.filter(turn => !supersededTurnIds.includes(turn.id))
+    localRows = localRows.filter(row => !supersededTurnIds.includes(row.turnId))
+  }
   const snapshotManifest = createHistoryManifest(snapshot)
   const previous = syncState?.sourceId === snapshot.sourceId ? syncState.manifest : null
   const manifest = snapshot.completeness === 'incremental' && previous
@@ -169,7 +182,7 @@ export function reconcileHistory({
         ]).values()],
       }
     : snapshotManifest
-  if (!checkedTurnIds.length && syncState?.sourceId === snapshot.sourceId
+  if (!supersededTurnIds.length && !checkedTurnIds.length && syncState?.sourceId === snapshot.sourceId
     && JSON.stringify(syncState.manifest || null) === JSON.stringify(manifest)) {
     return { mode: 'noop', changed: false, manifest, turns: [], rows: [], checkedTurnIds, confirmedTurnIds: [] }
   }
@@ -194,7 +207,7 @@ export function reconcileHistory({
   const currentIds = settled.map((turn) => turn.sourceTurnId)
   const commonPrefixMatches = Array.from({ length: Math.min(previousIds.length, currentIds.length) })
     .every((_, index) => previousIds[index] === currentIds[index])
-  const requiresRebuild = snapshot.completeness !== 'incremental' && Boolean(previous) && !commonPrefixMatches
+  const requiresRebuild = supersededTurnIds.length > 0 || (snapshot.completeness !== 'incremental' && Boolean(previous) && !commonPrefixMatches)
 
   if (requiresRebuild) {
     const groups = []
@@ -223,6 +236,7 @@ export function reconcileHistory({
     groups.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)))
     return {
       mode: 'rebuild',
+      supersededTurnIds,
       changed: true,
       manifest,
       turns,

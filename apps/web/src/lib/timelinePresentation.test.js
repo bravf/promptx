@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createTurnTimingMap, formatElapsedTime, formatMessageTime, getTurnActivityState, groupTimelineTurns, isTimelineTurnRunning, userMessageCopyText } from './timelinePresentation.js'
+import { createTurnTimingMap, formatElapsedTime, formatMessageTime, getTurnActivityState, groupedTurnTiming, groupTimelineTurns, isTimelineTurnRunning, userMessageCopyText } from './timelinePresentation.js'
 
 function entry(seq, turnId, type, item = {}) {
   return { seqStart: seq, seqEnd: seq, turnId, timestamp: `2026-01-01T00:00:0${seq}.000Z`, item: { type, ...item } }
@@ -144,4 +144,37 @@ test('消息时间根据本地日历日期补充昨天、日期和年份', () =>
 
 test('输入消息复制文本包含附件名称', () => {
   assert.equal(userMessageCopyText([{ type: 'text', text: '看这里' }, { type: 'image', name: '图.png' }, { type: 'file', name: '说明.pdf' }]), '看这里\n[图片] 图.png\n[附件] 说明.pdf')
+})
+
+test('后台续跑归到原请求，真正的新用户输入仍另起一轮，缺少前文时独立显示', () => {
+  const notice = { code: 'autonomous_turn', text: '后台任务触发自动续跑' }
+  const result = groupTimelineTurns([
+    entry(1, 'request', 'user_message'),
+    entry(2, 'request', 'assistant_message', { text: '等待后台任务' }),
+    entry(3, 'auto', 'system_notice', notice),
+    entry(4, 'auto', 'assistant_message', { text: '任务完成' }),
+    entry(5, 'next', 'user_message'),
+    entry(6, 'next-auto', 'system_notice', notice),
+    entry(7, 'next-auto', 'assistant_message', { text: '新请求的结果' }),
+  ])
+  assert.equal(result.length, 2)
+  assert.deepEqual(result[0].turnIds, ['request', 'auto'])
+  assert.equal(result[0].outputEntries.length, 1)
+  assert.equal(result[0].outputEntries[0].item.text, '等待后台任务\n\n任务完成')
+  assert.equal(result[0].processEntries[0].item.code, 'autonomous_turn')
+  assert.deepEqual(result[1].turnIds, ['next', 'next-auto'])
+  assert.equal(groupTimelineTurns([entry(1, 'auto', 'system_notice', notice)])[0].turnId, 'auto')
+})
+
+test('合并续跑使用原请求开始时间和最新轮次状态，完成后包含全部耗时', () => {
+  const turn = { turnId: 'request', turnIds: ['request', 'auto'] }
+  const timings = new Map([
+    ['request', { status: 'completed', startedAt: 1000, finishedAt: 2000 }],
+    ['auto', { status: 'running', startedAt: 3000, finishedAt: null }],
+  ])
+  assert.equal(groupedTurnTiming(turn, timings).startedAt, 1000)
+  assert.equal(groupedTurnTiming(turn, timings).status, 'running')
+  timings.set('auto', { status: 'completed', startedAt: 3000, finishedAt: 5000 })
+  assert.deepEqual(groupedTurnTiming(turn, timings), { status: 'completed', startedAt: 1000, finishedAt: 5000 })
+  assert.equal(groupedTurnTiming(turn, new Map()), null)
 })

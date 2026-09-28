@@ -462,3 +462,22 @@ test('Claude 中断尚未完成的请求时将原轮次标记为已取消', () =
   const snapshot = mapClaudeHistorySnapshot('session', lines.map(JSON.stringify).join('\n'))
   assert.deepEqual(snapshot.turns.map(turn => turn.status), ['canceled', 'canceled'])
 })
+
+test('Claude 后台通知不是用户输入，续跑身份与实时 SDK 一致', () => {
+  const notification = '<task-notification><task-id>child</task-id><status>completed</status></task-notification>'
+  const lines = [
+    { type: 'user', uuid: 'u', message: { content: '开始' } },
+    { type: 'assistant', uuid: 'a', message: { id: 'm1', stop_reason: 'end_turn', content: [{ type: 'text', text: '等待子任务' }] } },
+    { type: 'user', uuid: 'n', origin: { kind: 'task-notification' }, promptSource: 'system', turnOrigin: 'task_notification', message: { content: notification } },
+    { type: 'assistant', uuid: 'b', message: { id: 'm2', stop_reason: 'end_turn', content: [{ type: 'text', text: '继续汇总' }] } },
+    { type: 'user', uuid: 'real', message: { content: notification } },
+  ]
+  const snapshot = mapClaudeHistorySnapshot('session', lines.map(JSON.stringify).join('\n'))
+  const continuation = snapshot.turns[1]
+  assert.equal(continuation.taskNotification, true)
+  assert.equal(continuation.runtimeTurnId, 'claude:b')
+  assert.equal(continuation.items[0].item.code, 'autonomous_turn')
+  assert.equal(continuation.items.some(entry => entry.item.type === 'user_message'), false)
+  assert.equal(snapshot.turns[2].items[0].item.type, 'user_message')
+  assert.equal(snapshot.turns[2].items[0].item.content[0].text, notification)
+})

@@ -150,6 +150,13 @@ export function createRepository(db) {
     }
     const turnIds = new Map()
     let updatedTurns = 0
+    if (input.mode === 'rebuild') {
+      for (const turnId of input.supersededTurnIds || []) {
+        // 在同一事务内释放旧导入轮次的唯一身份，随后交给实际 SDK 轮次。
+        db.prepare(`UPDATE agent_turns SET provider_prompt_id = '' WHERE id = ? AND task_id = ?
+          AND status IN ('completed', 'failed', 'canceled')`).run(turnId, taskId)
+      }
+    }
     const checkedTurnIds = new Set(input.checkedTurnIds || [])
     for (const turn of input.turns || []) {
       let current = turn.localTurnId
@@ -276,6 +283,15 @@ export function createRepository(db) {
         item: entry.item,
       })
       nextSeq += 1
+    }
+
+    // 仅在重建已移除重复历史行之后清理旧轮次，不能删除仍有内容的轮次。
+    if (input.mode === 'rebuild') {
+      for (const turnId of input.supersededTurnIds || []) {
+        db.prepare(`DELETE FROM agent_turns WHERE id = ? AND task_id = ?
+          AND status IN ('completed', 'failed', 'canceled')
+          AND NOT EXISTS (SELECT 1 FROM agent_timeline_rows WHERE turn_id = ?)`).run(turnId, taskId, turnId)
+      }
     }
 
     for (const turnId of checkedTurnIds) {

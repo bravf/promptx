@@ -5,10 +5,15 @@ function isProviderRetryEntry(entry) {
   return entry.item?.type === 'system_notice' && entry.item.code === 'provider_retrying'
 }
 
+function isAutonomousEntry(entry) {
+  return entry.item?.type === 'system_notice' && entry.item.code === 'autonomous_turn'
+}
+
 function isProcessEntry(entry) {
   return PROCESS_ITEM_TYPES.has(entry.item?.type)
     || (entry.item?.type === 'assistant_message' && entry.item.phase === 'commentary')
     || isProviderRetryEntry(entry)
+    || isAutonomousEntry(entry)
 }
 
 function hasRenderableAssistantText(entry) {
@@ -54,6 +59,9 @@ function validTime(value) {
 export function groupTimelineTurns(entries = []) {
   const turns = new Map()
   const result = []
+  const autonomousIds = new Set(entries.filter(isAutonomousEntry).map(entry => entry.turnId))
+  const userIds = new Set(entries.filter(entry => entry.item?.type === 'user_message').map(entry => entry.turnId))
+  let requestTurn = null
 
   for (const entry of entries) {
     if (!entry.turnId) {
@@ -62,11 +70,17 @@ export function groupTimelineTurns(entries = []) {
     }
 
     let turn = turns.get(entry.turnId)
+    if (!turn && autonomousIds.has(entry.turnId) && !userIds.has(entry.turnId) && requestTurn) {
+      turn = requestTurn
+      turn.turnIds.push(entry.turnId)
+      turns.set(entry.turnId, turn)
+    }
     if (!turn) {
       turn = {
         presentationType: 'turn',
         key: `turn:${entry.turnId}`,
         turnId: entry.turnId,
+        turnIds: [entry.turnId],
         timestamp: entry.timestamp,
         seqStart: entry.seqStart,
         seqEnd: entry.seqEnd,
@@ -77,6 +91,7 @@ export function groupTimelineTurns(entries = []) {
       turns.set(entry.turnId, turn)
       result.push(turn)
     }
+    if (entry.item?.type === 'user_message') requestTurn = turn
     turn.seqStart = Math.min(turn.seqStart, entry.seqStart)
     turn.seqEnd = Math.max(turn.seqEnd, entry.seqEnd)
     turn.timestamp = entry.timestamp
@@ -86,7 +101,7 @@ export function groupTimelineTurns(entries = []) {
     else turn.outputEntries.push(entry)
   }
 
-  for (const turn of turns.values()) {
+  for (const turn of new Set(turns.values())) {
     const allEntries = [...turn.userEntries, ...turn.processEntries, ...turn.outputEntries]
     const latestEntry = allEntries.reduce((latest, entry) => (
       !latest || entry.seqEnd > latest.seqEnd ? entry : latest
@@ -98,6 +113,18 @@ export function groupTimelineTurns(entries = []) {
   }
 
   return result
+}
+
+export function groupedTurnTiming(turn, timings) {
+  const members = (turn.turnIds || [turn.turnId]).map(id => timings.get(id)).filter(Boolean)
+  if (!members.length) return null
+  const starts = members.map(member => member.startedAt).filter(Number.isFinite)
+  const ends = members.map(member => member.finishedAt).filter(Number.isFinite)
+  return {
+    status: members.at(-1).status,
+    startedAt: starts.length ? Math.min(...starts) : null,
+    finishedAt: ends.length ? Math.max(...ends) : null,
+  }
 }
 
 export function getTurnActivityState(turn, {

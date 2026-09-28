@@ -106,7 +106,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
             </div>
           </div>
           <div v-else-if="entry.item.type === 'system_notice'" class="flex items-center gap-2 text-[var(--theme-warningText)]">
-            <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin" />
+            <LoaderCircle v-if="entry.item.code === 'provider_retrying'" class="h-3.5 w-3.5 shrink-0 animate-spin" />
             <span>{{ entry.item.text }}</span>
           </div>
         </div>

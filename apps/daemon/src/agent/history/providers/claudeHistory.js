@@ -88,9 +88,16 @@ function interruptionNotice(entry) {
   return /^\[Request interrupted by user(?: for tool use)?\]$/.test(textContent(content).trim())
 }
 
+function taskNotification(entry) {
+  return entry.type === 'user' && !entry.isSidechain && (
+    entry.origin?.kind === 'task-notification' || entry.turnOrigin === 'task_notification'
+    || (entry.promptSource === 'system' && /^<task-notification>[\s\S]*<\/task-notification>$/.test(textContent(entry.message?.content).trim()))
+  )
+}
+
 function visibleUser(entry) {
   if (entry.type !== 'user' || entry.isSidechain || entry.isMeta || entry.isCompactSummary) return false
-  if (interruptionNotice(entry)) return false
+  if (interruptionNotice(entry) || taskNotification(entry)) return false
   const content = entry.message?.content
   if (Array.isArray(content) && content.some((block) => block?.type === 'tool_result')) return false
   return Boolean(textContent(content).trim())
@@ -166,7 +173,8 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
   let lastAssistantId = null
   for (const entry of parseLines(content)) {
     const interrupted = interruptionNotice(entry)
-    if (visibleUser(entry) || interrupted) {
+    const notification = taskNotification(entry)
+    if (visibleUser(entry) || interrupted || notification) {
       if (turn) {
         turn.status = turn.providerError ? 'failed'
           : turn.lastStopReason === 'interrupted' || (interrupted && turn.lastStopReason !== 'end_turn') ? 'canceled' : 'completed'
@@ -177,6 +185,7 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
         sourceTurnId: entry.uuid,
         providerPromptId: entry.uuid,
         runtimeTurnId: entry.uuid,
+        ...(notification ? { taskNotification: true } : {}),
         status: 'running',
         startedAt: timestamp,
         finishedAt: timestamp,
@@ -185,7 +194,8 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
           providerMessageId: entry.uuid,
           timestamp,
           // 保留原始消息标识，让已导入的错误 user_message 能原位纠正。
-          item: interrupted ? { type: 'system_notice', code: 'claude_request_interrupted', text: '请求已中断' } : {
+          item: notification ? { type: 'system_notice', code: 'autonomous_turn', text: '后台任务触发自动续跑' }
+            : interrupted ? { type: 'system_notice', code: 'claude_request_interrupted', text: '请求已中断' } : {
             type: 'user_message',
             clientMessageId: entry.uuid,
             content: [{ type: 'text', text: textContent(entry.message?.content) }],
@@ -196,6 +206,10 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
       continue
     }
     if (!turn) continue
+    if (turn.taskNotification && turn.runtimeTurnId === turn.sourceTurnId && entry.type === 'assistant' && !entry.isSidechain) {
+      // SDK 的自动续跑以首条 assistant UUID 标识，不能使用通知 UUID 对账。
+      turn.runtimeTurnId = `claude:${entry.uuid || entry.message?.id}`
+    }
     if (entry.type === 'assistant' && !entry.isSidechain && ['end_turn', 'interrupted'].includes(turn.lastStopReason) && lastAssistantId && entry.message?.id !== lastAssistantId) {
       turn.status = turn.providerError ? 'failed' : turn.lastStopReason === 'interrupted' ? 'canceled' : 'completed'
       turns.push(turn)
@@ -247,7 +261,7 @@ export function readClaudeHistorySnapshot({ cwd, sessionId, knownRevision = '', 
     ? result.endOffset
     : result.baseOffset + Buffer.byteLength(result.content.slice(0, Math.max(0, result.content.lastIndexOf('\n') + 1)))
   if (snapshot.turns.length) {
-    const start = [...records].reverse().find(({ value }) => visibleUser(value) || interruptionNotice(value))
+    const start = [...records].reverse().find(({ value }) => visibleUser(value) || interruptionNotice(value) || taskNotification(value))
     if (start) safeCursor = start.offset
   }
   return {
