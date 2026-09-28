@@ -10,6 +10,7 @@ import TaskDetailsDrawer from './TaskDetailsDrawer.vue'
 import V2SettingsDialog from './V2SettingsDialog.vue'
 import PxActionMenu from './PxActionMenu.vue'
 import PxIconButton from './PxIconButton.vue'
+import PxButton from './PxButton.vue'
 import AgentProviderIcon from './AgentProviderIcon.vue'
 const TaskTerminal = defineAsyncComponent(() => import('./TaskTerminal.vue'))
 const props = defineProps({ tasks: { type: Array, default: () => [] }, projects: { type: Array, default: () => [] }, ready: Boolean, mobile: Boolean, fallbackTaskId: { type: String, default: '' } })
@@ -219,7 +220,13 @@ defineExpose({ openSession, openSettings })
         <PxIconButton class="h-7 w-7 shrink-0" label="向右拆分" @click="split(rect.group.id, 'right')"><Columns2 class="h-3.5 w-3.5" /></PxIconButton>
         <PxIconButton class="h-7 w-7 shrink-0" label="向下拆分" @click="split(rect.group.id, 'bottom')"><Rows2 class="h-3.5 w-3.5" /></PxIconButton>
       </header>
-      <div v-if="!rect.group.tabs.length" class="theme-empty-state flex h-[calc(100%-36px)] flex-col items-center justify-center p-5 text-center text-xs"><MessageSquare class="mb-3 h-7 w-7" /><p>从左栏打开会话，或将标签拖到这里</p><button v-if="geometry.leaves.length > 1" class="tool-button mt-3" @click="closeEmptyGroup(layout, rect.group.id); announceFocus()">关闭空分区</button></div>
+      <div v-if="!rect.group.tabs.length" class="theme-empty-state flex h-[calc(100%-36px)] flex-col items-center justify-center p-5 text-center text-xs">
+        <MessageSquare class="mb-3 h-7 w-7" />
+        <p>从左栏打开会话，或将标签拖到这里</p>
+        <PxButton v-if="geometry.leaves.length > 1" variant="ghost" size="sm" class="mt-4" @click="closeEmptyGroup(layout, rect.group.id); announceFocus()">
+          <X class="h-3.5 w-3.5" aria-hidden="true" />关闭空分区
+        </PxButton>
+      </div>
     </section>
     <!-- 内容保持平铺和稳定 key；移动标签、改变树结构时不会重建会话和输入框。 -->
     <section v-for="panel in renderedPanels" v-show="panel.active" :key="panel.key" class="workbench-content absolute flex min-h-0 min-w-0 flex-col overflow-hidden" :style="panelStyle(panel)" role="tabpanel" :aria-label="title(panel)" :inert="!panel.active" @pointerdown.capture="focusGroup(panel.groupId)" @focusin.capture="focusGroup(panel.groupId)">
