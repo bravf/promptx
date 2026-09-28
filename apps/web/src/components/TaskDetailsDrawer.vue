@@ -5,7 +5,7 @@ import { v2Api } from '../lib/v2Api.js'
 import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
 
-const props = defineProps({ taskId: { type: String, required: true } })
+const props = defineProps({ taskId: { type: String, required: true }, tabbed: Boolean })
 const emit = defineEmits(['close', 'changed'])
 const loading = ref(true)
 const error = ref('')
@@ -91,7 +91,7 @@ watch(() => props.taskId, load, { immediate: true })
         <span v-if="task" class="details-status shrink-0 px-1.5 py-0.5 text-[9px]">{{ task.lifecycle === 'archived' ? '已归档' : '未归档' }}</span>
       </div>
       <PxIconButton class="h-8 w-8" label="刷新详情" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" /></PxIconButton>
-      <PxIconButton class="h-8 w-8" label="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
+      <PxIconButton v-if="!tabbed" class="h-8 w-8" label="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
     </header>
     <div v-if="error" class="details-error shrink-0 border-b px-3 py-2 text-xs">{{ error }}</div>
     <div v-if="loading" class="details-loading min-h-0 flex-1 p-3" role="status" aria-label="正在加载任务详情">

@@ -1,9 +1,9 @@
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
 import { ArrowDown, ArrowLeft, Bot, CircleAlert, Columns2, FileDiff, Files, Info, LoaderCircle, TerminalSquare, X } from 'lucide-vue-next'
-import { v2Api, taskEventsUrl } from '../lib/v2Api.js'
-import { createEventSource } from '../lib/eventSource.js'
+import { v2Api } from '../lib/v2Api.js'
+import { createTaskEventSource } from '../lib/taskEventSource.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupTimelineTurns, isTimelineTurnRunning } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
@@ -23,9 +23,13 @@ const props = defineProps({
   focused: { type: Boolean, default: false },
   splitEnabled: { type: Boolean, default: false },
   mobile: { type: Boolean, default: false },
+  tabbed: { type: Boolean, default: false },
+  visible: { type: Boolean, default: true },
 })
-const emit = defineEmits(['focus', 'back', 'split', 'close', 'agent-event', 'changed'])
+const emit = defineEmits(['focus', 'back', 'split', 'close', 'agent-event', 'changed', 'open-tab'])
 
+const parentTimelineVisible = inject('timelineVisible', ref(true))
+provide('timelineVisible', computed(() => props.visible && parentTimelineVisible.value))
 const taskDrafts = new Map()
 
 const { isDark } = useTheme()
@@ -345,6 +349,7 @@ function pinTimelineToBottom(requestVersion = timelineRequestVersion) {
 }
 
 function handleTimelineScroll(event) {
+  if (!props.visible) return
   const element = event.currentTarget
   const previousScrollTop = lastTimelineScrollTop
   lastTimelineScrollTop = element.scrollTop
@@ -360,7 +365,7 @@ function handleTimelineScroll(event) {
 }
 
 async function syncVisibleTimeline() {
-  if (document.visibilityState !== 'visible' || !activeTaskId.value) return
+  if (!props.visible || document.visibilityState !== 'visible' || !activeTaskId.value) return
   const now = Date.now()
   if (now - timelineWakeSyncAt < 2_000) return
   timelineWakeSyncAt = now
@@ -413,9 +418,11 @@ function applyTimelineSyncResult(sync, taskId) {
 }
 
 function openEvents(taskId, epoch, seq) {
-  eventSource = createEventSource(taskEventsUrl(taskId, seq ? `${epoch}:${seq}` : ''))
+  closeEvents()
+  if (!props.visible) return
+  eventSource = createTaskEventSource(taskId, epoch ? `${epoch}:${seq || 0}` : '')
   eventSource.addEventListener('timeline', (event) => {
-    if (activeTaskId.value !== taskId) return
+    if (!props.visible || activeTaskId.value !== taskId) return
     const { row } = JSON.parse(event.data)
     if (rows.value.some((item) => item.seq === row.seq)) return
     const shouldFollow = isTimelineAtBottom(timelineElement.value)
@@ -475,12 +482,14 @@ function scheduleInspectorRefresh() {
 }
 
 async function openProjectPath(target) {
+  if (props.tabbed) { emit('open-tab', target); return }
   drawerMode.value = target.intent === 'diff' ? 'diff' : 'files'
   await nextTick()
   inspectorDrawer.value?.openPath(target)
 }
 
 function toggleDrawer(mode) {
+  if (props.tabbed) { emit('open-tab', { type: mode }); return }
   drawerMode.value = drawerMode.value === mode ? null : mode
 }
 
@@ -520,6 +529,7 @@ async function scrollToBottom({ force = false, behavior = 'auto' } = {}) {
   await nextTick()
   if (!force && !followingTimeline.value) return
   const element = timelineElement.value
+  if (!props.visible) return
   element?.scrollTo({ top: element.scrollHeight, behavior })
   if (element) lastTimelineScrollTop = element.scrollTop
   followingTimeline.value = true
@@ -547,8 +557,17 @@ function handleGlobalKeydown(event) {
 watch(activeTaskId, (taskId) => {
   terminalOpen.value = false
   drawerMode.value = null
-  selectTask(taskId)
+  if (props.visible) selectTask(taskId)
 }, { immediate: true })
+watch(() => props.visible, async (visible) => {
+  if (!visible) { closeEvents(); releaseTimelineBottomPin(); return }
+  if (!timelineEpoch.value) { selectTask(activeTaskId.value); return }
+  await nextTick()
+  if (timelineElement.value) timelineElement.value.scrollTop = lastTimelineScrollTop
+  openEvents(activeTaskId.value, timelineEpoch.value, rows.value.at(-1)?.seq || 0)
+  loadTaskControl(activeTaskId.value)
+  if (followingTimeline.value) scrollToBottom()
+})
 watch(() => props.task?.lifecycle, (lifecycle, previous) => {
   if (previous === 'running' && lifecycle !== 'running') reconcileTerminalTaskTurns()
 })
@@ -558,6 +577,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', syncVisibleTimeline)
 })
 onBeforeUnmount(() => {
+  timelineRequestVersion += 1
   window.removeEventListener('keydown', handleGlobalKeydown)
   document.removeEventListener('visibilitychange', syncVisibleTimeline)
   closeEvents()
@@ -583,11 +603,11 @@ onBeforeUnmount(() => {
       <div class="ml-auto flex shrink-0 items-center gap-1">
         <div v-if="timelineSyncing" class="timeline-sync-status theme-muted-text flex h-8 w-8 items-center justify-center" title="正在同步 Timeline" aria-label="正在同步 Timeline"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
         <div v-if="task" :title="activity.label" :aria-label="activity.label" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="activity.running ? 'status-dot-running' : ''" /><span class="status-text">{{ activity.label }}</span></div>
-        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="terminalOpen ? 'is-active' : ''" label="终端" :aria-pressed="terminalOpen" @click="terminalOpen = !terminalOpen"><TerminalSquare class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="terminalOpen ? 'is-active' : ''" label="终端" :aria-pressed="terminalOpen" @click="tabbed ? emit('open-tab', { type: 'terminal' }) : (terminalOpen = !terminalOpen)"><TerminalSquare class="h-4 w-4" /></PxIconButton>
         <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :label="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></PxIconButton>
         <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :label="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></PxIconButton>
         <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'task-details' ? 'is-active' : ''" label="任务详情" :aria-pressed="drawerMode === 'task-details'" @click="toggleDrawer('task-details')"><Info class="h-4 w-4" /></PxIconButton>
-        <PxIconButton v-if="!mobile" class="split-trigger h-8 w-8" :label="splitEnabled ? '关闭此窗格' : '拆分 Timeline'" @click="splitEnabled ? emit('close') : emit('split')"><X v-if="splitEnabled" class="h-4 w-4" /><Columns2 v-else class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="!mobile && !tabbed" class="split-trigger h-8 w-8" :label="splitEnabled ? '关闭此窗格' : '拆分 Timeline'" @click="splitEnabled ? emit('close') : emit('split')"><X v-if="splitEnabled" class="h-4 w-4" /><Columns2 v-else class="h-4 w-4" /></PxIconButton>
       </div>
     </header>
 

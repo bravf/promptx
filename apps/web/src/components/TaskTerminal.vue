@@ -5,7 +5,7 @@ import PxIconButton from './PxIconButton.vue'
 import TerminalScreen from './TerminalScreen.vue'
 import { request } from '../lib/request.js'
 
-const props = defineProps({ taskId: { type: String, required: true } })
+const props = defineProps({ taskId: { type: String, required: true }, visible: { type: Boolean, default: true }, embedded: Boolean })
 const emit = defineEmits(['close'])
 const root = ref(null)
 const terminals = ref([])
@@ -23,6 +23,7 @@ const storageKey = `promptx:terminal-tab:${props.taskId}`
 let disposed = false, timer, revision = 0, dragCleanup
 try { activeId.value = localStorage.getItem(storageKey) || '' } catch {}
 watch(activeId, value => { try { localStorage.setItem(storageKey, value) } catch {} })
+watch(() => props.visible, visibility)
 function select(id) { activeId.value = id; editingId.value = '' }
 function reconcile(items) {
   terminals.value = items
@@ -37,11 +38,11 @@ async function refresh() {
 }
 function scheduleList() {
   clearTimeout(timer)
-  if (!disposed && !document.hidden) timer = setTimeout(async () => { if (!busy.value) await refresh(); scheduleList() }, 5000)
+  if (!disposed && props.visible && !document.hidden) timer = setTimeout(async () => { if (!busy.value) await refresh(); scheduleList() }, 5000)
 }
 function visibility() {
   clearTimeout(timer)
-  if (!document.hidden) { if (!busy.value) refresh(); scheduleList() }
+  if (props.visible && !document.hidden) { if (!busy.value) refresh(); scheduleList() }
 }
 async function create(ensure = false) {
   if (busy.value || disposed) return
@@ -129,12 +130,12 @@ onBeforeUnmount(() => { disposed = true; revision++; clearTimeout(timer); dragCl
       <PxIconButton class="h-7 w-7 shrink-0" label="新建终端" :disabled="busy || loading" @click="create(false)"><Plus class="h-3.5 w-3.5" /></PxIconButton>
       <PxIconButton v-if="active" class="h-7 w-7 shrink-0" label="重命名终端" :disabled="busy" @click="edit(active)"><Pencil class="h-3.5 w-3.5" /></PxIconButton>
       <PxIconButton v-if="active && !active.running" class="h-7 w-7 shrink-0" label="重新启动终端" :disabled="busy" @click="restart"><RotateCw class="h-3.5 w-3.5" /></PxIconButton>
-      <PxIconButton class="h-7 w-7 shrink-0" :label="maximized ? '还原终端' : '放大终端'" @click="maximized = !maximized"><Minimize2 v-if="maximized" class="h-3.5 w-3.5" /><Maximize2 v-else class="h-3.5 w-3.5" /></PxIconButton>
-      <PxIconButton class="h-7 w-7 shrink-0" label="收起终端（保留进程）" @click="emit('close')"><X class="h-3.5 w-3.5" /></PxIconButton>
+      <PxIconButton v-if="!embedded" class="h-7 w-7 shrink-0" :label="maximized ? '还原终端' : '放大终端'" @click="maximized = !maximized"><Minimize2 v-if="maximized" class="h-3.5 w-3.5" /><Maximize2 v-else class="h-3.5 w-3.5" /></PxIconButton>
+      <PxIconButton v-if="!embedded" class="h-7 w-7 shrink-0" label="收起终端（保留进程）" @click="emit('close')"><X class="h-3.5 w-3.5" /></PxIconButton>
     </header>
     <p v-if="error" class="theme-status-danger px-2 py-1 text-xs" role="alert">{{ error }} <button class="underline" @click="refresh">刷新列表</button></p>
     <p v-if="loading" class="theme-muted-text p-3 text-xs">正在连接终端…</p>
-    <TerminalScreen v-if="activeId" :key="activeId" :task-id="taskId" :terminal-id="activeId" @state="updateState" @missing="refresh" />
+    <TerminalScreen :visible="visible" v-if="activeId" :key="activeId" :task-id="taskId" :terminal-id="activeId" @state="updateState" @missing="refresh" />
     <div v-else-if="!loading" class="theme-empty-state flex flex-1 items-center justify-center text-xs">点击 ＋ 新建终端</div>
   </section>
 </template>

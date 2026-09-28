@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Archive, Check, Copy, Info, LoaderCircle, Palette, RadioTower, RefreshCw, RotateCcw, Settings2, X } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import DialogShell from './DialogShell.vue'
+import InlineSettingsPanel from './InlineSettingsPanel.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import PxButton from './PxButton.vue'
@@ -12,6 +13,7 @@ import { writeClipboardText } from '../lib/clipboard.js'
 import ArchivedTasksSettings from './ArchivedTasksSettings.vue'
 
 const props = defineProps({
+  embedded: { type: Boolean, default: false },
   open: {
     type: Boolean,
     default: false,
@@ -123,12 +125,14 @@ watch(
       activeSection.value = 'appearance'
       loadRelay()
     }
-  }
+  },
+  { immediate: true }
 )
 </script>
 
 <template>
-  <DialogShell
+  <component
+    :is="embedded ? InlineSettingsPanel : DialogShell"
     :open="open"
     :show-close="false"
     :stack-level="2"
@@ -143,7 +147,7 @@ watch(
           <Settings2 class="h-4 w-4 shrink-0" />
           <span>设置</span>
         </h2>
-        <PxIconButton class="h-8 w-8 shrink-0" label="关闭设置" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="!embedded" class="h-8 w-8 shrink-0" label="关闭设置" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
       </div>
     </template>
 
@@ -163,7 +167,7 @@ watch(
       </nav>
     </aside>
 
-    <div class="v2-settings-content min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8 sm:py-7">
+    <div class="v2-settings-content min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8 sm:py-7">
       <section v-if="activeSection === 'appearance'" class="mx-auto w-full max-w-2xl">
         <div class="mb-6">
           <h2 class="theme-heading text-lg font-semibold">外观</h2>
@@ -237,7 +241,7 @@ watch(
         </div>
       </section>
     </div>
-  </DialogShell>
+  </component>
 
   <ConfirmDialog
     :open="confirmReset"

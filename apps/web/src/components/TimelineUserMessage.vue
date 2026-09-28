@@ -6,10 +6,15 @@ import { importedMessageText } from '../lib/importedMessageText.js'
 import { useImageZoom } from '../composables/useImageZoom.js'
 import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
+import TimelineMarkdown from './TimelineMarkdown.vue'
 
 const props = defineProps({
   content: { type: Array, default: () => [] },
+  isDark: { type: Boolean, default: false },
+  workspaceCwd: { type: String, default: '' },
+  taskId: { type: String, default: '' },
 })
+const emit = defineEmits(['rendered', 'open-workspace-path'])
 
 const timelineVisible = inject('timelineVisible', ref(true))
 const preview = ref(null)
@@ -193,7 +198,7 @@ onBeforeUnmount(() => {
         </span>
       </PxButton>
     </div>
-    <div v-if="text" class="whitespace-pre-wrap" :class="images.length ? 'mt-2' : ''">{{ text }}</div>
+    <TimelineMarkdown v-if="text" :class="images.length ? 'mt-2' : ''" :text="text" :is-dark="isDark" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
     <div v-if="files.length" class="flex flex-wrap gap-2" :class="images.length || text ? 'mt-2' : ''">
       <a v-for="block in files" :key="block.assetId" class="message-file flex min-w-0 max-w-64 items-center gap-2 rounded-sm px-2 py-1.5" :href="assetUrls[block.assetId] || undefined" :download="block.name">
         <FileText class="h-4 w-4 shrink-0" />

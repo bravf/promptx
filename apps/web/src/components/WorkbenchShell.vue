@@ -22,6 +22,7 @@ import PxIconButton from './PxIconButton.vue'
 import PxSelect from './PxSelect.vue'
 import SessionTitleMarquee from './SessionTitleMarquee.vue'
 import TaskTimelinePane from './TaskTimelinePane.vue'
+import DesktopWorkbench from './DesktopWorkbench.vue'
 import V2SettingsDialog from './V2SettingsDialog.vue'
 
 const projects = ref([])
@@ -31,7 +32,11 @@ const expandedProjectIds = ref(new Set())
 const sessionListView = ref(readSessionListView())
 const listDate = ref(new Date())
 const loading = ref(true)
+const initialDataReady = ref(false)
 const error = ref('')
+const desktopWorkbench = ref(null)
+const desktopProjectId = ref('')
+const visibleDesktopTaskIds = ref([])
 const primaryTaskId = ref('')
 const secondaryTaskId = ref('')
 const splitEnabled = ref(false)
@@ -101,7 +106,8 @@ const primaryTask = computed(() => taskForId(primaryTaskId.value))
 const secondaryTask = computed(() => taskForId(secondaryTaskId.value))
 const focusedTaskId = computed(() => splitEnabled.value && focusedPane.value === 'secondary' ? secondaryTaskId.value : primaryTaskId.value)
 const activeTask = computed(() => taskForId(focusedTaskId.value))
-const activeProject = computed(() => projects.value.find((project) => project.id === activeTask.value?.projectId))
+const activeProject = computed(() => projects.value.find((project) => project.id === (!isMobile.value && desktopProjectId.value ? desktopProjectId.value : activeTask.value?.projectId)))
+const viewedTaskIds = computed(() => isMobile.value ? [primaryTaskId.value] : visibleDesktopTaskIds.value)
 const activeProjectId = computed(() => activeProject.value?.id || '')
 
 function taskView(task, projectId = task?.projectId) {
@@ -186,6 +192,11 @@ async function selectTask(taskId, { navigate = false } = {}) {
   if (!task) return
   setProjectExpanded(task.projectId)
   if (navigate) enterMobileTimeline(taskId)
+  if (!isMobile.value) {
+    desktopWorkbench.value?.openSession(task)
+    clearViewedTaskAttention(task)
+    return
+  }
   if (isMobile.value) {
     primaryTaskId.value = taskId
     if (secondaryTaskId.value === taskId) secondaryTaskId.value = ''
@@ -241,13 +252,23 @@ function taskMenuItems(task) {
   return [{ id: 'rename', label: '重命名', icon: Pencil }, { id: 'pin', label: task.pinnedAt ? '取消置顶' : '置顶', icon: task.pinnedAt ? PinOff : Pin }, { separator: true }, { id: 'archive', label: '归档会话', icon: Archive }]
 }
 
+function focusDesktopTask(taskId, projectId, visibleTaskIds) {
+  desktopProjectId.value = projectId
+  visibleDesktopTaskIds.value = visibleTaskIds
+  primaryTaskId.value = taskId
+  secondaryTaskId.value = ''
+  focusedPane.value = 'primary'
+  if (taskId) writeActiveTaskId(taskId)
+  visibleTaskIds.forEach(id => clearViewedTaskAttention(taskForId(id)))
+}
+
 function agentStatusClass(task) {
-  if ([primaryTaskId.value, secondaryTaskId.value].includes(task.id) || !task.requiresAttention) return ''
+  if (viewedTaskIds.value.includes(task.id) || !task.requiresAttention) return ''
   return task.attentionReason === 'error' ? 'agent-dot-failed' : (task.attentionReason === 'finished' ? 'agent-dot-finished' : '')
 }
 
 function clearViewedTaskAttention(task) {
-  if (!task || ![primaryTaskId.value, secondaryTaskId.value].includes(task.id) || !task.requiresAttention || attentionClearPending.has(task.id)) return
+  if (!task || !viewedTaskIds.value.includes(task.id) || !task.requiresAttention || attentionClearPending.has(task.id)) return
   attentionClearPending.add(task.id)
   v2Api.clearTaskAttention(task.id).then(({ agent }) => upsertTaskAgent(agent)).catch((cause) => { error.value = cause.message }).finally(() => attentionClearPending.delete(task.id))
 }
@@ -266,6 +287,7 @@ async function loadInitial() {
     const fallback = historyTaskId || readActiveTaskId() || allTasks.value[0]?.id || ''
     applyLayout(resolveSplitTimelineState(stored, new Set(allTasks.value.map((task) => task.id)), fallback))
     if (isMobile.value && historyTaskId && taskForId(historyTaskId)) primaryTaskId.value = historyTaskId
+    initialDataReady.value = true
   } catch (cause) {
     error.value = cause.message
   } finally {
@@ -298,6 +320,7 @@ function formatImportActivity(value) {
 }
 
 function openManagedDialog(dialogId) {
+  if (dialogId === 'settings' && !isMobile.value) { desktopWorkbench.value?.openSettings(); return }
   dialog.value = dialogId
   if (!isMobile.value) return
   if (getMobileDialogHistoryState(window.history.state) === dialogId) { dialogUsesHistory = true; return }
@@ -550,9 +573,9 @@ onBeforeUnmount(() => {
       <footer class="border-t p-2"><PxButton variant="ghost" size="sm" class="settings-entry h-9 w-full justify-start gap-2 px-2 text-left text-xs" @click="openManagedDialog('settings')"><Settings class="h-4 w-4 shrink-0" /><span>设置</span></PxButton></footer>
     </aside>
 
-    <main class="timeline-workspace grid min-h-0 min-w-0" :class="[{ 'is-split': splitEnabled && !isMobile }, mobileView === 'timeline' ? 'mobile-panel-active' : 'mobile-panel-hidden']" :inert="isMobile && mobileView !== 'timeline'" :aria-hidden="isMobile ? mobileView !== 'timeline' : undefined">
-      <TaskTimelinePane :task="primaryTask" :project="projectForTask(primaryTask)" :focused="focusedPane === 'primary' || isMobile" :split-enabled="splitEnabled && !isMobile" :mobile="isMobile" @focus="focusPane('primary')" @back="showMobileSidebar" @split="openSplit" @close="closePane('primary')" @agent-event="upsertTaskAgent" @changed="refreshProjects" />
-      <TaskTimelinePane v-if="splitEnabled && !isMobile" :task="secondaryTask" :project="projectForTask(secondaryTask)" :focused="focusedPane === 'secondary'" split-enabled @focus="focusPane('secondary')" @close="closePane('secondary')" @agent-event="upsertTaskAgent" @changed="refreshProjects" />
+    <main class="timeline-workspace grid min-h-0 min-w-0" :class="mobileView === 'timeline' ? 'mobile-panel-active' : 'mobile-panel-hidden'" :inert="isMobile && mobileView !== 'timeline'" :aria-hidden="isMobile ? mobileView !== 'timeline' : undefined">
+      <DesktopWorkbench v-show="!isMobile" ref="desktopWorkbench" :tasks="allTasks" :projects="projects" :ready="initialDataReady" :mobile="isMobile" :fallback-task-id="primaryTaskId" @focus-task="focusDesktopTask" @agent-event="upsertTaskAgent" @changed="refreshProjects" />
+      <TaskTimelinePane v-if="isMobile" :task="primaryTask" :project="projectForTask(primaryTask)" focused mobile @back="showMobileSidebar" @agent-event="upsertTaskAgent" @changed="refreshProjects" />
     </main>
 
     <div v-if="error" class="shell-error error-row absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-sm border px-3 py-2 text-xs"><span>{{ error }}</span><PxIconButton class="h-6 w-6" label="关闭错误提示" @click="error = ''"><X class="h-3.5 w-3.5" /></PxIconButton></div>

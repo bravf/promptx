@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import { request } from '../lib/request.js'
 import { useTheme } from '../composables/useTheme.js'
 
-const props = defineProps({ taskId: { type: String, required: true }, terminalId: { type: String, required: true } })
+const props = defineProps({ taskId: { type: String, required: true }, terminalId: { type: String, required: true }, visible: { type: Boolean, default: true } })
 const emit = defineEmits(['state', 'missing'])
 const host = ref(null)
 const error = ref('')
@@ -43,10 +43,10 @@ function enqueue(action) {
 }
 function schedule(ms = delay) {
   clearTimeout(timer)
-  if (!disposed && !document.hidden && running && !polling) timer = setTimeout(poll, ms)
+  if (!disposed && props.visible && !document.hidden && running && !polling) timer = setTimeout(poll, ms)
 }
 async function poll() {
-  if (disposed || document.hidden || polling) return
+  if (disposed || !props.visible || document.hidden || polling) return
   polling = true
   controller = new AbortController()
   try {
@@ -68,7 +68,7 @@ async function poll() {
   } finally { polling = false; schedule() }
 }
 function resize() {
-  if (disposed || !fit || document.hidden) return
+  if (disposed || !props.visible || !fit || document.hidden) return
   fit.fit()
   clearTimeout(resizeTimer)
   resizeTimer = setTimeout(() => {
@@ -93,9 +93,10 @@ function flushInput() {
 }
 function visibility() {
   clearTimeout(timer)
-  if (document.hidden) controller?.abort()
+  if (document.hidden || !props.visible) controller?.abort()
   else { resize(); schedule(0) }
 }
+watch(() => props.visible, visibility, { flush: 'post' })
 watch(currentTheme, applyTheme, { flush: 'post' })
 onMounted(() => {
   terminal = new Terminal({ fontSize: 12, fontFamily: 'monospace', scrollback: 3000, cursorBlink: true })

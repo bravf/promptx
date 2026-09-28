@@ -20,6 +20,7 @@ export class PromptxEventSource {
   constructor(path, options = {}) {
     this.path = path
     this.retryMs = options.retryMs || 1_000
+    this.requestOptions = options.requestOptions || (() => ({}))
     this.listeners = new Map()
     this.closed = false
     this.lastEventId = ''
@@ -55,8 +56,11 @@ export class PromptxEventSource {
     while (!this.closed) {
       this.controller = new AbortController()
       try {
+        const options = this.requestOptions()
         const response = await transportFetch(this.requestPath(), {
+          ...options,
           headers: {
+            ...options.headers,
             Accept: 'text/event-stream',
             ...(this.lastEventId ? { 'Last-Event-ID': this.lastEventId } : {}),
           },

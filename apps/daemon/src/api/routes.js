@@ -10,6 +10,7 @@ import {
   UpdateTaskInputSchema,
   UpdateAgentSettingsInputSchema,
   UpdateProjectInputSchema,
+  TaskEventSubscriptionsSchema,
 } from '../../../../packages/protocol/src/index.js'
 import { DATABASE_VERSION } from '../db/database.js'
 import fs from 'node:fs'
@@ -490,6 +491,41 @@ export function registerRoutes(app, context) {
       clearInterval(heartbeat)
       unsubscribe()
     })
+  })
+  app.post('/api/v2/task-events', (request, reply) => {
+    const { subscriptions } = TaskEventSubscriptionsSchema.parse(request.body)
+    reply.hijack()
+    const raw = reply.raw
+    raw.writeHead(200, createSseHeaders(request.headers.origin, (origin) => corsPolicy.allows(origin)))
+    const unsubscribes = []
+    const heartbeat = setInterval(() => raw.write(': heartbeat\n\n'), 15000)
+    heartbeat.unref?.()
+    raw.on('close', () => {
+      clearInterval(heartbeat)
+      unsubscribes.forEach(unsubscribe => unsubscribe())
+    })
+    for (const subscription of subscriptions) {
+      const write = event => sseWrite(raw, { type: 'task-event', subscriptionId: subscription.id, event: presentEvent(event) })
+      const agent = repository.getTaskAgent(subscription.taskId)
+      if (!agent) { write({ type: 'unavailable' }); continue }
+      unsubscribes.push(eventHub.subscribe(agent.id, write))
+      if (subscription.snapshot) {
+        let cursor = parseCursor(subscription.cursor)
+        let snapshot
+        do {
+          snapshot = timelineStore.fetch(subscription.taskId, { direction: cursor ? 'after' : 'tail', cursor, mode: 'presented' })
+          if (snapshot.reset) write({ type: 'reset', timeline: snapshot })
+          else snapshot.rows.forEach(row => write({ type: 'timeline', epoch: snapshot.epoch, row }))
+          cursor = { epoch: snapshot.epoch, seq: snapshot.rows.at(-1)?.seq || 0 }
+        } while (snapshot.hasNewer && snapshot.rows.length)
+        write({ type: 'agent', agent: repository.getAgent(agent.id) })
+        write({ type: 'timeline-synced', sync: { status: 'current', turns: repository.listTurns(subscription.taskId, 1000) } })
+        const control = agentManager.controlStates.get(agent.id)
+        if (control) write({ type: 'control', control })
+        void agentManager.syncTimeline(agent.id).catch(error => request.log.warn(error, 'Timeline 重连同步失败'))
+      }
+      write({ type: 'ready' })
+    }
   })
   app.get('/api/v2/tasks/:taskId/events', (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)

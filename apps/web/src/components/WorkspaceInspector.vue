@@ -1,4 +1,5 @@
 <script setup>
+import { createTaskEventSource } from '../lib/taskEventSource.js'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   ChevronRight,
@@ -22,11 +23,15 @@ import { inferPreviewLanguageFromPath, renderSourceCodePreview } from '../lib/so
 
 const props = defineProps({
   taskId: { type: String, required: true },
+  tabbed: { type: Boolean, default: false },
+  targetPath: { type: String, default: '' },
+  targetLine: { type: Number, default: null },
+  visible: { type: Boolean, default: true },
   workspaceCwd: { type: String, default: '' },
   isDark: { type: Boolean, default: false },
   mode: { type: String, default: 'files', validator: (value) => ['files', 'diff'].includes(value) },
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'selection-change'])
 
 const directoryCache = ref({})
 const expandedPaths = ref(new Set())
@@ -49,6 +54,7 @@ const showHiddenFiles = ref(false)
 let workspaceVersion = 0
 let gitLoadPromise = null
 let diffRequestVersion = 0
+let pathRequestVersion = 0
 
 function clearFilePreviewObjectUrl() {
   if (filePreviewObjectUrl.value) URL.revokeObjectURL(filePreviewObjectUrl.value)
@@ -152,6 +158,7 @@ async function renderFilePreview() {
 async function selectFile(filePath, line = null) {
   selectedPath.value = filePath
   requestedLine.value = line
+  emit('selection-change', { path: filePath, line })
   fileLoading.value = true
   error.value = ''
   const version = workspaceVersion
@@ -216,6 +223,7 @@ async function loadGitStatus(options = {}) {
 async function selectDiff(filePath) {
   const requestVersion = ++diffRequestVersion
   selectedDiffPath.value = filePath
+  emit('selection-change', { path: filePath, line: null })
   diffLoading.value = true
   error.value = ''
   const version = workspaceVersion
@@ -244,19 +252,29 @@ async function expandParents(filePath) {
 
 async function openPath(target) {
   if (!target?.path) return
+  const requestVersion = ++pathRequestVersion
+  const version = workspaceVersion
   if (target.intent === 'diff') {
     await loadGitStatus({ quiet: true })
+    if (version !== workspaceVersion || requestVersion !== pathRequestVersion) return
     await selectDiff(target.path)
     return
   }
   await loadDirectory('')
   await expandParents(target.path)
+  if (version !== workspaceVersion || requestVersion !== pathRequestVersion) return
   await selectFile(target.path, target.line)
 }
 
 async function refreshGit(options = {}) {
   await loadGitStatus({ quiet: true })
   if (selectedDiffPath.value && !options.preserveDiff) await selectDiff(selectedDiffPath.value)
+}
+
+async function refreshPreview() {
+  if (props.mode === 'diff') return refreshGit()
+  await loadDirectory('', true)
+  if (selectedPath.value) await selectFile(selectedPath.value, requestedLine.value)
 }
 
 watch(() => props.taskId, async () => {
@@ -274,10 +292,38 @@ watch(() => props.taskId, async () => {
   displayedDiffPath.value = ''
   diff.value = null
   error.value = ''
+  const version = workspaceVersion
   await Promise.all([loadDirectory(''), loadGitStatus({ quiet: true })])
+  if (version === workspaceVersion && props.targetPath) await openPath({ path: props.targetPath, line: props.targetLine, intent: props.mode })
 }, { immediate: true })
 
 watch(() => props.isDark, renderFilePreview)
+watch(() => [props.visible, props.taskId, props.mode, props.tabbed], ([visible, taskId, mode, tabbed], _, onCleanup) => {
+  if (!visible || !taskId || mode !== 'diff' || !tabbed) return
+  // Diff 可以独立于 Timeline 显示，复用事件连接监听文件变化。
+  const events = createTaskEventSource(taskId, '', { snapshot: false })
+  let timer
+  const scheduleRefresh = () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => refreshGit(), 250)
+  }
+  events.addEventListener('ready', scheduleRefresh)
+  events.addEventListener('timeline', message => {
+    const item = JSON.parse(message.data).row?.item
+    if (item?.type === 'tool_call' && ['completed', 'failed', 'canceled'].includes(item.status)) scheduleRefresh()
+  })
+  events.addEventListener('turn', message => {
+    if (['completed', 'failed', 'canceled'].includes(JSON.parse(message.data).turn?.status)) scheduleRefresh()
+  })
+  events.addEventListener('timeline-synced', scheduleRefresh)
+  onCleanup(() => { clearTimeout(timer); events.close() })
+}, { immediate: true })
+watch(() => [props.targetPath, props.targetLine], ([path, line]) => {
+  if (!path) return
+  const selected = props.mode === 'files' ? selectedPath.value : selectedDiffPath.value
+  if (path !== selected) openPath({ path, line, intent: props.mode })
+  else if (props.mode === 'files' && line !== requestedLine.value) { requestedLine.value = line; renderFilePreview() }
+})
 watch(() => props.mode, (mode) => {
   error.value = ''
   if (mode === 'files') loadDirectory('')
@@ -301,14 +347,14 @@ defineExpose({ openPath, refreshGit })
       </div>
       <div class="flex items-center gap-0.5">
         <PxIconButton v-if="mode === 'files'" class="drawer-action h-8 w-8" :class="!showHiddenFiles ? 'is-active' : ''" :label="showHiddenFiles ? '隐藏点文件' : '显示点文件'" :aria-pressed="!showHiddenFiles" @click="showHiddenFiles = !showHiddenFiles"><Eye v-if="showHiddenFiles" class="h-3.5 w-3.5" /><EyeOff v-else class="h-3.5 w-3.5" /></PxIconButton>
-        <PxIconButton class="h-8 w-8" label="刷新" @click="mode === 'files' ? loadDirectory('', true) : loadGitStatus()"><RefreshCw class="h-3.5 w-3.5" :class="(directoryLoading.has('') || gitLoading) ? 'animate-spin' : ''" /></PxIconButton>
-        <PxIconButton class="h-8 w-8" label="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
+        <PxIconButton class="h-8 w-8" label="刷新" @click="refreshPreview"><RefreshCw class="h-3.5 w-3.5" :class="(directoryLoading.has('') || gitLoading) ? 'animate-spin' : ''" /></PxIconButton>
+        <PxIconButton v-if="!tabbed" class="h-8 w-8" label="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
       </div>
     </header>
 
     <div v-if="error" class="inspector-error shrink-0 border-b px-3 py-2 text-xs">{{ error }}</div>
 
-    <div v-if="mode === 'files'" class="drawer-body grid min-h-0 flex-1">
+    <div v-if="mode === 'files'" class="drawer-body grid min-h-0 flex-1" >
       <div class="file-tree min-h-0 overflow-auto border-r py-1">
         <div v-if="directoryLoading.has('') && !directoryCache['']" class="inspector-skeleton p-2" role="status" aria-label="正在加载文件树">
           <div v-for="index in 8" :key="index" class="inspector-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
@@ -355,7 +401,7 @@ defineExpose({ openPath, refreshGit })
       </div>
     </div>
 
-    <div v-else class="drawer-body grid min-h-0 flex-1">
+    <div v-else class="drawer-body grid min-h-0 flex-1" >
       <div class="changes-list min-h-0 overflow-auto border-r py-1">
         <div v-if="gitLoading && !gitStatus" class="inspector-skeleton p-2" role="status" aria-label="正在加载 Git 变更">
           <div v-for="index in 8" :key="index" class="inspector-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
@@ -398,7 +444,7 @@ defineExpose({ openPath, refreshGit })
 .inspector-loading-overlay { position: absolute; inset: 0; z-index: 5; display: flex; align-items: flex-start; justify-content: center; padding-top: 4rem; background: color-mix(in srgb, var(--theme-appPanel) 82%, transparent); color: var(--theme-textMuted); }
 @keyframes inspector-skeleton-pulse { 0%, 100% { opacity: 0.42; } 50% { opacity: 0.82; } }
 .drawer-action.is-active { background: var(--theme-accentSoft); color: var(--theme-accentText); }
-.drawer-body { grid-template-columns: minmax(240px, 30%) minmax(0, 1fr); }
+.drawer-body { grid-template-columns: minmax(140px, 30%) minmax(0, 1fr); }
 .tab-count { min-width: 1rem; border-radius: 999px; background: var(--theme-appPanelStrong); padding: 0 0.3rem; text-align: center; font-size: 9px; }
 .tree-row, .change-row { transition: background-color 140ms ease, color 140ms ease; }
 .tree-row:hover, .change-row:hover { background: var(--theme-appPanelHover); }

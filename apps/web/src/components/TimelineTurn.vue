@@ -68,7 +68,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
 <template>
   <section class="timeline-turn min-w-0">
     <article v-for="entry in turn.userEntries" :key="entry.seqStart" class="timeline-message mb-5 flex min-w-0 max-w-full flex-col items-end" :data-timeline-seq="entry.seqEnd">
-      <TimelineUserMessage :content="entry.item.content" />
+      <TimelineUserMessage :content="entry.item.content" :is-dark="isDark" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
       <TimelineMessageMeta :text="userMessageCopyText(entry.item.content)" :timestamp="entry.timestamp" align="right" />
     </article>
 

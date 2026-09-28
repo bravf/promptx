@@ -58,16 +58,6 @@ async function availablePort() {
   return port
 }
 
-async function assertDrawerTransition(locator) {
-  await locator.waitFor()
-  const transition = await locator.evaluate((element) => {
-    const style = getComputedStyle(element)
-    return { duration: style.transitionDuration, property: style.transitionProperty }
-  })
-  assert.match(transition.property, /transform/)
-  assert.notEqual(transition.duration, '0s')
-}
-
 test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   const renamedTitle = '已重命名会话，这是一个用于验证超长标题跑马灯滚动效果的会话名称'
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v2-web-e2e-')))
@@ -158,11 +148,14 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   }
 
   for (const label of ['浏览文件', '查看 Diff', '任务详情']) {
-    await desktop.getByRole('button', { name: label, exact: true }).click()
-    await desktop.locator('.workspace-inspector, .task-details-drawer').waitFor()
-    await desktop.getByRole('link', { name: '切换后的任务', exact: true }).click()
-    await desktop.locator('.workspace-inspector, .task-details-drawer').waitFor({ state: 'detached' })
     await desktop.getByRole('link', { name: '移动端回归项目', exact: true }).click()
+    await desktop.getByRole('button', { name: label, exact: true }).click()
+    await desktop.locator('.workspace-inspector:visible, .task-details-drawer:visible').waitFor()
+    await desktop.getByRole('link', { name: '切换后的任务', exact: true }).click()
+    assert.equal(await desktop.locator('.workspace-inspector:visible, .task-details-drawer:visible').count(), 0)
+    await desktop.getByRole('link', { name: '移动端回归项目', exact: true }).click()
+    await desktop.getByRole('button', { name: label, exact: true }).click()
+    await desktop.locator('.workbench-group.is-focused .workbench-tab.is-active').getByRole('button', { name: /^关闭标签 / }).click()
   }
   await desktop.getByRole('link', { name: '切换后的任务', exact: true }).click()
   await desktop.reload({ waitUntil: 'domcontentloaded' })
@@ -246,30 +239,30 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   assert.equal(await mobile.evaluate(() => window.history.state?.promptxV2MobileTaskId), renamedTaskId)
 
   await desktop.getByRole('button', { name: '浏览文件' }).click()
-  await assertDrawerTransition(desktop.locator('.workspace-inspector'))
+  await desktop.locator('.workspace-inspector').waitFor()
   await desktop.waitForTimeout(300)
   const inspectorBox = await desktop.locator('.workspace-inspector').boundingBox()
-  await desktop.getByRole('button', { name: '关闭抽屉' }).click()
+  await desktop.locator('.workbench-group.is-focused .workbench-tab.is-active').getByRole('button', { name: /^关闭标签 / }).click()
   await desktop.locator('.workspace-inspector').waitFor({ state: 'detached' })
   await desktop.getByRole('button', { name: '查看 Diff' }).click()
-  await assertDrawerTransition(desktop.locator('.workspace-inspector'))
-  await desktop.getByRole('button', { name: '关闭抽屉' }).click()
+  await desktop.locator('.workspace-inspector').waitFor()
+  await desktop.locator('.workbench-group.is-focused .workbench-tab.is-active').getByRole('button', { name: /^关闭标签 / }).click()
   await desktop.locator('.workspace-inspector').waitFor({ state: 'detached' })
   await desktop.getByRole('button', { name: '任务详情' }).click()
-  await assertDrawerTransition(desktop.locator('.task-details-drawer'))
+  await desktop.locator('.task-details-drawer').waitFor()
   await desktop.waitForTimeout(300)
   const detailsBox = await desktop.locator('.task-details-drawer').boundingBox()
   assert.deepEqual(detailsBox, inspectorBox)
   assert.equal(await desktop.getByText('任务操作', { exact: true }).count(), 0)
   await desktop.getByRole('link', { name: '切换后的任务', exact: true }).click()
-  await desktop.locator('.task-details-drawer').waitFor({ state: 'detached' })
+  await desktop.locator('.task-details-drawer').waitFor({ state: 'hidden' })
   await desktop.getByRole('button', { name: '切换后的任务 的更多操作' }).click()
   await desktop.getByRole('menuitem', { name: '归档会话', exact: true }).click()
   await desktop.getByRole('button', { name: '归档', exact: true }).click()
   await desktop.getByRole('button', { name: '移动端回归项目 的更多操作' }).click()
   await desktop.getByRole('menuitem', { name: '归档会话', exact: true }).click()
   await desktop.getByRole('button', { name: '归档', exact: true }).click()
-  await desktop.getByText('新建一条会话', { exact: true }).waitFor({ timeout: 5_000 })
+  await desktop.getByText('从左栏打开会话，或将标签拖到这里', { exact: true }).waitFor({ timeout: 5_000 })
   assert.equal(app.sqliteRepository.getTask(task.id).lifecycle, 'archived')
 
   await desktop.getByRole('button', { name: '移动端回归工作区 的更多操作' }).click()
@@ -280,6 +273,6 @@ test('V2 桌面首屏与移动端 History 返回链路', async (t) => {
   const archivedProject = desktop.locator('article').filter({ hasText: '1 个活动会话' }).filter({ hasText: '移动端回归工作区' })
   await archivedProject.waitFor()
   await archivedProject.getByRole('button', { name: '恢复', exact: true }).click()
-  await desktop.getByRole('button', { name: '关闭设置' }).click()
+  await desktop.getByRole('button', { name: '关闭标签 设置', exact: true }).click()
   await desktop.getByRole('button', { name: '移动端回归工作区 的更多操作' }).waitFor()
 })
