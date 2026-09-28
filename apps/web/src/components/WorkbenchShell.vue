@@ -596,7 +596,7 @@ onBeforeUnmount(() => {
               <div class="flex flex-wrap gap-2">
                 <label v-for="provider in providerOptions" :key="provider.value" class="conversation-radio relative cursor-pointer">
                   <input v-model="taskProvider" class="peer sr-only" type="radio" name="conversation-provider" :value="provider.value" />
-                  <span class="conversation-radio-option flex min-h-10 items-center justify-center gap-2 rounded-sm border px-3 py-2 text-xs">
+                  <span class="conversation-radio-option flex min-h-10 items-center justify-center gap-2 border px-3 py-2 text-xs">
                     <AgentProviderIcon :provider-id="provider.value" :label="provider.label" aria-hidden="true" />{{ provider.label }}
                   </span>
                 </label>
@@ -607,7 +607,7 @@ onBeforeUnmount(() => {
               <div class="flex flex-wrap gap-2">
                 <label v-for="option in executionOptions" :key="option.value" class="conversation-radio relative cursor-pointer">
                   <input v-model="executionKind" class="peer sr-only" type="radio" name="execution-kind" :value="option.value" />
-                  <span class="conversation-radio-option flex min-h-10 items-center justify-center rounded-sm border px-3 py-2 text-xs">{{ option.label }}</span>
+                  <span class="conversation-radio-option flex min-h-10 items-center justify-center border px-3 py-2 text-xs">{{ option.label }}</span>
                 </label>
               </div>
             </fieldset>
@@ -691,9 +691,9 @@ onBeforeUnmount(() => {
 @media (hover: hover) and (pointer: fine) {
   .agent-row:not(.row-active):hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 }
-.conversation-radio-option { border-color: var(--theme-inputBorder); background: var(--theme-inputBg); color: var(--theme-textMuted); }
+.conversation-radio-option { border-radius: var(--theme-controlRadius); border-color: var(--theme-inputBorder); background: var(--theme-inputBg); color: var(--theme-textMuted); }
 .conversation-radio:hover .conversation-radio-option { background: var(--theme-appPanelHover); }
-.conversation-radio input:checked + .conversation-radio-option { border-color: var(--theme-primaryBorder); background: var(--theme-primaryBg); color: var(--theme-primaryText); }
+.conversation-radio input:checked + .conversation-radio-option { border-radius: var(--theme-controlRadius); border-color: var(--theme-primaryBorder); background: var(--theme-primaryBg); color: var(--theme-primaryText); }
 .conversation-radio input:focus-visible + .conversation-radio-option { outline: 2px solid var(--theme-focusRing); outline-offset: 2px; }
 .conversation-radio input:disabled + .conversation-radio-option { opacity: 0.5; cursor: not-allowed; }
 .session-view-button { color: var(--theme-textMuted); }

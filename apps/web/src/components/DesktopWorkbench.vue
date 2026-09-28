@@ -248,7 +248,9 @@ defineExpose({ openSession, openSettings })
 <style scoped>
 .desktop-workbench { background: var(--theme-appBg); }
 .workbench-group, .workbench-content { background: var(--theme-appPanel); }
-.workbench-group { border: 0; border-radius: 2px; }
+.workbench-group { border: 0; border-radius: var(--theme-layoutRadius); }
+.workbench-content { border-radius: 0 0 var(--theme-layoutRadius) var(--theme-layoutRadius); }
+.workbench-content > :deep(.panel) { border-radius: 0; }
 .workbench-tab-bar { background: var(--theme-appPanelInset); }
 .workbench-tab-list { align-items: flex-end; padding: 4px 8px 0; scrollbar-width: none; }
 .workbench-tab-list::-webkit-scrollbar { display: none; }

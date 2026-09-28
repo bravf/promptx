@@ -6,6 +6,8 @@
   color-scheme: light;
   --theme-fontSans: "MiSans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --theme-fontMono: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Monaco, monospace;
+  --theme-layoutRadius: 0.5rem;
+  --theme-controlRadius: 0.5rem;
   --theme-codeViewFontSize: 12px;
   --theme-codeViewLineHeight: 1.5;
   --theme-codeViewGutterFontSize: 12px;
@@ -100,6 +102,49 @@ body {
   color: var(--theme-selectionText);
 }
 
+/* 桌面滚动条使用主题色，触摸设备保留系统滚动体验。 */
+@media (hover: hover) and (pointer: fine) {
+  :root {
+    --theme-scrollbarThumb: color-mix(in srgb, var(--theme-textMuted) 32%, transparent);
+    --theme-scrollbarThumbHover: color-mix(in srgb, var(--theme-textMuted) 55%, transparent);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    min-width: 32px;
+    min-height: 32px;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-color: var(--theme-scrollbarThumb);
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--theme-scrollbarThumbHover);
+  }
+
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+
+  /* Firefox 使用标准属性，避免覆盖 Chromium 的圆角滑块样式。 */
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: var(--theme-scrollbarThumb) transparent;
+    }
+  }
+}
+
 @layer components {
   .app-shell {
     @apply relative flex h-dvh min-h-screen flex-col transition-colors;
@@ -117,7 +162,8 @@ body {
   }
 
   .panel {
-    @apply rounded-sm border;
+    @apply border;
+    border-radius: var(--theme-layoutRadius);
     border-color: var(--theme-borderDefault);
     background: var(--theme-appPanel);
     box-shadow: var(--theme-shadowPanel);
@@ -150,7 +196,8 @@ body {
   }
 
   .tool-button {
-    @apply inline-flex items-center justify-center rounded-sm border font-medium transition focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-60;
+    border-radius: var(--theme-controlRadius);
+    @apply inline-flex items-center justify-center border font-medium transition focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-60;
     border-color: var(--theme-buttonBorder);
     background: var(--theme-buttonBg);
     color: var(--theme-buttonText);
@@ -232,7 +279,8 @@ body {
   }
 
   .tool-input {
-    @apply w-full rounded-sm border px-3 py-2 text-sm outline-none transition focus:ring-2;
+    @apply w-full border px-3 py-2 text-sm outline-none transition focus:ring-2;
+    border-radius: var(--theme-controlRadius);
     border-color: var(--theme-inputBorder);
     background: var(--theme-inputBg);
     color: var(--theme-textPrimary);
@@ -262,7 +310,7 @@ body {
     -webkit-tap-highlight-color: transparent;
   }
 
-  .px-button { border: 1px solid var(--theme-buttonBorder); border-radius: 0.25rem; }
+  .px-button { border: 1px solid var(--theme-buttonBorder); border-radius: var(--theme-controlRadius); }
   .px-button-sm { min-height: 2rem; padding: 0.375rem 0.75rem; font-size: 0.75rem; }
   .px-button-md { min-height: 2.25rem; padding: 0.5rem 1rem; font-size: 0.8125rem; }
   .px-button-lg { min-height: 2.625rem; padding: 0.625rem 1.125rem; font-size: 0.875rem; }
@@ -310,7 +358,7 @@ body {
   .px-alert-dismiss { display: inline-flex; height: 1.5rem; width: 1.5rem; flex-shrink: 0; align-items: center; justify-content: center; color: currentColor; }
   .px-alert-dismiss:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
 
-  .px-select-trigger { min-height: 2.25rem; border: 1px solid var(--theme-inputBorder); border-radius: 0.25rem; background: var(--theme-inputBg); color: var(--theme-textPrimary); padding: 0.5rem 0.75rem; }
+  .px-select-trigger { min-height: 2.25rem; border: 1px solid var(--theme-inputBorder); border-radius: var(--theme-controlRadius); background: var(--theme-inputBg); color: var(--theme-textPrimary); padding: 0.5rem 0.75rem; }
   .px-select-sm .px-select-trigger { min-height: 2rem; padding: 0.375rem 0.625rem; font-size: 0.75rem; }
   .px-select-pill .px-select-trigger { border-color: transparent; border-radius: 9999px; background: var(--theme-appPanelMuted); color: var(--theme-textMuted); }
   .px-select-trigger:hover:not(:disabled) { border-color: var(--theme-borderStrong); }
@@ -805,7 +853,7 @@ body {
   :root[data-theme='promptx-glass-light'] .panel,
   :root[data-theme='promptx-glass-light'] .theme-popover {
     border-color: color-mix(in srgb, var(--theme-borderDefault) 52%, white 48%);
-    border-radius: 0.65rem;
+    border-radius: var(--theme-layoutRadius);
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--theme-appPanelStrong) 76%, transparent), color-mix(in srgb, var(--theme-appPanel) 88%, transparent)),
       var(--theme-appPanel);
@@ -817,7 +865,7 @@ body {
 
   :root[data-theme='promptx-glass-light'] .tool-button {
     border-color: color-mix(in srgb, var(--theme-buttonBorder) 72%, white 28%);
-    border-radius: 0.5rem;
+    border-radius: var(--theme-controlRadius);
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--theme-buttonHighlight) 100%, transparent), color-mix(in srgb, var(--theme-buttonBg) 96%, transparent)),
       var(--theme-buttonBg);
@@ -869,7 +917,7 @@ body {
 
   :root[data-theme='promptx-glass-light'] .tool-input {
     border-color: color-mix(in srgb, var(--theme-inputBorder) 76%, white 24%);
-    border-radius: 0.5rem;
+    border-radius: var(--theme-controlRadius);
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--theme-inputHighlight) 100%, transparent), color-mix(in srgb, var(--theme-inputBg) 94%, transparent)),
       var(--theme-inputBg);
@@ -1025,7 +1073,7 @@ body {
   :root[data-theme='promptx-aqua-classic'] .panel,
   :root[data-theme='promptx-aqua-classic'] .theme-popover {
     border-color: color-mix(in srgb, var(--theme-borderDefault) 82%, white 18%);
-    border-radius: 0.45rem;
+    border-radius: var(--theme-layoutRadius);
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(231, 236, 242, 0.9) 54%, rgba(220, 228, 237, 0.94)),
       var(--theme-appPanel);
@@ -1037,7 +1085,7 @@ body {
 
   :root[data-theme='promptx-aqua-classic'] .tool-button {
     border-color: color-mix(in srgb, var(--theme-buttonBorder) 88%, white 12%);
-    border-radius: 0.4rem;
+    border-radius: var(--theme-controlRadius);
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(234, 239, 244, 0.94) 58%, rgba(220, 228, 237, 0.96) 100%),
       var(--theme-buttonBg);
@@ -1097,7 +1145,7 @@ body {
 
   :root[data-theme='promptx-aqua-classic'] .tool-input {
     border-color: var(--theme-inputBorder);
-    border-radius: 0.35rem;
+    border-radius: var(--theme-controlRadius);
     background:
       linear-gradient(180deg, rgba(219, 228, 237, 0.62), rgba(255, 255, 255, 0.92) 28%),
       var(--theme-inputBg);
@@ -1174,6 +1222,11 @@ body {
 @media (max-width: 640px) {
 
   .dialog-shell-panel {
+    border-radius: var(--theme-layoutRadius) var(--theme-layoutRadius) 0 0;
+  }
+
+  .dialog-shell-panel.import-dialog-panel,
+  .dialog-shell-panel.v2-settings-panel {
     border-radius: 0;
   }
 
@@ -1284,7 +1337,7 @@ body {
   :root[data-theme='promptx-ink-landscape'] .panel,
   :root[data-theme='promptx-ink-landscape'] .theme-popover {
     border-color: color-mix(in srgb, var(--theme-borderDefault) 86%, white 14%);
-    border-radius: 0.7rem;
+    border-radius: var(--theme-layoutRadius);
     background:
       linear-gradient(180deg, rgba(252, 253, 251, 0.38), rgba(248, 250, 248, 0.78)),
       linear-gradient(135deg, rgba(255, 255, 255, 0.14), transparent 34%),
@@ -1298,7 +1351,7 @@ body {
   :root[data-theme='promptx-ink-landscape'] .tool-button,
   :root[data-theme='promptx-ink-landscape'] .tool-input {
     border-color: color-mix(in srgb, var(--theme-buttonBorder) 78%, white 22%);
-    border-radius: 0.55rem;
+    border-radius: var(--theme-controlRadius);
     background:
       linear-gradient(180deg, rgba(252, 253, 251, 0.3), rgba(241, 245, 243, 0.72)),
       var(--theme-buttonBg);
@@ -1361,7 +1414,7 @@ body {
   :root[data-theme='promptx-wechat-light'] .panel,
   :root[data-theme='promptx-wechat-light'] .theme-popover {
     border-color: var(--theme-borderDefault);
-    border-radius: 0;
+    border-radius: var(--theme-layoutRadius);
     background: var(--theme-appPanelStrong);
     box-shadow: var(--theme-shadowPanel);
   }
@@ -1369,7 +1422,7 @@ body {
   :root[data-theme='promptx-wechat-light'] .tool-button,
   :root[data-theme='promptx-wechat-light'] .tool-input {
     border-color: var(--theme-inputBorder);
-    border-radius: 0;
+    border-radius: var(--theme-controlRadius);
     background: var(--theme-inputBg);
     box-shadow: none;
   }
@@ -1407,7 +1460,7 @@ body {
 
   :root[data-theme='promptx-wechat-light'] .tool-button,
   :root[data-theme='promptx-wechat-light'] .tool-input {
-    border-radius: 0;
+    border-radius: var(--theme-controlRadius);
   }
 
   :root[data-theme='promptx-wechat-light'] .theme-toggle-current,
@@ -1470,3 +1523,6 @@ body {
 }
 
 .codex-markdown img[role="button"] { cursor: zoom-in; }
+
+/* 浮层的外框圆角统一，内部菜单项保留各自的圆角。 */
+.theme-popover { border-radius: var(--theme-layoutRadius); }
