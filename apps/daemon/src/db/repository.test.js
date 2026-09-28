@@ -3,6 +3,9 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { openDatabase } from './database.js'
 import { createRepository } from './repository.js'
+import { mapClaudeHistorySnapshot } from '../agent/history/providers/claudeHistory.js'
+import { createHistoryManifest } from '../agent/history/historySnapshot.js'
+import { reconcileHistory } from '../agent/history/historyReconciler.js'
 
 function setup() {
   const db = openDatabase(':memory:')
@@ -280,5 +283,38 @@ test('历史同步不按查看时间置顶，仅真实历史新活动推进活�
     assert.equal(repository.getTask(task.id).lastActiveAt, newer)
     sync([], [])
     assert.equal(repository.getTask(task.id).lastActiveAt, newer)
+  } finally { db.close() }
+})
+
+test('已同步的 Claude 中断假用户消息原位修正，保留真实本地消息且重复同步不新增', () => {
+  const { db, repository, task } = setup()
+  try {
+    const marker = '[Request interrupted by user]'
+    const old = { sourceId: 'claude-session', turns: [{
+      sourceTurnId: 'interruption', providerPromptId: 'interruption', runtimeTurnId: 'interruption', status: 'completed',
+      startedAt: '2026-09-28T05:44:47.048Z', finishedAt: '2026-09-28T05:44:47.048Z',
+      items: [{ providerMessageId: 'interruption', timestamp: '2026-09-28T05:44:47.048Z', item: { type: 'user_message', clientMessageId: 'interruption', content: [{ type: 'text', text: marker }] } }],
+    }] }
+    const apply = snapshot => {
+      const plan = reconcileHistory({ snapshot, localRows: repository.listTimelineRows(task.id), localTurns: repository.listTurns(task.id, 100), syncState: repository.getTimelineSyncState(task.id) })
+      if (plan.mode !== 'noop') repository.applyTimelineSync(task.id, { ...plan, providerId: 'claude', sourceId: snapshot.sourceId })
+      return plan
+    }
+    const oldPlan = reconcileHistory({ snapshot: old })
+    const manifest = { ...createHistoryManifest(old), reconcilerVersion: 8 }
+    repository.applyTimelineSync(task.id, { ...oldPlan, manifest, providerId: 'claude', sourceId: old.sourceId })
+    const original = repository.listTimelineRows(task.id)[0]
+    const local = repository.createTurn(task.id, 'real-user')
+    repository.appendTimeline(task.id, local.id, { type: 'user_message', content: [{ type: 'text', text: marker }], clientMessageId: 'real-user' })
+    const updated = mapClaudeHistorySnapshot('claude-session', JSON.stringify({ type: 'user', uuid: 'interruption', timestamp: '2026-09-28T05:44:47.048Z', message: { content: marker } }))
+    apply(updated)
+    const rows = repository.listTimelineRows(task.id)
+    assert.equal(rows.length, 2)
+    assert.equal(rows[0].seq, original.seq)
+    assert.equal(rows[0].item.type, 'system_notice')
+    assert.equal(rows[0].item.text, '请求已中断')
+    assert.equal(rows[1].item.type, 'user_message')
+    assert.equal(repository.getTurn(original.turnId).status, 'canceled')
+    assert.equal(apply(updated).mode, 'noop')
   } finally { db.close() }
 })

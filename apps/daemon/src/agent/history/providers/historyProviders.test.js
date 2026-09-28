@@ -431,3 +431,34 @@ test('Grok 扫描会话并跳过 subagent', () => {
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('Claude 中断标记显示为系统状态，保留标识且不冒充用户提示词', () => {
+  for (const marker of ['[Request interrupted by user]', '[Request interrupted by user for tool use]']) {
+    const lines = [
+      { type: 'user', uuid: 'question', message: { content: '生成视频' } },
+      { type: 'assistant', uuid: 'answer', message: { id: 'answer', stop_reason: 'end_turn', content: [{ type: 'text', text: '已生成' }] } },
+      { type: 'user', uuid: 'interruption', message: { content: [{ type: 'text', text: marker }] } },
+    ]
+    const snapshot = mapClaudeHistorySnapshot('session', lines.map(JSON.stringify).join('\n'))
+    assert.deepEqual(snapshot.turns.map(turn => turn.status), ['completed', 'canceled'])
+    const notice = snapshot.turns[1].items[0]
+    assert.equal(notice.providerMessageId, 'interruption')
+    assert.deepEqual(notice.item, { type: 'system_notice', code: 'claude_request_interrupted', text: '请求已中断' })
+    lines.push({ type: 'user', uuid: 'real-message', message: { content: `解释一下 ${marker} 是什么意思` } })
+    lines.push({ type: 'assistant', uuid: 'answer2', message: { id: 'answer2', stop_reason: 'end_turn', content: [{ type: 'text', text: '这是中断标记' }] } })
+    const continued = mapClaudeHistorySnapshot('session', lines.map(JSON.stringify).join('\n'))
+    assert.equal(continued.turns[1].status, 'canceled')
+    assert.equal(continued.turns[2].items[0].item.type, 'user_message')
+    assert.equal(continued.turns[2].items[0].item.content[0].text, `解释一下 ${marker} 是什么意思`)
+  }
+})
+
+test('Claude 中断尚未完成的请求时将原轮次标记为已取消', () => {
+  const lines = [
+    { type: 'user', uuid: 'question', message: { content: '生成视频' } },
+    { type: 'assistant', uuid: 'answer', message: { id: 'answer', stop_reason: 'tool_use', content: [{ type: 'text', text: '正在处理' }] } },
+    { type: 'user', uuid: 'interruption', message: { content: '[Request interrupted by user]' } },
+  ]
+  const snapshot = mapClaudeHistorySnapshot('session', lines.map(JSON.stringify).join('\n'))
+  assert.deepEqual(snapshot.turns.map(turn => turn.status), ['canceled', 'canceled'])
+})

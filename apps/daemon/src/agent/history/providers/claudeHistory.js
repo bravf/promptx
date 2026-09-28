@@ -81,8 +81,16 @@ export function listClaudeHistorySessions() {
   return sessions.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
 }
 
+function interruptionNotice(entry) {
+  if (entry.type !== 'user' || entry.isSidechain || entry.isMeta || entry.isCompactSummary) return false
+  const content = entry.message?.content
+  if (Array.isArray(content) && (content.length !== 1 || content[0]?.type !== 'text')) return false
+  return /^\[Request interrupted by user(?: for tool use)?\]$/.test(textContent(content).trim())
+}
+
 function visibleUser(entry) {
   if (entry.type !== 'user' || entry.isSidechain || entry.isMeta || entry.isCompactSummary) return false
+  if (interruptionNotice(entry)) return false
   const content = entry.message?.content
   if (Array.isArray(content) && content.some((block) => block?.type === 'tool_result')) return false
   return Boolean(textContent(content).trim())
@@ -157,9 +165,11 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
   let tools = new Map()
   let lastAssistantId = null
   for (const entry of parseLines(content)) {
-    if (visibleUser(entry)) {
+    const interrupted = interruptionNotice(entry)
+    if (visibleUser(entry) || interrupted) {
       if (turn) {
-        turn.status = turn.providerError ? 'failed' : 'completed'
+        turn.status = turn.providerError ? 'failed'
+          : turn.lastStopReason === 'interrupted' || (interrupted && turn.lastStopReason !== 'end_turn') ? 'canceled' : 'completed'
         turns.push(turn)
       }
       const timestamp = toIsoTimestamp(entry.timestamp)
@@ -170,11 +180,12 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
         status: 'running',
         startedAt: timestamp,
         finishedAt: timestamp,
-        lastStopReason: '',
+        lastStopReason: interrupted ? 'interrupted' : '',
         items: [{
           providerMessageId: entry.uuid,
           timestamp,
-          item: {
+          // 保留原始消息标识，让已导入的错误 user_message 能原位纠正。
+          item: interrupted ? { type: 'system_notice', code: 'claude_request_interrupted', text: '请求已中断' } : {
             type: 'user_message',
             clientMessageId: entry.uuid,
             content: [{ type: 'text', text: textContent(entry.message?.content) }],
@@ -185,8 +196,8 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
       continue
     }
     if (!turn) continue
-    if (entry.type === 'assistant' && !entry.isSidechain && turn.lastStopReason === 'end_turn' && lastAssistantId && entry.message?.id !== lastAssistantId) {
-      turn.status = turn.providerError ? 'failed' : 'completed'
+    if (entry.type === 'assistant' && !entry.isSidechain && ['end_turn', 'interrupted'].includes(turn.lastStopReason) && lastAssistantId && entry.message?.id !== lastAssistantId) {
+      turn.status = turn.providerError ? 'failed' : turn.lastStopReason === 'interrupted' ? 'canceled' : 'completed'
       turns.push(turn)
       const id = `claude:${entry.uuid || entry.message?.id}`
       turn = { sourceTurnId: id, providerPromptId: id, runtimeTurnId: id, status: 'running', startedAt: toIsoTimestamp(entry.timestamp), finishedAt: null, lastStopReason: '', items: [{ providerMessageId: `${id}:notice`, timestamp: toIsoTimestamp(entry.timestamp), item: { type: 'system_notice', code: 'autonomous_turn', text: '后台任务触发自动续跑' } }] }
@@ -198,7 +209,8 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
   }
   if (turn) {
     turn.status = turn.providerError ? 'failed'
-      : turn.lastStopReason === 'end_turn' ? 'completed' : 'running'
+      : turn.lastStopReason === 'interrupted' ? 'canceled'
+        : turn.lastStopReason === 'end_turn' ? 'completed' : 'running'
     turns.push(turn)
   }
   return {
@@ -235,7 +247,7 @@ export function readClaudeHistorySnapshot({ cwd, sessionId, knownRevision = '', 
     ? result.endOffset
     : result.baseOffset + Buffer.byteLength(result.content.slice(0, Math.max(0, result.content.lastIndexOf('\n') + 1)))
   if (snapshot.turns.length) {
-    const start = [...records].reverse().find(({ value }) => visibleUser(value))
+    const start = [...records].reverse().find(({ value }) => visibleUser(value) || interruptionNotice(value))
     if (start) safeCursor = start.offset
   }
   return {
