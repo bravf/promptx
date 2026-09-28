@@ -4,6 +4,7 @@ import { renderCodexMarkdown, renderPlainCodexMarkdown } from '../lib/codexMarkd
 import { workspaceLinkForHref } from '../lib/timelineWorkspaceLinks.js'
 import { writeClipboardText } from '../lib/clipboard.js'
 import TimelineImagePreview from './TimelineImagePreview.vue'
+import TimelineVideoPreview from './TimelineVideoPreview.vue'
 import { v2Api } from '../lib/v2Api.js'
 
 defineOptions({ inheritAttrs: false })
@@ -33,6 +34,7 @@ const props = defineProps({
 const emit = defineEmits(['rendered', 'open-workspace-path'])
 
 const preview = ref(null)
+const videoPreview = ref(null)
 const html = ref('')
 const contentElement = ref(null)
 let renderTimer = null
@@ -46,6 +48,7 @@ function releaseWorkspaceImages() {
   imageLoadController = null
   imageObjectUrls.forEach((url) => URL.revokeObjectURL(url))
   imageObjectUrls.clear()
+  videoPreview.value = null
 }
 
 async function hydrateWorkspaceImages(version) {
@@ -177,6 +180,14 @@ function handleContentClick(event) {
     return
   }
   const anchor = event.target?.closest?.('a[href]')
+  const videoPath = anchor?.dataset?.workspaceVideoPath
+  if (anchor && videoPath) {
+    event.preventDefault()
+    event.stopPropagation()
+    anchor.focus()
+    videoPreview.value = { path: videoPath, label: anchor.textContent?.trim() || '视频预览' }
+    return
+  }
   const target = anchor && workspaceLinkForHref(anchor.getAttribute('href'), props.workspaceCwd)
   if (target) {
     event.preventDefault()
@@ -186,6 +197,7 @@ function handleContentClick(event) {
   }
   copyCode(event)
 }
+
 
 function handleContentKeydown(event) {
   if (['Enter', ' '].includes(event.key) && openImage(event.target)) {
@@ -208,5 +220,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-bind="$attrs" ref="contentElement" class="prose-like codex-markdown" @click="handleContentClick" @keydown="handleContentKeydown" v-html="html" />
+  <TimelineVideoPreview v-if="videoPreview" :task-id="taskId" :path="videoPreview.path" :label="videoPreview.label" @close="videoPreview = null" />
   <TimelineImagePreview :src="preview?.src || ''" :alt="preview?.alt || ''" @close="preview = null" />
 </template>

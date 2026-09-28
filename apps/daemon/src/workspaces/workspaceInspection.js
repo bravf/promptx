@@ -21,6 +21,14 @@ const IMAGE_TYPES = new Map([
   ['.webp', 'image/webp'],
 ])
 
+const VIDEO_TYPES = new Map([
+  ['.mp4', 'video/mp4'],
+  ['.m4v', 'video/mp4'],
+  ['.webm', 'video/webm'],
+  ['.ogv', 'video/ogg'],
+  ['.mov', 'video/quicktime'],
+])
+
 const TEXT_TYPES = new Map([
   ['.css', 'text/css'],
   ['.csv', 'text/csv'],
@@ -151,7 +159,7 @@ function looksBinary(buffer) {
 
 function mimeTypeFor(filePath, fallback = 'application/octet-stream') {
   const extension = path.extname(filePath).toLowerCase()
-  return IMAGE_TYPES.get(extension) || TEXT_TYPES.get(extension) || fallback
+  return IMAGE_TYPES.get(extension) || VIDEO_TYPES.get(extension) || TEXT_TYPES.get(extension) || fallback
 }
 
 export function readWorkspaceFile(cwd, requestedPath) {
@@ -177,11 +185,11 @@ export function readWorkspaceFile(cwd, requestedPath) {
   return { ...base, kind: 'text', content: content.toString('utf8') }
 }
 
-export function openWorkspaceFileStream(cwd, requestedPath) {
+export function openWorkspaceFileStream(cwd, requestedPath, { allowVideo = false } = {}) {
   const target = resolveWorkspaceTarget(cwd, requestedPath)
   const stat = fs.statSync(target.target)
   if (!stat.isFile()) throw new WorkspaceInspectionError('not_a_file', '目标路径不是文件。')
-  const mimeType = IMAGE_TYPES.get(path.extname(target.target).toLowerCase())
+  const mimeType = IMAGE_TYPES.get(path.extname(target.target).toLowerCase()) || (allowVideo && VIDEO_TYPES.get(path.extname(target.target).toLowerCase()))
   if (!mimeType || stat.size > MAX_IMAGE_BYTES) {
     throw new WorkspaceInspectionError('preview_unavailable', '该文件不支持原始内容预览。', 415)
   }

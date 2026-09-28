@@ -5,6 +5,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { test } from 'node:test'
 import {
+  openWorkspaceFileStream,
   getWorkspaceGitDiff,
   getWorkspaceGitStatus,
   listWorkspaceDirectory,
@@ -160,4 +161,18 @@ test('超大 Diff 在子进程输出阶段截断并返回可展示内容', async
   assert.ok(Buffer.byteLength(result.unstaged) <= 2 * 1024 * 1024)
   assert.ok(result.unstaged.split('\n').length <= 8001)
   assert.match(result.unstaged, /diff --git/)
+})
+
+
+test('工作区视频允许读取，图片专用入口仍拒绝视频及路径逃逸', async (t) => {
+  const root = fixture(t)
+  const bytes = Buffer.from('video fixture')
+  fs.writeFileSync(path.join(root, '仓鼠.mp4'), bytes)
+  assert.throws(() => openWorkspaceFileStream(root, '仓鼠.mp4'), { code: 'preview_unavailable' })
+  const file = openWorkspaceFileStream(root, '仓鼠.mp4', { allowVideo: true })
+  assert.equal(file.mimeType, 'video/mp4')
+  const chunks = []
+  for await (const chunk of file.stream) chunks.push(chunk)
+  assert.deepEqual(Buffer.concat(chunks), bytes)
+  assert.throws(() => openWorkspaceFileStream(root, '../outside.mp4', { allowVideo: true }), { code: 'path_outside_workspace' })
 })

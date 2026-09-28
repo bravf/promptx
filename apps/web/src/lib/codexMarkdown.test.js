@@ -176,3 +176,11 @@ test('文件名不自动变成网址，显式网址和文件链接保持可点�
     assert.equal((html.match(/<a /g) || []).length, 4)
   }
 })
+
+test('视频链接标记播放目标，普通文件与外链保持原行为', async () => {
+  for (const render of [renderCodexMarkdown, renderPlainCodexMarkdown]) {
+    const html = await render('[仓鼠](/code/demo/output/仓鼠.mp4) [代码](src/a.js) [外链](https://example.com/a.mp4)', { workspaceCwd: '/code/demo' })
+    assert.match(html, /data-workspace-video-path="output\/仓鼠.mp4"/)
+    assert.equal((html.match(/data-workspace-video-path=/g) || []).length, 1)
+  }
+})

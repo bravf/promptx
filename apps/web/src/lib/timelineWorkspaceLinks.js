@@ -120,3 +120,7 @@ export function timelineImageForHref(value, workspaceCwd = '') {
   }
   return workspaceLinkForHref(value, workspaceCwd)
 }
+
+export function isWorkspaceVideoPath(value = '') {
+  return /\.(?:mp4|m4v|webm|ogv|mov)$/i.test(decodedHref(value).replace(/[?#].*$/, ''))
+}

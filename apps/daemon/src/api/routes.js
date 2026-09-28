@@ -369,7 +369,7 @@ export function registerRoutes(app, context) {
   app.get('/api/v2/tasks/:taskId/file/content', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)
     if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    const file = openWorkspaceFileStream(current.environment.cwd, request.query.path || '')
+    const file = openWorkspaceFileStream(current.environment.cwd, request.query.path || '', { allowVideo: true })
     reply.header('Content-Type', file.mimeType)
     reply.header('Content-Length', String(file.size))
     reply.header('X-Content-Type-Options', 'nosniff')
