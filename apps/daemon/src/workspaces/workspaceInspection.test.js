@@ -176,3 +176,28 @@ test('工作区视频允许读取，图片专用入口仍拒绝视频及路径�
   assert.deepEqual(Buffer.concat(chunks), bytes)
   assert.throws(() => openWorkspaceFileStream(root, '../outside.mp4', { allowVideo: true }), { code: 'path_outside_workspace' })
 })
+
+test('视频使用独立大小上限，超过 10 MiB 的视频可读取而图片仍受限', async (t) => {
+  const root = fixture(t)
+  const videoPath = path.join(root, 'video.mp4')
+  const size = 11 * 1024 * 1024
+  fs.writeFileSync(videoPath, '')
+  fs.truncateSync(videoPath, size)
+  const file = openWorkspaceFileStream(root, 'video.mp4', { allowVideo: true })
+  assert.equal(file.mimeType, 'video/mp4')
+  assert.equal(file.size, size)
+  let received = 0
+  for await (const chunk of file.stream) received += chunk.length
+  assert.equal(received, size)
+
+  fs.copyFileSync(videoPath, path.join(root, 'large.png'))
+  for (const allowVideo of [false, true]) {
+    assert.throws(() => openWorkspaceFileStream(root, 'large.png', { allowVideo }), {
+      code: 'preview_too_large', statusCode: 413, message: '图片超过 10 MiB 预览上限。',
+    })
+  }
+  fs.truncateSync(videoPath, 100 * 1024 * 1024 + 1)
+  assert.throws(() => openWorkspaceFileStream(root, 'video.mp4', { allowVideo: true }), {
+    code: 'preview_too_large', statusCode: 413, message: '视频超过 100 MiB 预览上限。',
+  })
+})

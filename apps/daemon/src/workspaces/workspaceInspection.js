@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const MAX_TEXT_BYTES = 2 * 1024 * 1024
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024
 const MAX_DIFF_BYTES = 2 * 1024 * 1024
 const MAX_DIFF_LINES = 8000
 const GIT_TIMEOUT_MS = 10_000
@@ -189,9 +190,15 @@ export function openWorkspaceFileStream(cwd, requestedPath, { allowVideo = false
   const target = resolveWorkspaceTarget(cwd, requestedPath)
   const stat = fs.statSync(target.target)
   if (!stat.isFile()) throw new WorkspaceInspectionError('not_a_file', '目标路径不是文件。')
-  const mimeType = IMAGE_TYPES.get(path.extname(target.target).toLowerCase()) || (allowVideo && VIDEO_TYPES.get(path.extname(target.target).toLowerCase()))
-  if (!mimeType || stat.size > MAX_IMAGE_BYTES) {
+  const extension = path.extname(target.target).toLowerCase()
+  const videoType = allowVideo && VIDEO_TYPES.get(extension)
+  const mimeType = IMAGE_TYPES.get(extension) || videoType
+  if (!mimeType) {
     throw new WorkspaceInspectionError('preview_unavailable', '该文件不支持原始内容预览。', 415)
+  }
+  const maxBytes = videoType ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES
+  if (stat.size > maxBytes) {
+    throw new WorkspaceInspectionError('preview_too_large', `${videoType ? '视频' : '图片'}超过 ${maxBytes / 1024 / 1024} MiB 预览上限。`, 413)
   }
   return { stream: fs.createReadStream(target.target), size: stat.size, mimeType }
 }

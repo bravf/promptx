@@ -51,7 +51,7 @@ async function load() {
   } catch (cause) {
     if (!request.signal.aborted) {
       loading.value = false
-      error.value = '视频加载失败，请重试'
+      error.value = cause.message ? `视频加载失败：${cause.message}` : '视频加载失败，请重试'
     }
   }
 }

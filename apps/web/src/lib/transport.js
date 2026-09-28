@@ -43,6 +43,9 @@ export function transportFetch(url, options = {}) {
 
 export async function transportObjectUrl(url, options = {}) {
   const response = await transportFetch(url, options)
-  if (!response.ok) throw new Error(`资源加载失败（${response.status}）`)
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null)
+    throw new Error(typeof detail?.message === 'string' ? detail.message : `资源加载失败（${response.status}）`)
+  }
   return URL.createObjectURL(await response.blob())
 }
