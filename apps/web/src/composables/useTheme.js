@@ -5,6 +5,7 @@ const themeId = ref(DEFAULT_THEME_ID)
 const themeReady = ref(false)
 let mediaQuery = null
 let mobileMediaQuery = null
+const themeColorKeys = [...new Set(THEME_PRESETS.flatMap(theme => Object.keys(theme.colors || {})))]
 
 function isMobileThemeRestricted() {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -59,9 +60,10 @@ function applyThemeToDocument(nextTheme) {
   root.classList.toggle('dark', nextTheme.mode === 'dark')
   root.style.colorScheme = nextTheme.mode
 
-  // 未指定字体的主题使用全局默认值，避免沿用上一个主题的字体。
-  root.style.removeProperty('--theme-fontSans')
-  root.style.removeProperty('--theme-primaryIcon')
+  // 未定义的 token 回到样式表默认值，避免跨主题残留渐变、图标色或字体。
+  for (const token of themeColorKeys) {
+    if (!Object.hasOwn(nextTheme.colors || {}, token)) root.style.removeProperty(`--theme-${token}`)
+  }
   Object.entries(nextTheme.colors || {}).forEach(([token, value]) => {
     root.style.setProperty(`--theme-${token}`, String(value))
   })

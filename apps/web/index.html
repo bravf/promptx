@@ -10,7 +10,7 @@
         try {
           const themeId = localStorage.getItem('promptx:theme-id') || 'promptx-stone-light'
           document.documentElement.dataset.theme = themeId
-          if (themeId === 'promptx-stone-dark' || (!localStorage.getItem('promptx:theme-id') && matchMedia('(prefers-color-scheme: dark)').matches)) {
+          if (themeId.endsWith('-dark') || themeId === 'tokyo-night' || (!localStorage.getItem('promptx:theme-id') && matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark')
             document.documentElement.style.colorScheme = 'dark'
           }

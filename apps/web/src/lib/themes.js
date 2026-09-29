@@ -1,6 +1,87 @@
 export const THEME_STORAGE_KEY = 'promptx:theme-id'
 export const DEFAULT_THEME_ID = 'promptx-stone-light'
 
+// 配色源自 tweakcn（Apache-2.0），来源和改动说明见 docs/theme-palettes.md。
+// 共用语义映射，让新增配色同时覆盖桌面、手机和 Relay，无需组件特例。
+function mixColor(first, second, weight) {
+  const channels = color => color.slice(1).match(/../g).map(value => parseInt(value, 16))
+  const right = channels(second)
+  return `#${channels(first).map((value, index) => Math.round(value * weight + right[index] * (1 - weight)).toString(16).padStart(2, '0')).join('')}`
+}
+
+function createPaletteTheme(id, name, mode, description, palette) {
+  const dark = mode === 'dark'
+  const { bg, panel, surface, text, primary, onPrimary, accent = primary, tint, border } = palette
+  const muted = mixColor(text, panel, 0.82)
+  const hover = mixColor(text, panel, 0.08)
+  const soft = mixColor(accent, panel, dark ? 0.16 : 0.09)
+  const inset = mixColor(bg, text, 0.96)
+  const colors = {
+    appBg: bg, appPanel: panel, appPanelMuted: mixColor(bg, panel, 0.6),
+    appPanelStrong: surface, appPanelHover: hover, appPanelInset: inset, appPanelActive: soft,
+    appOverlay: panel, borderDefault: border, borderMuted: mixColor(border, panel, 0.55),
+    borderStrong: mixColor(border, text, 0.65), textPrimary: text,
+    textSecondary: mixColor(text, panel, 0.9), textMuted: muted, textInverse: onPrimary,
+    buttonBg: panel, buttonHover: hover, buttonBorder: border, buttonText: text,
+    primaryBg: primary, primaryHover: mixColor(primary, dark ? '#ffffff' : '#000000', 0.9),
+    primaryBorder: primary, primaryText: onPrimary, primaryIcon: onPrimary,
+    inputBg: surface, inputBorder: mixColor(border, text, 0.65),
+    focusRing: accent, selectionBg: mixColor(accent, panel, 0.24), selectionText: text,
+    accent, accentSoft: soft, accentText: accent,
+    promptBg: mixColor(tint, panel, dark ? 0.15 : 0.22),
+    promptBorder: mixColor(tint, border, 0.35), promptText: text,
+    processBg: inset, processBorder: border, processText: text,
+    responseBg: panel, responseBorder: border, responseText: text,
+    codeBg: inset, codeBorder: border,
+    shadowPanel: 'none', shadowPopover: `0 12px 32px rgba(0, 0, 0, ${dark ? 0.32 : 0.14})`,
+    shellGradient: `linear-gradient(${bg}, ${bg})`, backdropBlur: '0px', backdropSaturate: '100%',
+    panelHighlight: 'transparent', panelChrome: 'transparent', buttonHighlight: 'transparent', inputHighlight: 'transparent',
+    modalBackdrop: `rgba(0, 0, 0, ${dark ? 0.65 : 0.4})`,
+  }
+  // 品牌色与错误/增删等业务状态分开，酒红主题也保留清晰的红绿 Diff。
+  const statuses = dark
+    ? { success: '#9cdbab', danger: '#ffabab', warning: '#f2cf87', info: '#9bcaff' }
+    : { success: '#245d37', danger: '#a02337', warning: '#79500b', info: '#235a91' }
+  for (const [status, color] of Object.entries(statuses)) {
+    colors[status] = color
+    colors[`${status}Soft`] = mixColor(color, panel, dark ? 0.1 : 0.07)
+    colors[`${status}Text`] = color
+  }
+  return {
+    id: `tweakcn-${id}-${mode}`, name: `${name} · ${dark ? '深色' : '浅色'}`,
+    shortName: `${name} · ${dark ? '深色' : '浅色'}`, mode, description,
+    swatches: [bg, panel, primary, tint], colors,
+  }
+}
+
+const TWEAKCN_PALETTES = [
+  {
+    id: 'kodama-grove', name: '林间苔色', description: '米色与苔绿，安静自然的林间配色。',
+    light: { bg: '#e4d7b0', panel: '#e7dbbf', surface: '#f3ead2', text: '#443a30', primary: '#4a5b25', onPrimary: '#fdfbf6', tint: '#8d9d4f', border: '#b19681' },
+    dark: { bg: '#3a3529', panel: '#413c33', surface: '#494338', text: '#ede4d4', primary: '#a6bb95', onPrimary: '#2a2521', accent: '#bacba8', tint: '#a18f5c', border: '#6a6252' },
+  },
+  {
+    id: 'ocean-breeze', name: '海风', description: '海蓝底色与薄荷绿，清爽通透。',
+    light: { bg: '#f0f8ff', panel: '#ffffff', surface: '#f7fbff', text: '#374151', primary: '#087747', onPrimary: '#ffffff', tint: '#22c55e', border: '#c8d9e5' },
+    dark: { bg: '#0f172a', panel: '#1e293b', surface: '#243247', text: '#e1e7ef', primary: '#34d399', onPrimary: '#0f172a', tint: '#2dd4bf', border: '#4b5b70' },
+  },
+  {
+    id: 'elegant-luxury', name: '雅致酒红', description: '奶油、酒红与暖金，沉稳雅致。',
+    light: { bg: '#faf7f5', panel: '#faf7f5', surface: '#fffdfa', text: '#29201e', primary: '#9b2c2c', onPrimary: '#ffffff', tint: '#e7bf69', border: '#d6c5af' },
+    dark: { bg: '#1c1917', panel: '#292524', surface: '#332c2a', text: '#f5f5f4', primary: '#b91c1c', onPrimary: '#faf7f5', accent: '#f4b8b0', tint: '#d4a455', border: '#62524b' },
+  },
+  {
+    id: 'caffeine', name: '咖啡', description: '咖啡棕与奶油色点缀，简洁耐看。',
+    light: { bg: '#f9f9f9', panel: '#fcfcfc', surface: '#ffffff', text: '#202020', primary: '#644a40', onPrimary: '#ffffff', tint: '#ffdfb5', border: '#d8d0cb' },
+    dark: { bg: '#111111', panel: '#191919', surface: '#222222', text: '#eeeeee', primary: '#ffe0c2', onPrimary: '#241b16', tint: '#c89b73', border: '#48403a' },
+  },
+  {
+    id: 'northern-lights', name: '北极光', description: '极光绿、蓝与青，清晰的冷色层次。',
+    light: { bg: '#f9f9fa', panel: '#ffffff', surface: '#f3f7fc', text: '#333333', primary: '#25723e', onPrimary: '#ffffff', tint: '#6495ed', border: '#ccd6dd' },
+    dark: { bg: '#1a1d23', panel: '#2f3436', surface: '#363d42', text: '#e5e5e5', primary: '#88dba4', onPrimary: '#17271d', tint: '#6495ed', border: '#536169' },
+  },
+]
+
 export const THEME_PRESETS = [
   {
     id: 'promptx-stone-light',
@@ -718,6 +799,10 @@ export const THEME_PRESETS = [
       shadowPopover: '0 24px 62px rgba(5, 8, 18, 0.44)',
     },
   },
+  ...TWEAKCN_PALETTES.flatMap(({ id, name, description, light, dark }) => [
+    createPaletteTheme(id, name, 'light', description, light),
+    createPaletteTheme(id, name, 'dark', description, dark),
+  ]),
 ]
 
 export const THEME_PRESET_MAP = Object.fromEntries(THEME_PRESETS.map((theme) => [theme.id, theme]))

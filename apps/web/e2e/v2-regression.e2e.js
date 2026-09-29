@@ -12,6 +12,7 @@ import { createApp } from '../../daemon/src/app.js'
 import { RelayService } from '../../daemon/src/relay/relayService.js'
 import { startRelayServer } from '../../../packages/relay/src/server.js'
 import { createLayout, openTab, splitGroup } from '../src/lib/workbenchTabs.js'
+import { THEME_PRESETS } from '../src/lib/themes.js'
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist')
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
@@ -286,6 +287,58 @@ async function saveScreenshot(page, name) {
   })
   await page.screenshot({ path: path.join(outputDir, name), fullPage: true })
 }
+
+test('新增配色在桌面和手机可切换、刷新恢复，旧主题不残留新主题 token', { timeout: 120000 }, async t => {
+  const fixture = await createFixture(t)
+  const themes = THEME_PRESETS.filter(theme => theme.id.startsWith('tweakcn-'))
+  const page = await fixture.browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const failures = collectPageFailures(page)
+  await page.goto(fixture.baseUrl)
+  for (const theme of themes) {
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    await page.locator('.theme-option').filter({ hasText: theme.shortName }).click()
+    await saveScreenshot(page, `${theme.id}-settings.png`)
+    await page.reload()
+    await page.locator('.theme-option-active').filter({ hasText: theme.shortName }).waitFor()
+    assert.equal(await page.locator('html').getAttribute('data-theme'), theme.id)
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains('dark')), theme.mode === 'dark')
+    await page.getByRole('button', { name: '关闭标签 设置', exact: true }).click()
+    await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    await page.getByText('回归基线已经准备完成。').waitFor()
+    await saveScreenshot(page, `${theme.id}-timeline.png`)
+    await page.getByRole('button', { name: '查看 Diff', exact: true }).click()
+    await page.locator('.workspace-inspector:visible button[title="README.md"]').click()
+    await page.getByText('+工作区修改', { exact: true }).waitFor()
+    await saveScreenshot(page, `${theme.id}-diff.png`)
+    await page.getByRole('button', { name: '关闭标签 Diff · 主回归会话', exact: true }).click()
+    await assertNoHorizontalOverflow(page)
+  }
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: 'Stone Light' }).click()
+  assert.equal(await page.evaluate(() => document.documentElement.style.getPropertyValue('--theme-shellGradient')), '')
+  assert.equal(await page.evaluate(() => document.documentElement.style.getPropertyValue('--theme-primaryIcon')), '')
+  await page.getByRole('button', { name: 'Glass Light' }).click()
+  await page.locator('.theme-option').filter({ hasText: themes[0].shortName }).click()
+  assert.equal(await page.evaluate(() => document.documentElement.style.getPropertyValue('--theme-backdropBlur')), '0px')
+  assert.deepEqual(failures, [])
+  await page.close()
+
+  const mobile = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  await mobile.goto(fixture.baseUrl)
+  for (const theme of themes) {
+    await mobile.getByRole('button', { name: '设置', exact: true }).click()
+    await mobile.locator('.theme-option').filter({ hasText: theme.shortName }).click()
+    await mobile.reload()
+    await mobile.locator('.theme-option-active').filter({ hasText: theme.shortName }).waitFor()
+    assert.equal(await mobile.locator('html').getAttribute('data-theme'), theme.id)
+    await mobile.getByRole('button', { name: '关闭设置', exact: true }).click()
+    await mobile.getByRole('link', { name: '主回归会话', exact: true }).click()
+    await mobile.getByText('回归基线已经准备完成。').waitFor()
+    await saveScreenshot(mobile, `${theme.id}-mobile.png`)
+    await assertNoHorizontalOverflow(mobile)
+    await mobile.getByRole('button', { name: '返回项目列表', exact: true }).click()
+  }
+})
 
 test('V2 全面桌面交互回归', async (t) => {
   const fixture = await createFixture(t)
