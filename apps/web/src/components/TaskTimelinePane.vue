@@ -58,6 +58,7 @@ provide('timelineEpoch', timelineEpoch)
 const hasOlderHistory = ref(false)
 const loadingOlderHistory = ref(false)
 const followingTimeline = ref(true)
+const timelineScrollable = ref(false)
 const hasNewTimelineItems = ref(false)
 const timelineElement = ref(null)
 const timelineContent = ref(null)
@@ -345,9 +346,14 @@ function pauseTimelineFollow() {
 }
 
 function recordTimelinePosition(element) {
+  timelineScrollable.value = canScrollTimeline(element)
   lastTimelineScrollTop = element.scrollTop
   lastTimelineHeight = element.scrollHeight
   lastTimelineViewportHeight = element.clientHeight
+}
+
+function canScrollTimeline(element) {
+  return Boolean(element && element.clientHeight > 0 && element.scrollHeight - element.clientHeight > 1)
 }
 
 function handleTimelineScroll(event) {
@@ -368,6 +374,7 @@ function handleTimelineScroll(event) {
 }
 
 function handleTimelineWheel(event) {
+  if (!canScrollTimeline(event.currentTarget)) return
   if (event.deltaY < 0 && Math.abs(event.deltaY) >= Math.abs(event.deltaX)) pauseTimelineFollow()
   else if (event.deltaY > 0 && isTimelineAtBottom(event.currentTarget)) jumpToLatest()
 }
@@ -378,6 +385,7 @@ function handleTimelineTouchStart(event) {
 
 function handleTimelineTouchMove(event) {
   const y = event.touches[0]?.clientY
+  if (!canScrollTimeline(event.currentTarget)) { timelineTouchY = y ?? null; return }
   if (timelineTouchY !== null && y > timelineTouchY + 1) pauseTimelineFollow()
   else if (timelineTouchY !== null && y < timelineTouchY - 1 && isTimelineAtBottom(event.currentTarget)) jumpToLatest()
   timelineTouchY = y ?? null
@@ -385,6 +393,7 @@ function handleTimelineTouchMove(event) {
 
 function handleTimelineKeydown(event) {
   if (event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return
+  if (!canScrollTimeline(event.currentTarget)) return
   if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || event.key === ' ' && event.shiftKey) {
     pauseTimelineFollow()
     event.preventDefault()
@@ -583,6 +592,7 @@ function jumpToLatest() {
 }
 
 function scheduleTimelineFollow() {
+  timelineScrollable.value = canScrollTimeline(timelineElement.value)
   if (!followingTimeline.value || !paneVisible.value || !parentTimelineVisible.value || document.hidden || timelineScrollFrame) return
   timelineScrollFrame = requestAnimationFrame(() => {
     timelineScrollFrame = null
@@ -685,7 +695,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="timelineLoading" class="timeline-loading-overlay absolute inset-0 z-10 flex items-start justify-center pt-16" role="status" aria-label="加载中"><div class="status-float status-float-pill timeline-loading-indicator gap-2"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /><span>加载中</span></div></div>
         <div v-if="loadingOlderHistory" class="status-float status-float-icon pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2" role="status" aria-label="正在加载更早记录"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
-        <PxIconButton v-if="!followingTimeline && timelineHasContent" class="timeline-jump-button absolute bottom-3 left-1/2 z-10 h-9 w-9 -translate-x-1/2 p-0" :class="{ 'is-running': isRunning || sending }" :label="isRunning || sending ? '正在生成，回到底部' : (hasNewTimelineItems ? '有新消息，回到底部' : '回到底部')" @click="jumpToLatest">
+        <PxIconButton v-if="!followingTimeline && timelineScrollable && timelineHasContent" class="timeline-jump-button absolute bottom-3 left-1/2 z-10 h-9 w-9 -translate-x-1/2 p-0" :class="{ 'is-running': isRunning || sending }" :label="isRunning || sending ? '正在生成，回到底部' : (hasNewTimelineItems ? '有新消息，回到底部' : '回到底部')" @click="jumpToLatest">
           <span v-if="isRunning || sending" class="timeline-jump-loading" aria-hidden="true"><span class="timeline-jump-loading-dot" /><span class="timeline-jump-loading-dot" /><span class="timeline-jump-loading-dot" /></span><ArrowDown v-else class="h-4 w-4" />
         </PxIconButton>
       </div>

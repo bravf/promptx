@@ -340,6 +340,37 @@ test('新增配色在桌面和手机可切换、刷新恢复，旧主题不残�
   }
 })
 
+test('短 Timeline 上滚不显示回到底部，增高仍跟随，内容收起后隐藏箭头', async t => {
+  const fixture = await createFixture(t)
+  for (const mobile of [false, true]) {
+    const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1440, height: 1000 }, isMobile: mobile })
+    await page.goto(fixture.baseUrl)
+    if (mobile) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    await page.getByText('回归基线已经准备完成。').waitFor()
+    const timeline = page.locator('.timeline:visible')
+    assert.equal(await timeline.evaluate(el => el.scrollHeight <= el.clientHeight), true)
+    await timeline.dispatchEvent('wheel', { deltaY: -100, deltaX: 0 })
+    await timeline.dispatchEvent('touchstart', { touches: [{ identifier: 1, clientY: 100 }] })
+    await timeline.dispatchEvent('touchmove', { touches: [{ identifier: 1, clientY: 180 }] })
+    await timeline.focus()
+    await page.keyboard.press('PageUp')
+    assert.equal(await page.locator('.timeline-jump-button').count(), 0)
+    // 未发生真实滚动的手势不能暂停后续异步排版的跟随。
+    await timeline.locator(':scope > .mx-auto').evaluate(el => {
+      const spacer = document.createElement('div')
+      spacer.className = 'test-overflow'
+      spacer.style.height = '1600px'
+      el.append(spacer)
+    })
+    await page.waitForFunction(() => [...document.querySelectorAll('.timeline')].some(el => el.clientHeight > 0 && el.scrollTop > 500 && el.scrollHeight - el.clientHeight - el.scrollTop <= 2))
+    await timeline.press('PageUp')
+    await page.locator('.timeline-jump-button').waitFor()
+    await timeline.locator('.test-overflow').evaluate(el => el.remove())
+    await page.locator('.timeline-jump-button').waitFor({ state: 'detached' })
+    await page.close()
+  }
+})
+
 test('工作区侧栏支持拖动、键盘和重置，刷新记住宽度且窄屏不挤占会话', async t => {
   const fixture = await createFixture(t)
   const page = await fixture.browser.newPage({ viewport: { width: 1440, height: 900 } })
