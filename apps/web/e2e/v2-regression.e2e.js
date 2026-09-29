@@ -1912,6 +1912,44 @@ test('工具详情在桌面和手机原地展开，Relay 按需分页并缓存�
   }
 })
 
+test('旋转延续当前会话，保留历史标签和分栏，并同步主动切换后的返回记录', { timeout: 60000 }, async t => {
+  const fixture = await createFixture(t)
+  for (const existing of [false, true]) {
+    const layout = createLayout()
+    if (existing) {
+      openTab(layout, { type: 'session', taskId: fixture.task.id })
+      splitGroup(layout, layout.focusedId, 'right')
+    }
+    openTab(layout, { type: 'session', taskId: fixture.secondaryTask.id })
+    openTab(layout, { type: 'settings' })
+    const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true })
+    await page.addInitScript(layout => localStorage.setItem('promptx:v2:workbench-tabs', JSON.stringify({ version: 2, layout })), layout)
+    await page.goto(fixture.baseUrl)
+    await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    const mobilePane = page.locator('.timeline-workspace > .task-timeline-pane')
+    await mobilePane.getByPlaceholder('向 Agent 发送消息').fill('会话 1 的草稿')
+    await page.setViewportSize({ width: 844, height: 390 })
+    await page.locator('.workbench-group.is-focused [role="tab"][aria-selected="true"][aria-label="主回归会话"]').waitFor()
+    assert.equal(await page.getByRole('tab', { name: '主回归会话', exact: true }).count(), 1)
+    assert.equal(await page.locator('.workbench-group').count(), existing ? 2 : 1)
+    assert.equal(await page.getByRole('tab', { name: '设置', exact: true }).count(), 1)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mobilePane.locator('.pane-heading[title="主回归会话"]').waitFor()
+    assert.equal(await mobilePane.getByPlaceholder('向 Agent 发送消息').inputValue(), '会话 1 的草稿')
+    await page.setViewportSize({ width: 844, height: 390 })
+    await page.getByRole('tab', { name: '草稿切换会话', exact: true }).click()
+    await page.getByRole('tab', { name: '设置', exact: true }).click()
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mobilePane.locator('.pane-heading[title="草稿切换会话"]').waitFor()
+    assert.equal(await page.evaluate(() => history.state.promptxV2MobileTaskId), fixture.secondaryTask.id)
+    await mobilePane.getByTitle('返回项目列表').click()
+    await page.waitForFunction(() => document.querySelector('.workspace-sidebar')?.classList.contains('mobile-panel-active'))
+    await page.goForward()
+    await mobilePane.locator('.pane-heading[title="草稿切换会话"]').waitFor()
+    await page.close()
+  }
+})
+
 test('手机草稿在跨断点横竖屏切换后保留，返回时没有重复输入框', { timeout: 30000 }, async t => {
   const fixture = await createFixture(t)
   const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true })

@@ -257,12 +257,19 @@ function taskMenuItems(task) {
 }
 
 function focusDesktopTask(taskId, projectId, visibleTaskIds) {
+  if (isMobile.value) return
   desktopProjectId.value = projectId
   visibleDesktopTaskIds.value = visibleTaskIds
-  primaryTaskId.value = taskId
+  // 设置、空分栏没有会话，保留最近查看的会话供窄屏恢复。
+  if (taskId) primaryTaskId.value = taskId
   secondaryTaskId.value = ''
   focusedPane.value = 'primary'
-  if (taskId) writeActiveTaskId(taskId)
+  if (taskId) {
+    writeActiveTaskId(taskId)
+    if (hasMobileTimelineHistoryState(window.history.state)) {
+      window.history.replaceState(createMobileTimelineHistoryState(window.history.state, taskId), '')
+    }
+  }
   visibleTaskIds.forEach(id => clearViewedTaskAttention(taskForId(id)))
 }
 
@@ -484,9 +491,15 @@ function handleMobileHistoryPop(event) {
   if (dialogUsesHistory && historyDialog !== dialog.value) finishDialogClose()
   else if (!dialogUsesHistory && isMobile.value && historyDialog) restoreDialogFromHistory(historyDialog)
   if (!isMobile.value) return
+  const historyTaskId = getMobileTimelineTaskId(event.state)
+  if (taskForId(historyTaskId)) primaryTaskId.value = historyTaskId
   mobileView.value = hasMobileTimelineHistoryState(event.state) && primaryTaskId.value ? 'timeline' : 'sidebar'
 }
 function updateMobileState(event) {
+  // 先在仍隐藏的桌面布局中定位会话，再让它恢复焦点通知，避免旧标签覆盖手机会话。
+  if (isMobile.value && !event.matches && mobileView.value === 'timeline' && initialDataReady.value) {
+    desktopWorkbench.value?.openSession(primaryTask.value)
+  }
   isMobile.value = event.matches
   mobileView.value = event.matches ? (hasMobileTimelineHistoryState(window.history.state) ? 'timeline' : 'sidebar') : 'timeline'
   if (event.matches && dialog.value && !dialogUsesHistory) openManagedDialog(dialog.value)
