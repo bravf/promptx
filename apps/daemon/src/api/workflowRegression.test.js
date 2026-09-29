@@ -422,3 +422,36 @@ test('空工作区可独立归档、恢复和永久删除', async (t) => {
   assert.equal((await f.app.inject({ method: 'DELETE', url: `/api/v2/projects/${project.id}` })).statusCode, 204)
   assert.equal(f.app.sqliteRepository.getProject(project.id), null)
 })
+
+
+test('视频内容支持 HEAD、首段、尾段及越界 Range，大于 100 MiB 不再被拒绝', async t => {
+  const f = await fixture(t)
+  const video = path.join(f.workspace, 'large.mp4')
+  const size = 294 * 1024 * 1024
+  fs.writeFileSync(video, Buffer.from('video-start'))
+  fs.truncateSync(video, size)
+  const url = `/api/v2/tasks/${f.local.task.id}/file/content?path=large.mp4`
+  const head = await f.app.inject({ method: 'HEAD', url })
+  assert.equal(head.statusCode, 200)
+  assert.equal(Number(head.headers['content-length']), size)
+  assert.equal(head.rawPayload.length, 0)
+  for (const [range, expected, length] of [
+    ['bytes=0-10', `bytes 0-10/${size}`, 11],
+    ['bytes=-3', `bytes ${size - 3}-${size - 1}/${size}`, 3],
+    [`bytes=${size - 1}-`, `bytes ${size - 1}-${size - 1}/${size}`, 1],
+    [`bytes=${size - 2}-${size + 10}`, `bytes ${size - 2}-${size - 1}/${size}`, 2],
+  ]) {
+    const result = await f.app.inject({ url, headers: { range } })
+    assert.equal(result.statusCode, 206)
+    assert.equal(result.headers['content-range'], expected)
+    assert.equal(result.rawPayload.length, length)
+    assert.equal(result.headers['accept-ranges'], 'bytes')
+    if (range === 'bytes=0-10') assert.equal(result.body, 'video-start')
+  }
+  for (const range of [`bytes=${size}-`, 'bytes=10-2', 'bytes=0-1,5-6', 'bytes=-0', 'bytes=-']) {
+    const result = await f.app.inject({ url, headers: { range } })
+    assert.equal(result.statusCode, 416)
+    assert.equal(result.headers['content-range'], `bytes */${size}`)
+    assert.equal(result.rawPayload.length, 0)
+  }
+})

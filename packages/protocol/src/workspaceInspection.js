@@ -18,7 +18,7 @@ export const WorkspaceFileSchema = z.object({
   name: z.string(),
   size: z.number().int().nonnegative(),
   modifiedAt: z.string(),
-  kind: z.enum(['text', 'image', 'binary', 'too_large']),
+  kind: z.enum(['text', 'image', 'video', 'audio', 'binary', 'too_large']),
   mimeType: z.string(),
   content: z.string().optional(),
 })

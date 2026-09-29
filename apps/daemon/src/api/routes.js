@@ -370,12 +370,16 @@ export function registerRoutes(app, context) {
   app.get('/api/v2/tasks/:taskId/file/content', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)
     if (!current) return reply.code(404).send({ error: 'task_not_found' })
-    const file = openWorkspaceFileStream(current.environment.cwd, request.query.path || '', { allowVideo: true })
+    const file = openWorkspaceFileStream(current.environment.cwd, request.query.path || '', { allowVideo: true, allowAudio: true, range: request.headers.range })
+    reply.code(file.statusCode)
+    reply.header('Accept-Ranges', 'bytes')
+    reply.header('Cache-Control', 'no-store')
+    if (file.contentRange) reply.header('Content-Range', file.contentRange)
     reply.header('Content-Type', file.mimeType)
     reply.header('Content-Length', String(file.size))
     reply.header('X-Content-Type-Options', 'nosniff')
     reply.header('Content-Security-Policy', "default-src 'none'; sandbox")
-    return reply.send(file.stream)
+    return reply.send(file.stream || '')
   })
   app.get('/api/v2/tasks/:taskId/git/status', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)

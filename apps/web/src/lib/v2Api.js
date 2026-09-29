@@ -1,5 +1,6 @@
 import { getApiBase, request } from './request.js'
 import { transportObjectUrl } from './transport.js'
+import { createVideoSource } from './videoSource.js'
 
 export const v2Api = {
   listProjects: () => request('/api/v2/projects', { cache: 'no-store' }),
@@ -34,6 +35,7 @@ export const v2Api = {
   syncTaskTimeline: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/timeline/sync`, { method: 'POST' }),
   listTaskFiles: (taskId, filePath = '') => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/files?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
   readTaskFile: (taskId, filePath) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/file?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
+  taskVideoSource: (taskId, filePath, options = {}) => createVideoSource(`${getApiBase()}/api/v2/tasks/${encodeURIComponent(taskId)}/file/content?${new URLSearchParams({ path: filePath })}`, options),
   taskFileObjectUrl: (taskId, filePath, options = {}) => transportObjectUrl(`${getApiBase()}/api/v2/tasks/${encodeURIComponent(taskId)}/file/content?${new URLSearchParams({ path: filePath })}`, options),
   taskLocalImageObjectUrl: (taskId, filePath, options = {}) => transportObjectUrl(`${getApiBase()}/api/v2/tasks/${encodeURIComponent(taskId)}/local-image/content?${new URLSearchParams({ path: filePath })}`, options),
   getTaskGitStatus: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/git/status`, { cache: 'no-store' }),

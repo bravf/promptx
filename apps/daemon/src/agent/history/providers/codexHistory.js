@@ -35,7 +35,7 @@ function userContent(content = []) {
   return result
 }
 
-export function mapCodexHistoryItem(item) {
+export function mapCodexHistoryItem(item, { completed = false } = {}) {
   if (!item?.type || !item.id) return []
   const type = normalizedItemType(item.type)
   if (type === 'userMessage') {
@@ -84,7 +84,7 @@ export function mapCodexHistoryItem(item) {
       type: 'tool_call',
       callId: item.id,
       name: names[type],
-      status: toolStatus(item.status),
+      status: toolStatus(item.status || (completed ? 'completed' : undefined)),
       detail: { type, ...item },
       ...(item.error?.message ? { error: { message: item.error.message } } : {}),
     },
@@ -123,7 +123,7 @@ export function mapCodexHistorySnapshot(thread, revision = '') {
         items: (turn.items || []).flatMap((item) => {
           const mapped = item?.item && item?.providerMessageId
             ? [item]
-            : mapCodexHistoryItem(item)
+            : mapCodexHistoryItem(item, { completed: status === 'completed' })
           return mapped.map((entry) => ({
             ...entry,
             timestamp: toIsoTimestamp(item.timestamp || item.createdAt) || (entry.item.type === 'user_message' ? startedAt : finishedAt),
@@ -144,8 +144,8 @@ function rolloutTimestamp(record) {
   return toIsoTimestamp(record?.timestamp || record?.payload?.timestamp || record?.completed_at || record?.payload?.completed_at)
 }
 
-function addRolloutItem(turn, item, timestamp) {
-  const entries = mapCodexHistoryItem(item)
+function addRolloutItem(turn, item, timestamp, completed = false) {
+  const entries = mapCodexHistoryItem(item, { completed })
   for (const entry of entries) {
     if (turn.items.some((existing) => existing.providerMessageId === entry.providerMessageId)) continue
     turn.items.push({ ...entry, timestamp: timestamp || turn.finishedAt || turn.startedAt })
@@ -215,7 +215,7 @@ export function mapCodexRolloutSnapshot(thread, content, revision = '') {
     }
     if (eventType === 'item_completed') {
       const turn = getTurn(payload.turn_id, timestamp)
-      addRolloutItem(turn, payload.item, timestamp)
+      addRolloutItem(turn, payload.item, timestamp, true)
       continue
     }
     if (eventType === 'task_complete' || eventType === 'turn_completed') {

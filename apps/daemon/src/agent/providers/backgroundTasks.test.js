@@ -130,3 +130,27 @@ test('ACP 准备用户输入时发生自动续跑，不覆盖自动轮次', asyn
   assert.equal(runtime.activeRunId, 'grok:auto:racing-wake')
   assert.equal(prompts, 0)
 })
+
+test('Claude 实时占位不触发自动续跑，也不妨碍已有轮次结束', async () => {
+  for (const active of [null, 'user-turn']) {
+    const runtime = new ClaudeRuntime({ cwd: '/tmp' })
+    runtime.activeRunId = active
+    runtime.refreshContextUsage = async () => {}
+    const starts = [], ends = [], messages = []
+    runtime.on('turnStarted', event => starts.push(event))
+    runtime.on('turnCompleted', event => ends.push(event))
+    runtime.on('timeline', event => messages.push(event))
+    async function* stream() {
+      yield { type: 'assistant', uuid: 'placeholder', message: { id: 'placeholder', model: '<synthetic>', content: [{ type: 'text', text: 'No response requested.' }] } }
+      yield { type: 'result', subtype: 'success' }
+      yield { type: 'assistant', uuid: 'real', message: { id: 'real', model: 'claude', content: [{ type: 'text', text: 'No response requested.' }] } }
+      yield { type: 'result', subtype: 'success' }
+      runtime.closing = true
+    }
+    runtime.runningQuery = stream()
+    await runtime.consume(runtime.runningQuery, new AbortController())
+    assert.deepEqual(starts.map(event => event.nativeTurnId), ['claude:real'])
+    assert.equal(ends.length, active ? 2 : 1)
+    assert.deepEqual(messages.map(item => item.messageId), ['real'])
+  }
+})

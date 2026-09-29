@@ -177,7 +177,7 @@ test('工作区视频允许读取，图片专用入口仍拒绝视频及路径�
   assert.throws(() => openWorkspaceFileStream(root, '../outside.mp4', { allowVideo: true }), { code: 'path_outside_workspace' })
 })
 
-test('视频使用独立大小上限，超过 10 MiB 的视频可读取而图片仍受限', async (t) => {
+test('大视频支持按范围读取，图片仍保持大小限制', async (t) => {
   const root = fixture(t)
   const videoPath = path.join(root, 'video.mp4')
   const size = 11 * 1024 * 1024
@@ -197,7 +197,37 @@ test('视频使用独立大小上限，超过 10 MiB 的视频可读取而图片
     })
   }
   fs.truncateSync(videoPath, 100 * 1024 * 1024 + 1)
-  assert.throws(() => openWorkspaceFileStream(root, 'video.mp4', { allowVideo: true }), {
-    code: 'preview_too_large', statusCode: 413, message: '视频超过 100 MiB 预览上限。',
-  })
+  const large = openWorkspaceFileStream(root, 'video.mp4', { allowVideo: true, range: 'bytes=104857600-' })
+  assert.equal(large.statusCode, 206)
+  assert.equal(large.contentRange, 'bytes 104857600-104857600/104857601')
+  let tailBytes = 0
+  for await (const chunk of large.stream) tailBytes += chunk.length
+  assert.equal(tailBytes, 1)
+})
+
+test('视频文件元数据不受文本预览大小限制，也不读取视频正文', t => {
+  const root = fixture(t)
+  const file = path.join(root, 'movie.MP4')
+  fs.writeFileSync(file, '')
+  fs.truncateSync(file, 294 * 1024 * 1024)
+  const preview = readWorkspaceFile(root, 'movie.MP4')
+  assert.equal(preview.kind, 'video')
+  assert.equal(preview.mimeType, 'video/mp4')
+  assert.equal(preview.size, 294 * 1024 * 1024)
+  assert.equal(preview.content, undefined)
+})
+
+test('音频识别与范围读取支持 WAV、M4A 等格式，图片入口仍拒绝音频', async t => {
+  const root = fixture(t)
+  for (const [ext, mime] of [['wav', 'audio/wav'], ['m4a', 'audio/mp4'], ['mp3', 'audio/mpeg'], ['flac', 'audio/flac']]) {
+    fs.writeFileSync(path.join(root, `sound.${ext}`), Buffer.from('audio-data'))
+    assert.equal(readWorkspaceFile(root, `sound.${ext}`).kind, 'audio')
+    assert.throws(() => openWorkspaceFileStream(root, `sound.${ext}`), { code: 'preview_unavailable' })
+    const result = openWorkspaceFileStream(root, `sound.${ext}`, { allowAudio: true, range: 'bytes=1-4' })
+    assert.equal(result.mimeType, mime)
+    assert.equal(result.statusCode, 206)
+    const chunks = []
+    for await (const chunk of result.stream) chunks.push(chunk)
+    assert.equal(Buffer.concat(chunks).toString(), 'udio')
+  }
 })

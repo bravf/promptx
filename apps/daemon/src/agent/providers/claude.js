@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isClaudeNoResponsePlaceholder } from './claudeMessages.js'
 import { BackgroundTasks, taskStatus } from './backgroundTasks.js'
 import { EventEmitter } from 'node:events'
 import { query } from '@anthropic-ai/claude-agent-sdk'
@@ -217,6 +218,7 @@ export class ClaudeRuntime extends EventEmitter {
           this.emit('handle', { sessionId: this.sessionId })
         }
         if (this.runningQuery !== stream || this.closing) return
+        if (isClaudeNoResponsePlaceholder(message)) continue
         if (message.type === 'system') this.consumeTask(message)
         if (message.type === 'user' && !message.parent_tool_use_id && Array.isArray(message.message?.content)) {
           for (const block of message.message.content) {

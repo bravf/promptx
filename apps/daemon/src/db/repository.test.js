@@ -350,3 +350,39 @@ test('Claude 通知历史与实时续跑合并身份并修复已导入重复，�
     assert.equal(repository.listTimelineRows(task.id).length, rows.length)
   } finally { db.close() }
 })
+
+test('原始历史确认的 synthetic 占位从旧数据清除，保留同文真实消息并可重复同步', () => {
+  const { db, repository, task } = setup()
+  try {
+    const text = 'No response requested.'
+    const time = '2026-09-28T09:34:30.299Z'
+    const lines = [
+      { type: 'user', uuid: 'u', timestamp: time, message: { content: '开始' } },
+      { type: 'assistant', uuid: 'a', timestamp: time, message: { id: 'answer', model: 'claude', stop_reason: 'end_turn', content: [{ type: 'text', text: '已完成' }] } },
+      { type: 'assistant', uuid: 'p', timestamp: time, message: { id: 'placeholder', model: 'claude', stop_reason: 'end_turn', content: [{ type: 'text', text }] } },
+    ]
+    const apply = snapshot => {
+      const plan = reconcileHistory({ snapshot, localRows: repository.listTimelineRows(task.id), localTurns: repository.listTurns(task.id), syncState: repository.getTimelineSyncState(task.id) })
+      if (plan.mode !== 'noop') repository.applyTimelineSync(task.id, { ...plan, providerId: 'claude', sourceId: snapshot.sourceId })
+      return plan
+    }
+    const snapshot = () => mapClaudeHistorySnapshot('session', lines.map(JSON.stringify).join('\n'))
+    apply(snapshot())
+    const oldTurn = repository.listTurns(task.id).find(turn => turn.nativeTurnId === 'claude:p')
+    assert.ok(oldTurn)
+    const real = repository.createTurn(task.id, 'real-user')
+    repository.appendTimeline(task.id, real.id, { type: 'user_message', clientMessageId: 'real-user', content: [{ type: 'text', text }] })
+    repository.appendTimeline(task.id, real.id, { type: 'assistant_message', messageId: 'real-answer', phase: 'final_answer', text })
+    // 同时覆盖旧实时流保存的占位行，不能只清理 Provider 导入行。
+    repository.appendTimeline(task.id, oldTurn.id, { type: 'assistant_message', messageId: 'placeholder', phase: 'unknown', text })
+    lines[2].message.model = '<synthetic>'
+    assert.equal(apply(snapshot()).mode, 'rebuild')
+    const rows = repository.listTimelineRows(task.id)
+    assert.equal(rows.filter(row => row.item.type === 'assistant_message' && row.item.text === text).length, 1)
+    assert.equal(rows.filter(row => row.item.type === 'user_message').length, 2)
+    assert.equal(rows.some(row => row.item.messageId === 'placeholder'), false)
+    assert.equal(rows.some(row => row.item.text === '已完成'), true)
+    assert.equal(repository.getTurn(oldTurn.id), null)
+    assert.equal(apply(snapshot()).mode, 'noop')
+  } finally { db.close() }
+})

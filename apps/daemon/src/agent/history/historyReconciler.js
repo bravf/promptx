@@ -158,6 +158,17 @@ export function reconcileHistory({
   syncState = null,
   checkedTurnIds = [],
 }) {
+  // 仅依据原始历史明确标记的消息身份清理旧占位内容，不按文字删除正常消息。
+  const ignoredIdentities = new Set((snapshot.ignoredItems || []).flatMap(itemIdentities))
+  const ignoredRows = localRows.filter(row => itemIdentities(row).some(id => ignoredIdentities.has(id)))
+  const ignoredRuntimeIds = new Set((snapshot.ignoredItems || []).map(entry => entry.runtimeTurnId).filter(Boolean))
+  const placeholderTurnIds = localTurns.filter(turn => (
+    TERMINAL_HISTORY_STATUSES.has(turn.status)
+    && (ignoredRuntimeIds.has(turn.nativeTurnId) || ignoredRuntimeIds.has(turn.providerPromptId))
+    && localRows.filter(row => row.turnId === turn.id).every(row => ignoredRows.includes(row)
+      || (row.item.type === 'system_notice' && row.item.code === 'autonomous_turn'))
+  )).map(turn => turn.id)
+  if (ignoredRows.length) localRows = localRows.filter(row => !ignoredRows.includes(row))
   // 旧版把系统任务通知导入成用户轮次，同时实时流另存了自动续跑。
   // 只清理完全由 Provider 导入、且有相同 runtime 身份的重复轮次；真实本地输入不受影响。
   const supersededTurnIds = snapshot.turns.filter(turn => turn.taskNotification && TERMINAL_HISTORY_STATUSES.has(turn.status)).flatMap(turn => {
@@ -167,6 +178,7 @@ export function reconcileHistory({
       && TERMINAL_HISTORY_STATUSES.has(local.status)
       && localRows.filter(row => row.turnId === local.id).every(row => row.source === 'provider')).map(local => local.id)
   })
+  supersededTurnIds.push(...placeholderTurnIds)
   if (supersededTurnIds.length) {
     localTurns = localTurns.filter(turn => !supersededTurnIds.includes(turn.id))
     localRows = localRows.filter(row => !supersededTurnIds.includes(row.turnId))
@@ -182,7 +194,7 @@ export function reconcileHistory({
         ]).values()],
       }
     : snapshotManifest
-  if (!supersededTurnIds.length && !checkedTurnIds.length && syncState?.sourceId === snapshot.sourceId
+  if (!ignoredRows.length && !supersededTurnIds.length && !checkedTurnIds.length && syncState?.sourceId === snapshot.sourceId
     && JSON.stringify(syncState.manifest || null) === JSON.stringify(manifest)) {
     return { mode: 'noop', changed: false, manifest, turns: [], rows: [], checkedTurnIds, confirmedTurnIds: [] }
   }
@@ -207,7 +219,7 @@ export function reconcileHistory({
   const currentIds = settled.map((turn) => turn.sourceTurnId)
   const commonPrefixMatches = Array.from({ length: Math.min(previousIds.length, currentIds.length) })
     .every((_, index) => previousIds[index] === currentIds[index])
-  const requiresRebuild = supersededTurnIds.length > 0 || (snapshot.completeness !== 'incremental' && Boolean(previous) && !commonPrefixMatches)
+  const requiresRebuild = ignoredRows.length > 0 || supersededTurnIds.length > 0 || (snapshot.completeness !== 'incremental' && Boolean(previous) && !commonPrefixMatches)
 
   if (requiresRebuild) {
     const groups = []

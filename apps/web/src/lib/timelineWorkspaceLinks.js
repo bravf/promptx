@@ -124,3 +124,9 @@ export function timelineImageForHref(value, workspaceCwd = '') {
 export function isWorkspaceVideoPath(value = '') {
   return /\.(?:mp4|m4v|webm|ogv|mov)$/i.test(decodedHref(value).replace(/[?#].*$/, ''))
 }
+
+export function workspaceMediaKind(filePath = '') {
+  if (isWorkspaceVideoPath(filePath)) return 'video'
+  if (/\.(wav|m4a|mp3|aac|ogg|oga|opus|flac|aif|aiff)$/i.test(filePath)) return 'audio'
+  return ''
+}

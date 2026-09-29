@@ -131,3 +131,13 @@ test('ACP 扩展 session/update 通知会校验方法与会话后转发', async 
     text: '模型服务连接异常，正在自动重试。',
   }])
 })
+
+test('Codex 查看图片在实时开始和结束通知中都有工具状态', () => {
+  const runtime = new CodexRuntime({ cwd: '/tmp', nativeHandle: { threadId: 'thread' } })
+  const messages = []
+  runtime.on('timeline', item => messages.push(item))
+  const params = { threadId: 'thread', turnId: 'turn', item: { type: 'imageView', id: 'image', path: '/tmp/test.png' } }
+  runtime.onNotification({ method: 'item/started', params })
+  runtime.onNotification({ method: 'item/completed', params })
+  assert.deepEqual(messages.map(item => item.status), ['running', 'completed'])
+})

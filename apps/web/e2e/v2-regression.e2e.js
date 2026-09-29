@@ -9,6 +9,8 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createApp } from '../../daemon/src/app.js'
+import { RelayService } from '../../daemon/src/relay/relayService.js'
+import { startRelayServer } from '../../../packages/relay/src/server.js'
 import { createLayout, openTab, splitGroup } from '../src/lib/workbenchTabs.js'
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist')
@@ -86,7 +88,7 @@ function providerRegistry(runtimeRecords) {
         runtime.startTurn = async (content) => {
           const text = content.filter((item) => item.type === 'text').map((item) => item.text).join('\n')
           runtimeRecords.turns.push(content)
-          await runtimeRecords.onTurn?.(text)
+          await runtimeRecords.onTurn?.(text, runtime)
           runtime.emit('timeline', { type: 'reasoning', text: '正在执行回归测试请求' })
           if (!text.includes('保持运行')) {
             setTimeout(() => {
@@ -1411,6 +1413,208 @@ test('用户提示词渲染 Markdown，发送和复制保留原文，桌面与�
     await saveScreenshot(page, `user-markdown-${viewport.width}.png`)
     await bubble.getByRole('link', { name: '项目说明', exact: true }).click()
     await page.locator('.workspace-inspector:visible').getByText('工作区修改', { exact: true }).waitFor()
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
+})
+
+
+test('大视频在本地与加密 Relay 分段播放、跳转进度和关闭，远程不整段下载', async t => {
+  const fixture = await createFixture(t)
+  const videoPath = path.join(fixture.workspace, 'large-video.mp4')
+  fs.copyFileSync(process.env.PROMPTX_TEST_VIDEO || new URL('./fixtures/preview.mp4', import.meta.url), videoPath)
+  if (!process.env.PROMPTX_TEST_VIDEO) {
+    const padding = Buffer.alloc(8)
+    padding.writeUInt32BE(294 * 1024 * 1024)
+    padding.write('free', 4)
+    fs.appendFileSync(videoPath, padding)
+    fs.truncateSync(videoPath, fs.statSync(videoPath).size + 294 * 1024 * 1024 - 8)
+  }
+  const repository = fixture.app.sqliteRepository
+  const turn = repository.createTurn(fixture.task.id, 'large-video')
+  repository.updateTurn(turn.id, { status: 'completed' })
+  repository.appendTimeline(fixture.task.id, turn.id, { type: 'assistant_message', messageId: 'large-video', phase: 'final_answer', text: '[播放大视频](large-video.mp4)' })
+  const relay = await startRelayServer({ logger: false, webDistDir: webRoot, config: { host: '127.0.0.1', port: 0 } })
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-video-relay-'))
+  const service = new RelayService({ localBaseUrl: fixture.baseUrl, logger: false, configPath: path.join(temp, 'config.json'), identityPath: path.join(temp, 'identity.json') })
+  t.after(async () => { service.stop(); await relay.close(); fs.rmSync(temp, { recursive: true, force: true }) })
+  service.updateConfig({ enabled: true, relayUrl: `ws://127.0.0.1:${relay.port}/relay/ws`, appUrl: `http://127.0.0.1:${relay.port}` })
+  const ranges = []
+  const forward = service.forward.bind(service)
+  service.forward = (channel, request) => {
+    if (request.path.includes('/file/content?path=large-video.mp4')) ranges.push(request.headers.range)
+    return forward(channel, request)
+  }
+  for (const remote of [false, true]) {
+    const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true })
+    const failures = collectPageFailures(page)
+    if (remote) {
+      // 等待独立测试 Relay 完成注册，不使用用户的配对或会话。
+      for (let attempts = 0; !service.getStatus().connected && attempts < 100; attempts++) await new Promise(resolve => setTimeout(resolve, 20))
+      assert.equal(service.getStatus().connected, true)
+    }
+    await page.goto(remote ? service.getOffer().url : fixture.baseUrl)
+    await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    await page.getByRole('link', { name: '播放大视频', exact: true }).click()
+    const viewer = page.getByRole('dialog', { name: '视频预览' })
+    await page.waitForFunction(() => document.querySelector('[aria-label="视频预览"] video')?.readyState >= 2, null, { timeout: 20000 })
+    const video = viewer.locator('video')
+    await video.evaluate(element => { element.pause(); element.currentTime = element.duration * 0.8 })
+    await page.waitForFunction(() => { const video = document.querySelector('[aria-label="视频预览"] video'); return video && !video.seeking && video.readyState >= 2 }, null, { timeout: 20000 })
+    if (remote) {
+      assert.match(await video.getAttribute('src'), /__promptx_video/)
+      const size = fs.statSync(videoPath).size
+      const probe = await video.evaluate(async (element, size) => {
+        const response = await fetch(element.src, { headers: { Range: `bytes=${size - 8}-${size - 1}` } })
+        return { status: response.status, range: response.headers.get('content-range'), size: (await response.arrayBuffer()).byteLength }
+      }, size)
+      assert.equal(probe.status, 206)
+      assert.equal(probe.size, 8)
+      assert.equal(probe.range, `bytes ${size - 8}-${size - 1}/${size}`)
+      const metadata = await video.evaluate(async element => {
+        const response = await fetch(element.src, { method: 'HEAD' })
+        return { status: response.status, size: Number(response.headers.get('content-length')) }
+      })
+      assert.deepEqual(metadata, { status: 200, size })
+      assert.ok(ranges.length > 0 && ranges.every(range => {
+        const match = /^bytes=(\d+)-(\d+)$/.exec(range || '')
+        return match && Number(match[2]) - Number(match[1]) < 1024 * 1024
+      }))
+    }
+    await viewer.getByRole('button', { name: '关闭预览' }).click()
+    await viewer.waitFor({ state: 'detached' })
+    assert.deepEqual(failures, [])
+    await page.close()
+    ranges.length = 0
+  }
+})
+
+
+test('结束轮次的遗留工具不转圈，当前工具运行时转圈，取消后停止', async t => {
+  const fixture = await createFixture(t)
+  const repository = fixture.app.sqliteRepository
+  const oldTurn = repository.listTurns(fixture.task.id)[0]
+  repository.appendTimeline(fixture.task.id, oldTurn.id, { type: 'tool_call', callId: 'old-image', name: '旧图片工具', status: 'running', detail: { type: 'imageView' } })
+  fixture.runtimeRecords.onTurn = (_, runtime) => {
+    runtime.emit('timeline', { type: 'tool_call', callId: 'current-image', name: '当前图片工具', status: 'running', detail: { type: 'imageView' } })
+  }
+  const page = await fixture.browser.newPage({ viewport: { width: 1280, height: 900 } })
+  const failures = collectPageFailures(page)
+  await page.goto(fixture.baseUrl)
+  await page.getByText('回归基线已经准备完成。').waitFor()
+  const turns = page.locator('.timeline-turn')
+  await turns.first().locator('.process-toggle').click()
+  const oldTool = page.locator('.process-entry').filter({ hasText: '旧图片工具' })
+  await oldTool.waitFor()
+  assert.equal(await oldTool.locator('.animate-spin').count(), 0)
+  await oldTool.getByLabel('本轮已结束，未收到工具完成状态').waitFor()
+  await page.getByPlaceholder('向 Agent 发送消息').fill('保持运行，检查工具状态')
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  const currentTool = page.locator('.process-entry').filter({ hasText: '当前图片工具' })
+  await currentTool.locator('.animate-spin').waitFor()
+  assert.equal(await oldTool.locator('.animate-spin').count(), 0)
+  await page.getByRole('button', { name: '停止', exact: true }).click()
+  await page.getByRole('button', { name: '发送', exact: true }).waitFor()
+  await turns.last().locator('.process-toggle').click()
+  await currentTool.waitFor()
+  assert.equal(await currentTool.locator('.animate-spin').count(), 0)
+  assert.deepEqual(failures, [])
+})
+
+test('文件与 Diff 支持拖动分割线，选择大视频后点击按钮播放且关闭后保留左右栏', async t => {
+  const fixture = await createFixture(t)
+  const file = path.join(fixture.workspace, 'preview.mp4')
+  fs.copyFileSync(new URL('./fixtures/preview.mp4', import.meta.url), file)
+  const padding = Buffer.alloc(8)
+  padding.writeUInt32BE(110 * 1024 * 1024)
+  padding.write('free', 4)
+  fs.appendFileSync(file, padding)
+  fs.truncateSync(file, fs.statSync(file).size + 110 * 1024 * 1024 - 8)
+  for (const mobile of [false, true]) {
+    const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 844 } })
+    const failures = collectPageFailures(page)
+    await page.goto(fixture.baseUrl)
+    if (mobile) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    await page.getByText('回归基线已经准备完成。').waitFor()
+    for (const mode of ['files', 'diff']) {
+      await page.getByRole('button', { name: mode === 'files' ? '浏览文件' : '查看 Diff', exact: true }).click()
+      const inspector = page.locator('.workspace-inspector:visible')
+      const separator = inspector.getByRole('separator')
+      await separator.click()
+      const list = inspector.locator(mode === 'files' ? '.file-tree' : '.changes-list')
+      const before = await list.boundingBox()
+      const handle = await separator.boundingBox()
+      await page.mouse.move(handle.x + handle.width / 2, handle.y + 100)
+      await page.mouse.down()
+      await page.mouse.move(handle.x + (mobile ? 40 : 120), handle.y + 100, { steps: 5 })
+      await page.mouse.up()
+      assert.ok((await list.boundingBox()).width > before.width + 20, JSON.stringify({ mobile, mode, before, after: await list.boundingBox(), ratio: await separator.getAttribute('aria-valuenow') }))
+      const ratio = Number(await separator.getAttribute('aria-valuenow'))
+      await separator.press('ArrowLeft')
+      assert.ok(Number(await separator.getAttribute('aria-valuenow')) < ratio)
+      await list.getByTitle('preview.mp4', { exact: true }).click()
+      await inspector.getByRole('button', { name: '播放视频', exact: true }).waitFor()
+      assert.equal(await page.getByRole('dialog', { name: '视频预览' }).count(), 0)
+      await inspector.getByRole('button', { name: '播放视频', exact: true }).click()
+      const viewer = page.getByRole('dialog', { name: '视频预览' })
+      await viewer.waitFor()
+      await page.waitForFunction(() => document.querySelector('[aria-label="视频预览"] video')?.readyState >= 2)
+      await viewer.getByRole('button', { name: '关闭预览' }).click()
+      await viewer.waitFor({ state: 'detached' })
+      assert.equal(await list.isVisible(), true)
+      assert.equal(await inspector.getByText('文件过大，暂不支持预览', { exact: true }).count(), 0)
+      await inspector.getByRole('button', { name: '播放视频', exact: true }).waitFor()
+      await separator.dblclick()
+      assert.ok(Math.abs((await list.boundingBox()).width - before.width) < 2)
+      await assertNoHorizontalOverflow(page)
+      if (mobile) await inspector.getByRole('button', { name: '关闭抽屉' }).click()
+      else await page.getByRole('tab', { name: '主回归会话', exact: true }).click()
+    }
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
+})
+
+test('文件标签播放 WAV、M4A、MP4，并兼容旧文件类型返回', async t => {
+  const fixture = await createFixture(t)
+  fs.copyFileSync(new URL('./fixtures/preview.mp4', import.meta.url), path.join(fixture.workspace, 'sample.mp4'))
+  fs.copyFileSync(new URL('./fixtures/preview.m4a', import.meta.url), path.join(fixture.workspace, 'sample.m4a'))
+  const wav = Buffer.alloc(44 + 16000)
+  wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8)
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34)
+  wav.write('data', 36); wav.writeUInt32LE(16000, 40)
+  fs.writeFileSync(path.join(fixture.workspace, 'sample.wav'), wav)
+  for (const mobile of [false, true]) {
+    const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 844 } })
+    const failures = collectPageFailures(page)
+    await page.route('**/file?*', async route => {
+      const response = await route.fetch()
+      const body = await response.json()
+      if (body.file && body.file.path.endsWith('.mp4')) body.file.kind = 'too_large'
+      await route.fulfill({ response, json: body })
+    })
+    await page.goto(fixture.baseUrl)
+    if (mobile) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    await page.getByText('回归基线已经准备完成。').waitFor()
+    await page.getByRole('button', { name: '浏览文件', exact: true }).click()
+    const inspector = page.locator('.workspace-inspector:visible')
+    for (const ext of ['wav', 'm4a', 'mp4']) {
+      await inspector.getByTitle(`sample.${ext}`, { exact: true }).click()
+      const play = inspector.getByRole('button', { name: ext === 'mp4' ? '播放视频' : '播放音频', exact: true })
+      await play.waitFor()
+      assert.equal(await page.getByRole('dialog', { name: /^(音频|视频)预览$/ }).count(), 0)
+      await play.click()
+      const viewer = page.getByRole('dialog', { name: ext === 'mp4' ? '视频预览' : '音频预览', exact: true })
+      await viewer.waitFor()
+      const media = viewer.locator(ext === 'mp4' ? 'video' : 'audio')
+      await media.evaluate(element => element.play())
+      await page.waitForFunction(() => { const el = document.querySelector('[role="dialog"] audio, [role="dialog"] video'); return el?.currentTime > 0 && !el.error })
+      await viewer.getByRole('button', { name: '关闭预览' }).click()
+      await viewer.waitFor({ state: 'detached' })
+      assert.equal(await inspector.getByText('文件过大，暂不支持预览', { exact: true }).count(), 0)
+      await assertNoHorizontalOverflow(page)
+    }
     assert.deepEqual(failures, [])
     await page.close()
   }

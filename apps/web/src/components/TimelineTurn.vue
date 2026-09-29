@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Bot, Check, ChevronRight, Circle, CircleDot, FileDiff, FileText, LoaderCircle, Wrench } from 'lucide-vue-next'
+import { Bot, Check, ChevronRight, Circle, CircleAlert, CircleDot, FileDiff, FileText, LoaderCircle, Wrench } from 'lucide-vue-next'
 import { formatElapsedTime, getTurnActivityState, userMessageCopyText } from '../lib/timelinePresentation.js'
 import { workspaceLinksForTool } from '../lib/timelineWorkspaceLinks.js'
 import TimelineMarkdown from './TimelineMarkdown.vue'
@@ -11,6 +11,7 @@ const props = defineProps({
   turn: { type: Object, required: true },
   timing: { type: Object, default: null },
   running: { type: Boolean, default: false },
+  activeTurnId: { type: String, default: '' },
   isDark: { type: Boolean, default: false },
   workspaceCwd: { type: String, default: '' },
   taskId: { type: String, default: '' },
@@ -85,7 +86,13 @@ onBeforeUnmount(() => clearInterval(clockTimer))
           <div v-else-if="entry.item.type === 'tool_call'" class="flex min-w-0 items-start gap-2">
             <Wrench class="theme-muted-text mt-0.5 h-3.5 w-3.5 shrink-0" />
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2"><span class="truncate font-medium">{{ entry.item.name }}</span><Check v-if="entry.item.status === 'completed'" class="h-3.5 w-3.5 shrink-0" /><LoaderCircle v-else-if="entry.item.status === 'running'" class="h-3.5 w-3.5 shrink-0 animate-spin" /></div>
+              <div class="flex items-center gap-2">
+                <span class="truncate font-medium">{{ entry.item.name }}</span>
+                <Check v-if="entry.item.status === 'completed'" class="h-3.5 w-3.5 shrink-0" />
+                <LoaderCircle v-else-if="entry.item.status === 'running' && running && entry.turnId === activeTurnId" class="h-3.5 w-3.5 shrink-0 animate-spin" />
+                <CircleAlert v-else-if="entry.item.status === 'failed'" class="theme-danger-text h-3.5 w-3.5 shrink-0" aria-label="工具执行失败" />
+                <Circle v-else-if="entry.item.status === 'running'" class="theme-muted-text h-3.5 w-3.5 shrink-0" aria-label="本轮已结束，未收到工具完成状态" />
+              </div>
               <div v-if="entry.item.detail?.command || entry.item.detail?.type" class="theme-muted-text mt-0.5 truncate font-mono text-[10px]">{{ entry.item.detail?.command || entry.item.detail?.type }}</div>
               <div v-if="toolLinks(entry).length" class="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1">
                 <button v-for="link in toolLinks(entry)" :key="`${link.intent}:${link.path}`" type="button" class="workspace-path-link inline-flex h-auto min-h-0 min-w-0 items-center justify-start gap-1 border-0 p-0 text-left font-mono text-[10px]" :title="link.path" @click="emit('open-workspace-path', link)">
@@ -106,7 +113,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
             </div>
           </div>
           <div v-else-if="entry.item.type === 'system_notice'" class="flex items-center gap-2 text-[var(--theme-warningText)]">
-            <LoaderCircle v-if="entry.item.code === 'provider_retrying'" class="h-3.5 w-3.5 shrink-0 animate-spin" />
+            <LoaderCircle v-if="entry.item.code === 'provider_retrying' && running && entry.turnId === activeTurnId" class="h-3.5 w-3.5 shrink-0 animate-spin" />
             <span>{{ entry.item.text }}</span>
           </div>
         </div>

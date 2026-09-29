@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { isClaudeNoResponsePlaceholder } from '../../providers/claudeMessages.js'
 import os from 'node:os'
 import path from 'node:path'
 import {
@@ -168,10 +169,19 @@ function appendAssistant(entry, turn, tools) {
 
 export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
   const turns = []
+  const ignoredItems = []
   let turn = null
   let tools = new Map()
   let lastAssistantId = null
   for (const entry of parseLines(content)) {
+    if (isClaudeNoResponsePlaceholder(entry)) {
+      if (!entry.isSidechain) entry.message.content.forEach((block, index) => ignoredItems.push({
+        providerMessageId: `${entry.uuid || entry.message.id}:${index}`,
+        runtimeTurnId: `claude:${entry.uuid || entry.message.id}`,
+        item: { type: 'assistant_message', messageId: entry.message.id || entry.uuid },
+      }))
+      continue
+    }
     const interrupted = interruptionNotice(entry)
     const notification = taskNotification(entry)
     if (visibleUser(entry) || interrupted || notification) {
@@ -230,6 +240,7 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
   return {
     sourceId: sessionId,
     revision,
+    ignoredItems,
     turns: turns.map(({ lastStopReason, providerError, ...value }) => value),
   }
 }

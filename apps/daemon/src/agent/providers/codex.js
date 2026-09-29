@@ -35,6 +35,8 @@ function normalizeItem(item, status = 'running') {
     fileChange: '文件修改',
     mcpToolCall: item.tool || item.name || 'MCP 工具',
     webSearch: '网页搜索',
+    imageView: '查看图片',
+    imageGeneration: '生成图片',
   }
   if (toolNames[item.type]) {
     return {

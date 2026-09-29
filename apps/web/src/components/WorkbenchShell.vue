@@ -585,7 +585,7 @@ onBeforeUnmount(() => {
 
     <div v-if="error" class="shell-error error-row absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-sm border px-3 py-2 text-xs"><span>{{ error }}</span><PxIconButton class="h-6 w-6" label="关闭错误提示" @click="error = ''"><X class="h-3.5 w-3.5" /></PxIconButton></div>
     <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" @changed="refreshProjects" />
-    <TimelineVideoPreview v-if="videoPreview" :task-id="videoPreview.taskId" :path="videoPreview.path" :label="videoPreview.label" @close="videoPreview = null" />
+    <TimelineVideoPreview v-if="videoPreview" :task-id="videoPreview.taskId" :path="videoPreview.path" :label="videoPreview.label" :kind="videoPreview.kind || 'video'" @close="videoPreview = null" />
 
     <PxDialog :open="dialog === 'conversation'" panel-class="new-conversation-panel max-h-[calc(100dvh-1.5rem)] max-w-none border-0 sm:max-h-[calc(100dvh-3rem)] sm:max-w-md sm:border" header-class="h-14 shrink-0 px-4 sm:px-5" body-class="flex min-h-0 flex-col" @close="closeDialog">
       <template #title><h2 class="text-sm font-semibold">新会话</h2></template>

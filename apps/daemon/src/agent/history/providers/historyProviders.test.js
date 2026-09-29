@@ -481,3 +481,45 @@ test('Claude 后台通知不是用户输入，续跑身份与实时 SDK 一致',
   assert.equal(snapshot.turns[2].items[0].item.type, 'user_message')
   assert.equal(snapshot.turns[2].items[0].item.content[0].text, notification)
 })
+
+test('Claude synthetic 无需回复占位不生成内容或续跑，正常同文回复与合成错误仍保留', () => {
+  const assistant = (uuid, model, text, extra = {}) => ({ type: 'assistant', uuid, ...extra, message: { id: uuid, model, stop_reason: 'end_turn', content: [{ type: 'text', text }] } })
+  const lines = [
+    { type: 'user', uuid: 'u', message: { content: '开始' } },
+    assistant('answer', 'claude', '完成'),
+    { type: 'user', uuid: 'meta', isMeta: true, message: { content: 'Continue from where you left off.' } },
+    assistant('placeholder', '<synthetic>', 'No response requested.'),
+  ]
+  const map = rows => mapClaudeHistorySnapshot('session', rows.map(JSON.stringify).join('\n'))
+  const snapshot = map(lines)
+  assert.equal(snapshot.turns.length, 1)
+  assert.deepEqual(snapshot.turns[0].items.map(entry => entry.item.type), ['user_message', 'assistant_message'])
+  assert.equal(snapshot.ignoredItems[0].providerMessageId, 'placeholder:0')
+  for (const record of [
+    assistant('real', 'claude', 'No response requested.'),
+    assistant('error', '<synthetic>', 'No response requested.', { isApiErrorMessage: true }),
+    assistant('error2', '<synthetic>', 'API Error: connection failed'),
+  ]) {
+    const result = map([...lines, record])
+    assert.equal(result.turns.at(-1).items.at(-1).item.text, record.message.content[0].text)
+  }
+})
+
+test('Codex 已完成图片工具缺少 status 时正确结束，显式失败或取消状态仍保留', () => {
+  const items = [
+    { id: 'image', type: 'imageView', path: '/tmp/image.png' },
+    { id: 'search', type: 'webSearch', query: 'test' },
+    { id: 'failed', type: 'commandExecution', status: 'failed' },
+    { id: 'canceled', type: 'commandExecution', status: 'declined' },
+  ]
+  const result = mapCodexHistorySnapshot({ id: 'thread', turns: [{ id: 't', status: 'completed', items }] })
+  assert.deepEqual(result.turns[0].items.map(entry => entry.item.status), ['completed', 'completed', 'failed', 'canceled'])
+  const running = mapCodexHistorySnapshot({ id: 'thread', turns: [{ id: 't', status: 'inProgress', items }] })
+  assert.equal(running.turns[0].items[0].item.status, 'running')
+  const rollout = mapCodexRolloutSnapshot({ id: 'thread' }, [
+    { type: 'event_msg', payload: { type: 'task_started', turn_id: 't' } },
+    { type: 'event_msg', payload: { type: 'item_completed', turn_id: 't', item: items[0] } },
+  ].map(JSON.stringify).join('\n'))
+  assert.equal(rollout.turns[0].status, 'running')
+  assert.equal(rollout.turns[0].items[0].item.status, 'completed')
+})

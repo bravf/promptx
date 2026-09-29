@@ -1,6 +1,6 @@
 <script setup>
 import { createTaskEventSource } from '../lib/taskEventSource.js'
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   ChevronRight,
   File,
@@ -15,10 +15,15 @@ import {
   Link2,
   LoaderCircle,
   RefreshCw,
+  Video,
+  Music,
+  Play,
   X,
 } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
 import PxIconButton from './PxIconButton.vue'
+import InspectorSplitPane from './InspectorSplitPane.vue'
+import { workspaceMediaKind } from '../lib/timelineWorkspaceLinks.js'
 import { inferPreviewLanguageFromPath, renderSourceCodePreview } from '../lib/sourceCodePreview.js'
 
 const props = defineProps({
@@ -32,7 +37,10 @@ const props = defineProps({
   mode: { type: String, default: 'files', validator: (value) => ['files', 'diff'].includes(value) },
 })
 const emit = defineEmits(['close', 'selection-change'])
-
+const openVideoPreview = inject('openVideoPreview', null)
+function playVideo(filePath) {
+  openVideoPreview?.({ taskId: props.taskId, path: filePath, label: filePath.split('/').at(-1), kind: workspaceMediaKind(filePath) || 'video' })
+}
 const directoryCache = ref({})
 const expandedPaths = ref(new Set())
 const directoryLoading = ref(new Set())
@@ -73,6 +81,9 @@ const visibleFiles = computed(() => {
   append('', 0)
   return result
 })
+
+const diffVideo = computed(() => workspaceMediaKind(selectedDiffPath.value)
+  && gitStatus.value?.files.some(file => file.path === selectedDiffPath.value && file.status !== 'deleted'))
 
 const diffSections = computed(() => [
   ...(diff.value?.staged ? [{ key: 'staged', title: '已暂存', content: diff.value.staged }] : []),
@@ -165,7 +176,10 @@ async function selectFile(filePath, line = null) {
   try {
     const result = await v2Api.readTaskFile(props.taskId, filePath)
     if (version !== workspaceVersion || selectedPath.value !== filePath) return
-    const nextFile = result.file
+    const nextFile = { ...result.file }
+    // 兼容旧版 Daemon 的 binary/too_large 元数据；实际内容仍由媒体接口校验。
+    const mediaKind = workspaceMediaKind(nextFile.path || filePath)
+    if (mediaKind) nextFile.kind = mediaKind
     let nextObjectUrl = ''
     if (nextFile.kind === 'image') {
       const objectUrl = await v2Api.taskFileObjectUrl(props.taskId, nextFile.path)
@@ -354,36 +368,38 @@ defineExpose({ openPath, refreshGit })
 
     <div v-if="error" class="inspector-error shrink-0 border-b px-3 py-2 text-xs">{{ error }}</div>
 
-    <div v-if="mode === 'files'" class="drawer-body grid min-h-0 flex-1" >
-      <div class="file-tree min-h-0 overflow-auto border-r py-1">
-        <div v-if="directoryLoading.has('') && !directoryCache['']" class="inspector-skeleton p-2" role="status" aria-label="正在加载文件树">
-          <div v-for="index in 8" :key="index" class="inspector-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
+    <InspectorSplitPane v-if="mode === 'files'" key="files" label="调整文件列表宽度">
+      <template #list>
+        <div class="file-tree min-h-0 min-w-0 overflow-auto py-1">
+          <div v-if="directoryLoading.has('') && !directoryCache['']" class="inspector-skeleton p-2" role="status" aria-label="正在加载文件树">
+            <div v-for="index in 8" :key="index" class="inspector-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
+          </div>
+          <template v-else>
+            <button
+              v-for="entry in visibleFiles"
+              :key="entry.path"
+              type="button"
+              class="tree-row flex h-7 min-h-0 w-full min-w-0 items-center justify-start gap-1.5 border-0 pr-2 text-left text-xs"
+              :class="selectedPath === entry.path ? 'is-selected' : ''"
+              :style="{ paddingLeft: `${8 + entry.depth * 14}px` }"
+              :title="entry.path"
+              @click="selectTreeEntry(entry)"
+            >
+              <ChevronRight v-if="entry.type === 'directory'" class="h-3 w-3 shrink-0 transition-transform" :class="expandedPaths.has(entry.path) ? 'rotate-90' : ''" />
+              <span v-else class="w-3 shrink-0" />
+              <FolderOpen v-if="entry.type === 'directory' && expandedPaths.has(entry.path)" class="folder-icon h-3.5 w-3.5 shrink-0" />
+              <Folder v-else-if="entry.type === 'directory'" class="folder-icon h-3.5 w-3.5 shrink-0" />
+              <Link2 v-else-if="entry.type === 'symlink'" class="theme-muted-text h-3.5 w-3.5 shrink-0" />
+              <File v-else class="theme-muted-text h-3.5 w-3.5 shrink-0" />
+              <span class="truncate">{{ entry.name }}</span>
+              <LoaderCircle v-if="directoryLoading.has(entry.path)" class="theme-muted-text ml-auto h-3 w-3 shrink-0 animate-spin" />
+            </button>
+          </template>
+          <div v-if="directoryCache[''] && !visibleFiles.length" class="theme-muted-text px-3 py-8 text-center text-xs">工作区为空</div>
         </div>
-        <template v-else>
-          <button
-            v-for="entry in visibleFiles"
-            :key="entry.path"
-            type="button"
-            class="tree-row flex h-7 min-h-0 w-full min-w-0 items-center justify-start gap-1.5 border-0 pr-2 text-left text-xs"
-            :class="selectedPath === entry.path ? 'is-selected' : ''"
-            :style="{ paddingLeft: `${8 + entry.depth * 14}px` }"
-            :title="entry.path"
-            @click="selectTreeEntry(entry)"
-          >
-            <ChevronRight v-if="entry.type === 'directory'" class="h-3 w-3 shrink-0 transition-transform" :class="expandedPaths.has(entry.path) ? 'rotate-90' : ''" />
-            <span v-else class="w-3 shrink-0" />
-            <FolderOpen v-if="entry.type === 'directory' && expandedPaths.has(entry.path)" class="folder-icon h-3.5 w-3.5 shrink-0" />
-            <Folder v-else-if="entry.type === 'directory'" class="folder-icon h-3.5 w-3.5 shrink-0" />
-            <Link2 v-else-if="entry.type === 'symlink'" class="theme-muted-text h-3.5 w-3.5 shrink-0" />
-            <File v-else class="theme-muted-text h-3.5 w-3.5 shrink-0" />
-            <span class="truncate">{{ entry.name }}</span>
-            <LoaderCircle v-if="directoryLoading.has(entry.path)" class="theme-muted-text ml-auto h-3 w-3 shrink-0 animate-spin" />
-          </button>
-        </template>
-        <div v-if="directoryCache[''] && !visibleFiles.length" class="theme-muted-text px-3 py-8 text-center text-xs">工作区为空</div>
-      </div>
 
-      <div ref="previewPane" class="preview-pane relative min-h-0 flex-1 overflow-auto">
+      </template>
+      <div ref="previewPane" class="preview-pane relative min-h-0 min-w-0 flex-1 overflow-auto">
         <div v-if="fileLoading && !filePreview" class="theme-muted-text flex h-full items-center justify-center"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
         <div v-else-if="!filePreview" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><Files class="mb-2 h-6 w-6" />选择文件进行预览</div>
         <template v-else>
@@ -395,35 +411,45 @@ defineExpose({ openPath, refreshGit })
             <table class="source-code-view__table"><tbody v-html="filePreviewHtml.replaceAll('data-line=', 'data-preview-line=')" /></table>
           </div>
           <div v-else-if="filePreview.kind === 'image'" class="flex min-h-full items-center justify-center p-4"><img v-if="filePreviewObjectUrl" class="max-h-full max-w-full object-contain" :src="filePreviewObjectUrl" :alt="filePreview.name" /></div>
+          <div v-else-if="['video', 'audio'].includes(filePreview.kind)" class="theme-muted-text flex flex-col items-center justify-center gap-3 p-6 text-center text-xs">
+            <component :is="workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? Music : Video" class="h-8 w-8" />
+            <button class="tool-button inline-flex items-center gap-2 px-3 py-2" @click="playVideo(filePreview.path)"><Play class="h-4 w-4" />{{ workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? '播放音频' : '播放视频' }}</button>
+          </div>
           <div v-else class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><component :is="filePreview.kind === 'too_large' ? FileWarning : ImageIcon" class="mb-2 h-6 w-6" />{{ filePreview.kind === 'too_large' ? '文件过大，暂不支持预览' : '二进制文件暂不支持预览' }}</div>
         </template>
         <div v-if="fileLoading && filePreview" class="inspector-loading-overlay" role="status" aria-label="正在加载文件预览"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
       </div>
-    </div>
+    </InspectorSplitPane>
 
-    <div v-else class="drawer-body grid min-h-0 flex-1" >
-      <div class="changes-list min-h-0 overflow-auto border-r py-1">
-        <div v-if="gitLoading && !gitStatus" class="inspector-skeleton p-2" role="status" aria-label="正在加载 Git 变更">
-          <div v-for="index in 8" :key="index" class="inspector-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
+    <InspectorSplitPane v-else key="diff" label="调整变更列表宽度">
+      <template #list>
+        <div class="changes-list min-h-0 min-w-0 overflow-auto py-1">
+          <div v-if="gitLoading && !gitStatus" class="inspector-skeleton p-2" role="status" aria-label="正在加载 Git 变更">
+            <div v-for="index in 8" :key="index" class="inspector-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
+          </div>
+          <div v-else-if="gitStatus && !gitStatus.available" class="theme-muted-text px-4 py-8 text-center text-xs">当前工作区不在 Git 仓库中</div>
+          <div v-else-if="gitStatus && !gitStatus.files.length" class="theme-muted-text px-4 py-8 text-center text-xs">没有未提交的变更</div>
+          <template v-else>
+            <div v-if="gitStatus?.branch" class="theme-muted-text flex h-7 items-center gap-1.5 px-3 text-[10px]"><GitBranch class="h-3 w-3" />{{ gitStatus.branch }}</div>
+            <button v-for="file in gitStatus?.files" :key="file.path" type="button" class="change-row flex h-8 min-h-0 w-full min-w-0 items-center justify-start gap-2 border-0 px-3 text-left text-xs" :class="selectedDiffPath === file.path ? 'is-selected' : ''" :title="file.path" @click="selectDiff(file.path)">
+              <span class="change-status w-4 shrink-0 text-center font-mono text-[10px]" :data-status="file.status">{{ statusLabel(file.status) }}</span>
+              <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{{ file.path }}</span>
+              <span v-if="file.staged" class="theme-muted-text shrink-0 text-[9px]">S</span>
+            </button>
+          </template>
         </div>
-        <div v-else-if="gitStatus && !gitStatus.available" class="theme-muted-text px-4 py-8 text-center text-xs">当前工作区不在 Git 仓库中</div>
-        <div v-else-if="gitStatus && !gitStatus.files.length" class="theme-muted-text px-4 py-8 text-center text-xs">没有未提交的变更</div>
-        <template v-else>
-          <div v-if="gitStatus?.branch" class="theme-muted-text flex h-7 items-center gap-1.5 px-3 text-[10px]"><GitBranch class="h-3 w-3" />{{ gitStatus.branch }}</div>
-          <button v-for="file in gitStatus?.files" :key="file.path" type="button" class="change-row flex h-8 min-h-0 w-full min-w-0 items-center justify-start gap-2 border-0 px-3 text-left text-xs" :class="selectedDiffPath === file.path ? 'is-selected' : ''" :title="file.path" @click="selectDiff(file.path)">
-            <span class="change-status w-4 shrink-0 text-center font-mono text-[10px]" :data-status="file.status">{{ statusLabel(file.status) }}</span>
-            <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{{ file.path }}</span>
-            <span v-if="file.staged" class="theme-muted-text shrink-0 text-[9px]">S</span>
-          </button>
-        </template>
-      </div>
 
-      <div class="diff-pane relative min-h-0 flex-1 overflow-auto">
+      </template>
+      <div class="diff-pane relative min-h-0 min-w-0 flex-1 overflow-auto">
         <div v-if="!selectedDiffPath" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><GitBranch class="mb-2 h-6 w-6" />选择文件查看 Diff</div>
         <template v-else>
           <div class="preview-heading sticky top-0 z-[1] border-b px-3 py-2 font-mono text-[11px]">{{ displayedDiffPath || selectedDiffPath }}</div>
+          <div v-if="diffVideo" class="theme-muted-text flex flex-col items-center justify-center gap-3 p-6 text-center text-xs">
+            <component :is="workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? Music : Video" class="h-8 w-8" />
+            <button class="tool-button inline-flex items-center gap-2 px-3 py-2" @click="playVideo(selectedDiffPath)"><Play class="h-4 w-4" />{{ workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? '播放音频' : '播放视频' }}</button>
+          </div>
           <div v-if="diff?.truncated" class="inspector-warning border-b px-3 py-2 text-[10px]">Diff 过大，仅显示前 2 MB 或 8000 行</div>
-          <div v-if="diff && !diffSections.length" class="theme-muted-text px-4 py-8 text-center text-xs">没有可显示的文本 Diff</div>
+          <div v-if="diff && !diffSections.length && !diffVideo" class="theme-muted-text px-4 py-8 text-center text-xs">没有可显示的文本 Diff</div>
           <section v-for="section in diffSections" :key="section.key">
             <div class="diff-section-title sticky top-[33px] z-[1] border-b px-3 py-1.5 text-[10px] font-medium">{{ section.title }}</div>
             <pre class="diff-code m-0 min-w-max"><code><span v-for="(line, index) in section.content.split('\n')" :key="index" class="diff-line block px-3" :class="diffLineClass(line)">{{ line || ' ' }}</span></code></pre>
@@ -431,7 +457,7 @@ defineExpose({ openPath, refreshGit })
         </template>
         <div v-if="diffLoading" class="inspector-loading-overlay" role="status" aria-label="正在加载 Diff"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
       </div>
-    </div>
+    </InspectorSplitPane>
   </aside>
 </template>
 
@@ -444,7 +470,6 @@ defineExpose({ openPath, refreshGit })
 .inspector-loading-overlay { position: absolute; inset: 0; z-index: 5; display: flex; align-items: flex-start; justify-content: center; padding-top: 4rem; background: color-mix(in srgb, var(--theme-appPanel) 82%, transparent); color: var(--theme-textMuted); }
 @keyframes inspector-skeleton-pulse { 0%, 100% { opacity: 0.42; } 50% { opacity: 0.82; } }
 .drawer-action.is-active { background: var(--theme-accentSoft); color: var(--theme-accentText); }
-.drawer-body { grid-template-columns: minmax(140px, 30%) minmax(0, 1fr); }
 .tab-count { min-width: 1rem; border-radius: 999px; background: var(--theme-appPanelStrong); padding: 0 0.3rem; text-align: center; font-size: 9px; }
 .tree-row, .change-row { transition: background-color 140ms ease, color 140ms ease; }
 .tree-row:hover, .change-row:hover { background: var(--theme-appPanelHover); }
@@ -474,8 +499,5 @@ defineExpose({ openPath, refreshGit })
 @media (prefers-reduced-motion: reduce) {
   .drawer-action, .tree-row, .change-row { transition: none; }
   .inspector-skeleton-line { animation: none; opacity: 0.62; }
-}
-@media (max-width: 720px) {
-  .drawer-body { grid-template-columns: minmax(180px, 38%) minmax(0, 1fr); }
 }
 </style>

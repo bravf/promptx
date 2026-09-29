@@ -6,7 +6,6 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const MAX_TEXT_BYTES = 2 * 1024 * 1024
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MAX_VIDEO_BYTES = 100 * 1024 * 1024
 const MAX_DIFF_BYTES = 2 * 1024 * 1024
 const MAX_DIFF_LINES = 8000
 const GIT_TIMEOUT_MS = 10_000
@@ -28,6 +27,12 @@ const VIDEO_TYPES = new Map([
   ['.webm', 'video/webm'],
   ['.ogv', 'video/ogg'],
   ['.mov', 'video/quicktime'],
+])
+
+const AUDIO_TYPES = new Map([
+  ['.wav', 'audio/wav'], ['.m4a', 'audio/mp4'], ['.mp3', 'audio/mpeg'],
+  ['.aac', 'audio/aac'], ['.ogg', 'audio/ogg'], ['.oga', 'audio/ogg'],
+  ['.opus', 'audio/ogg'], ['.flac', 'audio/flac'], ['.aif', 'audio/aiff'], ['.aiff', 'audio/aiff'],
 ])
 
 const TEXT_TYPES = new Map([
@@ -160,7 +165,7 @@ function looksBinary(buffer) {
 
 function mimeTypeFor(filePath, fallback = 'application/octet-stream') {
   const extension = path.extname(filePath).toLowerCase()
-  return IMAGE_TYPES.get(extension) || VIDEO_TYPES.get(extension) || TEXT_TYPES.get(extension) || fallback
+  return IMAGE_TYPES.get(extension) || VIDEO_TYPES.get(extension) || AUDIO_TYPES.get(extension) || TEXT_TYPES.get(extension) || fallback
 }
 
 export function readWorkspaceFile(cwd, requestedPath) {
@@ -179,6 +184,8 @@ export function readWorkspaceFile(cwd, requestedPath) {
   if (IMAGE_TYPES.has(extension)) {
     return { ...base, kind: stat.size <= MAX_IMAGE_BYTES ? 'image' : 'too_large' }
   }
+  if (VIDEO_TYPES.has(extension)) return { ...base, kind: 'video' }
+  if (AUDIO_TYPES.has(extension)) return { ...base, kind: 'audio' }
   if (stat.size > MAX_TEXT_BYTES) return { ...base, kind: 'too_large' }
 
   const content = fs.readFileSync(target.target)
@@ -186,21 +193,45 @@ export function readWorkspaceFile(cwd, requestedPath) {
   return { ...base, kind: 'text', content: content.toString('utf8') }
 }
 
-export function openWorkspaceFileStream(cwd, requestedPath, { allowVideo = false } = {}) {
+export function openWorkspaceFileStream(cwd, requestedPath, { allowVideo = false, allowAudio = false, range } = {}) {
   const target = resolveWorkspaceTarget(cwd, requestedPath)
   const stat = fs.statSync(target.target)
   if (!stat.isFile()) throw new WorkspaceInspectionError('not_a_file', '目标路径不是文件。')
   const extension = path.extname(target.target).toLowerCase()
-  const videoType = allowVideo && VIDEO_TYPES.get(extension)
-  const mimeType = IMAGE_TYPES.get(extension) || videoType
+  const mediaType = (allowVideo && VIDEO_TYPES.get(extension)) || (allowAudio && AUDIO_TYPES.get(extension))
+  const mimeType = IMAGE_TYPES.get(extension) || mediaType
   if (!mimeType) {
     throw new WorkspaceInspectionError('preview_unavailable', '该文件不支持原始内容预览。', 415)
   }
-  const maxBytes = videoType ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES
+  const maxBytes = mediaType ? Infinity : MAX_IMAGE_BYTES
   if (stat.size > maxBytes) {
-    throw new WorkspaceInspectionError('preview_too_large', `${videoType ? '视频' : '图片'}超过 ${maxBytes / 1024 / 1024} MiB 预览上限。`, 413)
+    throw new WorkspaceInspectionError('preview_too_large', `${mediaType ? '音视频' : '图片'}超过 ${maxBytes / 1024 / 1024} MiB 预览上限。`, 413)
   }
-  return { stream: fs.createReadStream(target.target), size: stat.size, mimeType }
+  const total = stat.size
+  let start = 0
+  let end = total - 1
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range)
+    const invalid = () => ({ size: 0, mimeType, statusCode: 416, contentRange: `bytes */${total}` })
+    if (!match || (!match[1] && !match[2]) || !total) return invalid()
+    if (!match[1]) {
+      const suffix = Number(match[2])
+      if (!Number.isSafeInteger(suffix) || suffix <= 0) return invalid()
+      start = Math.max(0, total - suffix)
+    } else {
+      start = Number(match[1])
+      end = match[2] ? Number(match[2]) : end
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= total) return invalid()
+      end = Math.min(end, total - 1)
+    }
+  }
+  return {
+    stream: fs.createReadStream(target.target, total ? { start, end } : {}),
+    size: total ? end - start + 1 : 0,
+    mimeType,
+    statusCode: range ? 206 : 200,
+    ...(range ? { contentRange: `bytes ${start}-${end}/${total}` } : {}),
+  }
 }
 
 async function runGit(cwd, args, options = {}) {
