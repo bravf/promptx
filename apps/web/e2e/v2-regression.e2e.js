@@ -8,6 +8,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { createServer as createViteServer } from 'vite'
 import { createApp } from '../../daemon/src/app.js'
 import { RelayService } from '../../daemon/src/relay/relayService.js'
 import { startRelayServer } from '../../../packages/relay/src/server.js'
@@ -59,7 +60,7 @@ function providerRegistry(runtimeRecords) {
             ? [{ id: 'low', label: '低' }]
             : [{ id: 'low', label: '低' }, { id: 'medium', label: '中' }],
           currentReasoningEffort,
-          contextUsage: { percentage: 75, usedTokens: 7500, maxTokens: 10000 },
+          contextUsage: { percentage: 75, usedTokens: 7500, maxTokens: 10000, updatedAt: new Date().toISOString() },
         })
         runtime.getControlState = async () => control()
         runtime.updateSettings = async (input) => {
@@ -188,12 +189,13 @@ function seedWorkspace(root, repository) {
   return { workspace, project, task, secondaryTask }
 }
 
-async function createFixture(t) {
+async function createFixture(t, { allowedOrigins, onRequest } = {}) {
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-full-regression-')))
   const runtimeRecords = { settings: [], turns: [], canceled: 0 }
   const port = await availablePort()
   const baseUrl = `http://127.0.0.1:${port}`
   const app = await createApp({
+    allowedOrigins,
     databasePath: ':memory:',
     assetsDir: path.join(root, 'uploads'),
     logger: false,
@@ -237,6 +239,7 @@ async function createFixture(t) {
     },
   })
   const seeded = seedWorkspace(root, app.sqliteRepository)
+  if (onRequest) app.addHook('onRequest', onRequest)
   await app.listen({ host: '127.0.0.1', port })
   const browser = await chromium.launch({ headless: true })
   t.after(async () => {
@@ -670,6 +673,56 @@ test('归档确认长网址不遮挡关闭按钮，窄屏与横屏保持操作�
     assert.deepEqual(failures, [])
     await page.close()
   }
+})
+
+test('导入长会话列表在手机竖横屏均可触摸滚到底并导入末项', async t => {
+  const fixture = await createFixture(t)
+  const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const failures = collectPageFailures(page)
+  await page.route('**/api/v2/import/sessions?*', async route => {
+    const response = await route.fetch()
+    const result = await response.json()
+    const target = result.sessions.find(session => session.providerHandleId === 'codex-import-regression')
+    await route.fulfill({ response, json: { ...result, sessions: [
+      ...Array.from({ length: 40 }, (_, index) => ({ ...target, providerHandleId: `scroll-fixture-${index}`, title: `滚动测试会话 ${index + 1}` })),
+      target,
+    ] } })
+  })
+  await page.goto(fixture.baseUrl)
+  await page.getByRole('button', { name: '导入会话', exact: true }).click()
+  const list = page.locator('.import-dialog-panel .overflow-y-auto')
+  await page.getByText('可导入 Codex 会话', { exact: true }).waitFor()
+  const cdp = await page.context().newCDPSession(page)
+  for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }, { width: 390, height: 600 }]) {
+    await page.setViewportSize(viewport)
+    await page.waitForFunction(() => !document.querySelector('.import-dialog-panel').getAnimations().some(animation => animation.playState === 'running'))
+    const geometry = await list.evaluate(element => {
+      const box = element.getBoundingClientRect()
+      return { top: box.top, bottom: box.bottom, height: element.clientHeight, total: element.scrollHeight }
+    })
+    assert.ok(geometry.height > 0 && geometry.total > geometry.height, '列表必须具有独立滚动空间')
+    assert.ok(geometry.top >= 0 && geometry.bottom <= viewport.height, `列表底部必须位于屏幕内：${JSON.stringify({ viewport, geometry })}`)
+    const search = page.getByPlaceholder('搜索标题、目录、Session ID 或首条消息')
+    const searchTop = (await search.boundingBox()).y
+    const bounds = await list.boundingBox()
+    await cdp.send('Input.synthesizeScrollGesture', {
+      x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height * 0.8),
+      yDistance: -5000, speed: 10000, gestureSourceType: 'touch',
+    })
+    await page.waitForFunction(() => {
+      const element = document.querySelector('.import-dialog-panel .overflow-y-auto')
+      return element.scrollTop + element.clientHeight >= element.scrollHeight - 2
+    })
+    assert.equal((await search.boundingBox()).y, searchTop, '搜索栏应保持固定')
+    const last = await page.getByText('可导入 Codex 会话', { exact: true }).boundingBox()
+    assert.ok(last.y >= 0 && last.y + last.height <= viewport.height)
+    await assertNoHorizontalOverflow(page)
+  }
+  await saveScreenshot(page, 'mobile-import-scroll-bottom.png')
+  await page.getByText('可导入 Codex 会话', { exact: true }).tap()
+  await page.locator('.import-dialog-panel').waitFor({ state: 'detached' })
+  await page.getByText('导入完成。', { exact: true }).waitFor()
+  assert.deepEqual(failures, [])
 })
 
 test('V2 移动端布局、弹层和 History 回归', async (t) => {
@@ -1555,6 +1608,47 @@ test('用户提示词渲染 Markdown，发送和复制保留原文，桌面与�
   }
 })
 
+
+test('本地开发页面与 Daemon 不同端口时视频和音频携带允许的 Origin 并正常播放', async t => {
+  const port = await availablePort()
+  const origin = `http://127.0.0.1:${port}`
+  const requests = []
+  const fixture = await createFixture(t, { allowedOrigins: [origin], onRequest: async request => {
+    if (request.url.includes('/file/content?')) requests.push({ origin: request.headers.origin, range: request.headers.range })
+  } })
+  const dev = await createViteServer({
+    root: path.resolve(webRoot, '..'),
+    configFile: path.resolve(webRoot, '../vite.config.js'),
+    cacheDir: path.join(fixture.root, 'vite-cache'),
+    define: { 'import.meta.env.VITE_API_BASE_URL': JSON.stringify(fixture.baseUrl) },
+    server: { host: '127.0.0.1', port, strictPort: true, hmr: false },
+    logLevel: 'error',
+  })
+  t.after(() => dev.close())
+  await dev.listen()
+  const turn = fixture.app.sqliteRepository.createTurn(fixture.task.id, 'cross-origin-media')
+  fixture.app.sqliteRepository.updateTurn(turn.id, { status: 'completed' })
+  for (const ext of ['mp4', 'm4a']) fs.copyFileSync(process.env.PROMPTX_TEST_VIDEO || new URL('./fixtures/preview.mp4', import.meta.url), path.join(fixture.workspace, `cross-origin.${ext}`))
+  fixture.app.sqliteRepository.appendTimeline(fixture.task.id, turn.id, {
+    type: 'assistant_message', messageId: 'cross-origin-media', phase: 'final_answer', text: '[跨端口视频](cross-origin.mp4)',
+  })
+  const page = await fixture.browser.newPage()
+  const failures = collectPageFailures(page)
+  await page.goto(origin)
+  await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+  await page.getByRole('link', { name: '跨端口视频', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('[aria-label="视频预览"] video')?.currentTime > 0, null, { timeout: 10000 })
+  await saveScreenshot(page, 'local-cross-origin-video.png')
+  await page.getByRole('button', { name: '关闭预览', exact: true }).click()
+  await page.getByRole('button', { name: '浏览文件', exact: true }).click()
+  const inspector = page.locator('.workspace-inspector:visible')
+  await inspector.getByTitle('cross-origin.m4a', { exact: true }).click()
+  await inspector.getByRole('button', { name: '播放音频', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('[aria-label="音频预览"] audio')?.currentTime > 0, null, { timeout: 10000 })
+  assert.ok(requests.length >= 2)
+  assert.ok(requests.every(request => request.origin === origin && request.range?.startsWith('bytes=')))
+  assert.deepEqual(failures, [])
+})
 
 test('大视频在本地与加密 Relay 分段播放、跳转进度和关闭，远程不整段下载', async t => {
   const fixture = await createFixture(t)

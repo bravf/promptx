@@ -651,7 +651,7 @@ onBeforeUnmount(() => {
       </form>
     </PxDialog>
 
-    <PxDialog :open="dialog === 'import'" panel-class="import-dialog-panel h-[100dvh] max-w-none border-0 sm:h-[min(40rem,calc(100dvh-3rem))] sm:max-w-2xl sm:border" header-class="h-14 px-4 sm:px-5" body-class="flex min-h-0 flex-1 flex-col" @close="closeDialog">
+    <PxDialog :open="dialog === 'import'" panel-class="import-dialog-panel h-[100dvh] max-w-none border-0 sm:h-[min(40rem,calc(100dvh-3rem))] sm:max-w-2xl sm:border" header-class="h-14 shrink-0 px-4 sm:px-5" body-class="flex min-h-0 flex-1 flex-col" @close="closeDialog">
       <template #title><h2 class="text-sm font-semibold">导入会话</h2></template>
       <div class="flex min-h-0 flex-1 flex-col px-4 pb-4">
         <div class="import-layout flex min-h-0 flex-1 gap-3 pt-1">
@@ -662,10 +662,10 @@ onBeforeUnmount(() => {
           <section class="flex min-h-0 min-w-0 flex-1 flex-col">
             <div class="relative shrink-0"><input v-model="importQuery" class="tool-input h-9 w-full pr-9 text-xs" placeholder="搜索标题、目录、Session ID 或首条消息" @input="scheduleImportSearch" /><PxIconButton v-if="importQuery" class="import-query-clear theme-muted-text absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2" label="清空搜索" @click="clearImportQuery"><X class="h-3.5 w-3.5" /></PxIconButton><LoaderCircle v-else-if="importLoading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin" /></div>
             <div v-if="importError" class="error-row mt-3 rounded-sm border px-3 py-2 text-xs">{{ importError }}</div>
-            <div class="relative mt-2 min-h-0 flex-1">
+            <div class="relative mt-2 flex min-h-0 flex-1 flex-col">
               <div v-if="importLoading && !importSessions.length" class="theme-muted-text flex h-full items-center justify-center text-xs"><LoaderCircle class="mr-2 h-4 w-4 animate-spin" />正在扫描本机 Provider 会话</div>
               <div v-else-if="!importSessions.length" class="theme-muted-text flex h-full items-center justify-center text-xs">没有可导入的会话</div>
-              <div v-else class="h-full min-h-0 space-y-1 overflow-y-auto pr-1">
+              <div v-else class="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1">
                 <button v-for="session in importSessions" :key="`${session.providerId}:${session.providerHandleId}`" type="button" class="import-session-row flex w-full min-w-0 items-center gap-3 rounded-sm border px-3 py-2 text-left" :disabled="Boolean(importingId)" @click="importSession(session)">
                   <span class="import-provider-mark flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-[10px] font-semibold">{{ providerLabel(session.providerId).slice(0, 1) }}</span>
                   <span class="min-w-0 flex-1"><span class="flex items-center gap-2"><span class="truncate text-xs font-medium">{{ session.title }}</span><span class="theme-muted-text shrink-0 text-[10px]">{{ providerLabel(session.providerId) }}</span><span class="theme-muted-text ml-auto shrink-0 text-[10px]">{{ formatImportActivity(session.lastActivityAt) }}</span></span><span class="theme-muted-text mt-0.5 block truncate font-mono text-[10px]" :title="session.cwd || '未记录工作目录，将使用当前项目目录'">{{ session.cwd || '未记录工作目录，将使用当前项目目录' }}</span><span class="theme-muted-text mt-0.5 block truncate text-[11px]">{{ session.lastPromptPreview || session.firstPromptPreview }}</span></span>
@@ -756,7 +756,7 @@ onBeforeUnmount(() => {
   .timeline-workspace.mobile-panel-hidden { transform: translateX(100%); pointer-events: none; }
   .mobile-panel-active { transform: translateX(0); opacity: 1; pointer-events: auto; }
   .workspace-action, .agent-action { opacity: 1; }
-  .import-layout { display: block; }
+  .import-layout { flex-direction: column; }
   .import-provider-list { width: 100%; flex-direction: row; overflow-x: auto; border-right: 0; padding: 0 0 0.5rem; }
 }
 @media (prefers-reduced-motion: reduce) { .skeleton-line { animation: none; } .workspace-sidebar, .timeline-workspace, .workspace-agents-enter-active, .workspace-agents-leave-active { transition: none; } }
