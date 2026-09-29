@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 
-export const DATABASE_VERSION = 8
+export const DATABASE_VERSION = 9
 
 export function resolveDaemonPaths() {
   const homeDir = path.resolve(process.env.PROMPTX_HOME || path.join(os.homedir(), '.promptx'))
@@ -31,6 +31,11 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
       )`)
       db.pragma('user_version = 8')
       version = 8
+    })()
+    if (hasTables && version === 8 && db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'agent_sessions'").get()) db.transaction(() => {
+      db.exec("ALTER TABLE agent_sessions ADD COLUMN context_usage_json TEXT NOT NULL DEFAULT 'null'")
+      db.pragma('user_version = 9')
+      version = 9
     })()
     if (hasTables && version !== DATABASE_VERSION) {
       const error = new Error('数据库模型已更新，不支持旧数据。请停止服务后运行 pnpm data:reset，再重新启动。')
@@ -74,6 +79,7 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
           provider_id TEXT NOT NULL, lifecycle TEXT NOT NULL,
           model_id TEXT NOT NULL DEFAULT '', mode_id TEXT NOT NULL DEFAULT '',
           config_json TEXT NOT NULL DEFAULT '{}', capabilities_json TEXT NOT NULL DEFAULT '{}',
+          context_usage_json TEXT NOT NULL DEFAULT 'null',
           native_handle_json TEXT NOT NULL DEFAULT '{}', native_source_id TEXT,
           last_error TEXT NOT NULL DEFAULT '', requires_attention INTEGER NOT NULL DEFAULT 0,
           attention_reason TEXT, attention_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,

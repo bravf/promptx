@@ -38,11 +38,13 @@ test('读取 Codex 控制状态不会抢占 thread writer', async () => {
   const { runtime, getRpc } = createRuntime(async (method) => {
     if (method === 'initialize') return {}
     if (method === 'model/list') return { data: [], nextCursor: null }
+    if (method === 'thread/read') return { thread: { id: 'thread-1' } }
     assert.fail(`不应调用 ${method}`)
   })
 
   await runtime.getControlState()
-  assert.deepEqual(getRpc().calls.map((call) => call.method), ['initialize', 'model/list'])
+  assert.deepEqual(getRpc().calls.map((call) => call.method), ['initialize', 'model/list', 'thread/read'])
+  assert.equal(getRpc().calls.at(-1).params.includeTurns, false)
   runtime.close()
 })
 

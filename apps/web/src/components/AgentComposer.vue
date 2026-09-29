@@ -52,7 +52,7 @@ const contextUsageTone = computed(() => {
 })
 const contextUsageTitle = computed(() => contextUsage.value
   ? `上下文：已使用 ${Math.round(contextPercentage.value)}%（${contextUsage.value.usedTokens.toLocaleString()} / ${contextUsage.value.maxTokens.toLocaleString()} tokens）`
-  : '发送消息后显示上下文用量')
+  : '暂无上下文用量，等待 Agent 上报')
 const modelOptions = computed(() => (props.control?.models || []).map((model) => ({ value: model.id, label: model.label })))
 const effortOptions = computed(() => (props.control?.reasoningEfforts || []).map((effort) => ({ value: effort.id, label: effort.label })))
 
@@ -384,9 +384,9 @@ onBeforeUnmount(() => {
 .model-select :deep(.px-select-trigger > span) { overflow: visible; text-overflow: clip; white-space: nowrap; }
 .context-usage { color: var(--theme-textMuted); }
 .context-ring { transform: rotate(-90deg); }
-.context-ring-track { stroke: var(--theme-appPanelMuted); }
+.context-ring-track { stroke: var(--theme-borderStrong); }
 .context-ring-progress { transition: stroke-dashoffset 180ms ease; }
-.context-progress-normal { stroke: var(--theme-textMuted); }
+.context-progress-normal { stroke: var(--theme-accent); }
 .context-progress-warning { stroke: var(--theme-warning); }
 .context-progress-danger { stroke: var(--theme-danger); }
 .modal-backdrop { background: var(--theme-modalBackdrop); }

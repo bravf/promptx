@@ -502,6 +502,12 @@ export function createRepository(db) {
       const source = providerId === 'codex' ? handle.threadId : handle.sessionId
       return source ? mapAgent(db.prepare(`${AGENT_SELECT} WHERE a.provider_id = ? AND a.native_source_id = ?`).get(providerId, source)) : null
     },
+    getAgentContextUsage(id) {
+      return parseJson(db.prepare('SELECT context_usage_json FROM agent_sessions WHERE id = ?').get(id)?.context_usage_json, null)
+    },
+    saveAgentContextUsage(id, value) {
+      db.prepare('UPDATE agent_sessions SET context_usage_json = ? WHERE id = ?').run(JSON.stringify(value), id)
+    },
     updateAgent(id, patch = {}) {
       const current = this.getAgent(id)
       if (!current) return null

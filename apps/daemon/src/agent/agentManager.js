@@ -4,6 +4,7 @@ import { TimelineCoalescer } from '../timeline/timelineCoalescer.js'
 import { DEFAULT_AGENT_TITLE, deriveAgentTitle } from './sessionTitle.js'
 import { TimelineSyncCoordinator } from './history/timelineSyncCoordinator.js'
 import { resolveBackgroundTaskOwnership } from './backgroundTaskOwnership.js'
+import { AgentContextUsageSchema } from '../../../../packages/protocol/src/agent.js'
 
 function nowIso() {
   return new Date().toISOString()
@@ -52,6 +53,23 @@ export class AgentManager {
     if (changed) this.eventHub.publish(agent.id, { type: 'agent', agent: this.repository.getAgent(agent.id) })
   }
 
+  rememberControlState(agentId, control) {
+    const agent = this.repository.getAgent(agentId)
+    if (!agent) return control
+    const sourceId = agent.nativeHandle?.threadId || agent.nativeHandle?.sessionId || ''
+    const saved = this.repository.getAgentContextUsage?.(agentId)
+    const previous = saved?.sourceId === sourceId && saved?.modelId === control.currentModelId ? saved.usage : null
+    const parsed = AgentContextUsageSchema.safeParse(control.contextUsage)
+    const incoming = parsed.success ? parsed.data : null
+    const usage = incoming && (!previous || Date.parse(incoming.updatedAt) >= Date.parse(previous.updatedAt)) ? incoming : previous
+    if (usage && JSON.stringify(usage) !== JSON.stringify(previous)) {
+      this.repository.saveAgentContextUsage?.(agentId, { sourceId, modelId: control.currentModelId, usage })
+    }
+    const next = { ...control, contextUsage: usage || null }
+    this.controlStates.set(agentId, next)
+    return next
+  }
+
   getRuntime(agent) {
     let runtime = this.runtimes.get(agent.id)
     if (runtime) return runtime
@@ -75,8 +93,9 @@ export class AgentManager {
       if (current) this.repository.updateAgent(agent.id, { config: { ...current.config, ...providerConfig } })
     })
     runtime.on('controlState', (control) => {
-      this.controlStates.set(agent.id, control)
-      this.eventHub.publish(agent.id, { type: 'control', control })
+      if (this.runtimes.get(agent.id) !== runtime) return
+      const next = this.rememberControlState(agent.id, control)
+      this.eventHub.publish(agent.id, { type: 'control', control: next })
     })
     runtime.on('capabilities', (capabilities) => {
       if (this.repository.getAgent(agent.id)) this.repository.updateAgent(agent.id, { capabilities })
@@ -269,8 +288,7 @@ export class AgentManager {
     if (!agent) throw new Error('Agent 不存在。')
     const runtime = this.getRuntime(agent)
     const control = await this.runtimeOperation(agentId, runtime, () => runtime.getControlState(), '读取 Agent 设置', 90_000)
-    this.controlStates.set(agentId, control)
-    return control
+    return this.rememberControlState(agentId, control)
   }
 
   async syncTimeline(agentId, options = {}) {
@@ -309,7 +327,7 @@ export class AgentManager {
     }
     const runtime = this.runtimes.get(agentId)
     if (typeof runtime?.updateSettings === 'function') {
-      const nextControl = await this.runtimeOperation(agentId, runtime, () => runtime.updateSettings({ modelId, reasoningEffort }), '更新 Agent 设置')
+      const nextControl = this.rememberControlState(agentId, await this.runtimeOperation(agentId, runtime, () => runtime.updateSettings({ modelId, reasoningEffort }), '更新 Agent 设置'))
       const current = this.repository.getAgent(agentId)
       const updated = this.repository.updateAgent(agentId, {
         modelId: nextControl.currentModelId,

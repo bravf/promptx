@@ -7,6 +7,7 @@ import { createControlState, effortLabel, normalizeContextUsage } from '../contr
 import { readCodexHistorySnapshot } from '../history/providers/codexHistory.js'
 import { CODEX_BIN, createPaginatedResumeError } from './codexCli.js'
 import { listCodexHistorySessions } from '../history/providers/codexSessions.js'
+import { readCodexContextUsage } from '../history/providers/codexContextUsage.js'
 
 export function buildCodexInput(content) {
   return content.map((block) => {
@@ -189,7 +190,24 @@ export class CodexRuntime extends EventEmitter {
 
   async getControlState() {
     await this.connect()
+    if (this.threadId && !this.controlState.contextUsage) {
+      try {
+        const metadata = await this.rpc.request('thread/read', { threadId: this.threadId, includeTurns: false })
+        await this.refreshContextUsageFromHistory(metadata.thread?.path)
+      } catch {} // 历史不可用时仍允许查看模型与发送消息。
+    }
     return this.controlState
+  }
+
+  async refreshContextUsageFromHistory(file) {
+    if (!file) return
+    const result = await readCodexContextUsage(file, this.contextUsageFile === file ? this.contextUsageRevision : '')
+    this.contextUsageFile = file
+    this.contextUsageRevision = result.revision
+    const previous = this.controlState.contextUsage
+    if (!result.usage || (previous && Date.parse(previous.updatedAt) >= Date.parse(result.usage.updatedAt))) return
+    this.controlState = { ...this.controlState, contextUsage: result.usage }
+    this.emit('controlState', this.controlState)
   }
 
   async readHistorySnapshot(options) {
@@ -338,7 +356,9 @@ export class CodexRuntime extends EventEmitter {
       return
     }
     if (method === 'thread/tokenUsage/updated') {
+      if (params.threadId !== this.threadId) return
       const usage = params.tokenUsage || {}
+      if (!Number.isFinite(usage.last?.totalTokens) || !Number.isFinite(usage.modelContextWindow) || usage.modelContextWindow <= 0) return
       this.controlState = {
         ...this.controlState,
         contextUsage: normalizeContextUsage(usage.last?.totalTokens, usage.modelContextWindow),

@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process'
 import { test } from 'node:test'
 import { createApp } from './app.js'
 
-function createControlTestRegistry() {
+function createControlTestRegistry({ contextUsage = { usedTokens: 25, maxTokens: 100, percentage: 25, updatedAt: new Date().toISOString() } } = {}) {
   const runtimes = []
   const models = [
     {
@@ -41,7 +41,7 @@ function createControlTestRegistry() {
         currentModelId: selected.id,
         reasoningEfforts: selected.reasoningEfforts,
         currentReasoningEffort,
-        contextUsage: { usedTokens: 25, maxTokens: 100, percentage: 25, updatedAt: new Date().toISOString() },
+        contextUsage,
       })
       runtime.startTurn = async (_content, clientMessageId) => ({ nativeTurnId: clientMessageId })
       runtime.cancel = async () => {}
@@ -576,6 +576,46 @@ test('v2 资产上传会持久化元数据并返回原始文件内容', async ()
     await app.close()
     fs.rmSync(assetsDir, { recursive: true, force: true })
   }
+})
+
+test('上下文用量在重启后恢复，空通知不清除记录，实时更新持久化且按会话隔离', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-control-persist-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const databasePath = path.join(directory, 'test.sqlite')
+  const initial = createControlTestRegistry()
+  let app = await createApp({ databasePath, logger: false, webRoot: false, relay: false, providerRegistry: initial.registry })
+  let taskId
+  try {
+    const response = await createLocalTask(app, { cwd: process.cwd(), providerId: 'codex' })
+    taskId = response.json().task.id
+    const result = await app.inject({ method: 'GET', url: `/api/v2/tasks/${taskId}/control` })
+    assert.equal(result.json().control.contextUsage.usedTokens, 25)
+  } finally { await app.close() }
+  const restored = createControlTestRegistry({ contextUsage: null })
+  app = await createApp({ databasePath, logger: false, webRoot: false, relay: false, providerRegistry: restored.registry })
+  try {
+    const read = () => app.inject({ method: 'GET', url: `/api/v2/tasks/${taskId}/control` })
+    assert.equal((await read()).json().control.contextUsage.usedTokens, 25)
+    const runtime = restored.runtimes[0]
+    const control = await runtime.getControlState()
+    const usage = { usedTokens: 60, maxTokens: 100, percentage: 60, updatedAt: new Date(Date.now() + 1000).toISOString() }
+    runtime.emit('controlState', { ...control, contextUsage: usage })
+    runtime.emit('controlState', control)
+    assert.deepEqual((await read()).json().control.contextUsage, usage)
+    const agent = app.sqliteRepository.getTaskAgent(taskId)
+    assert.deepEqual(app.sqliteRepository.getAgentContextUsage(agent.id).usage, usage)
+    runtime.emit('runtimeExit')
+    assert.deepEqual((await read()).json().control.contextUsage, usage)
+    assert.equal(restored.runtimes.length, 2)
+    // 运行实例替换后旧实例不能再写入用量。
+    const switched = await app.inject({ method: 'PATCH', url: `/api/v2/tasks/${taskId}/settings`, payload: { modelId: 'model-b' } })
+    assert.equal(switched.json().control.contextUsage, null)
+    runtime.emit('controlState', { ...control, contextUsage: usage })
+    assert.equal((await read()).json().control.contextUsage, null)
+    const other = (await createLocalTask(app, { cwd: directory, providerId: 'codex' })).json().task
+    const otherControl = await app.inject({ method: 'GET', url: `/api/v2/tasks/${other.id}/control` })
+    assert.equal(otherControl.json().control.contextUsage, null)
+  } finally { await app.close() }
 })
 
 test('Agent 控制接口持久化模型和思考强度，并在运行中拒绝切换', async () => {

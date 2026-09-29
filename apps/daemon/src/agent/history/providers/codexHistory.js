@@ -288,6 +288,7 @@ function isPaginatedThreadsError(error) {
 export async function readCodexHistorySnapshot(runtime, { knownRevision = '', cursor = 0 } = {}) {
   await runtime.connect()
   const metadata = await runtime.rpc.request('thread/read', { threadId: runtime.threadId, includeTurns: false })
+  await runtime.refreshContextUsageFromHistory?.(metadata.thread?.path)
   try {
     const result = await runtime.rpc.request('thread/read', { threadId: runtime.threadId, includeTurns: true })
     return mapCodexHistorySnapshot(result.thread, threadRevision(result.thread) || threadRevision(metadata.thread))
