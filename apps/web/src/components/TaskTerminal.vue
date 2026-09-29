@@ -98,14 +98,17 @@ function updateState(state) {
   const item = terminals.value.find(item => item.id === state.id)
   if (item) Object.assign(item, state)
 }
+const resizing = ref(false)
 function startDrag(event) {
-  if (maximized.value) return
+  if (maximized.value || event.button !== 0) return
+  dragCleanup?.()
+  resizing.value = true
   event.preventDefault()
   const startY = event.clientY, initial = height.value
   const move = event => { height.value = Math.max(140, Math.min(root.value.parentElement.clientHeight - 100, initial + startY - event.clientY)) }
-  const end = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); dragCleanup = null }
+  const end = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); resizing.value = false; dragCleanup = null }
   dragCleanup = end
-  window.addEventListener('pointermove', move); window.addEventListener('pointerup', end)
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end)
 }
 onMounted(async () => {
   await refresh()
@@ -118,7 +121,7 @@ onBeforeUnmount(() => { disposed = true; revision++; clearTimeout(timer); dragCl
 
 <template>
   <section ref="root" class="task-terminal flex min-h-0 shrink-0 flex-col" :class="{ 'is-maximized': maximized }" :style="maximized ? {} : { height: `${height}px`, maxHeight: '75%' }">
-    <div class="terminal-resizer shrink-0" role="separator" aria-label="调整终端高度" aria-orientation="horizontal" tabindex="0" @pointerdown="startDrag" @keydown.up.prevent="height += 20" @keydown.down.prevent="height = Math.max(140, height - 20)" />
+    <div class="terminal-resizer theme-resize-handle shrink-0" :class="{ 'is-resizing': resizing }" role="separator" aria-label="调整终端高度" aria-orientation="horizontal" tabindex="0" @pointerdown="startDrag" @keydown.up.prevent="height += 20" @keydown.down.prevent="height = Math.max(140, height - 20)" />
     <header class="flex min-h-9 shrink-0 items-center gap-1 px-2">
       <div class="flex min-w-0 flex-1 items-center overflow-x-auto" role="tablist" aria-label="会话终端">
         <div v-for="item in terminals" :key="item.id" class="terminal-tab flex shrink-0 items-center" :class="{ 'is-active': item.id === activeId }">
@@ -143,8 +146,7 @@ onBeforeUnmount(() => { disposed = true; revision++; clearTimeout(timer); dragCl
 <style scoped>
 .task-terminal { background: var(--theme-appPanel); border-top: 1px solid var(--theme-borderDefault); }
 .task-terminal.is-maximized { position: absolute; inset: 3.5rem 0 0; z-index: 25; }
-.terminal-resizer { height: 5px; cursor: ns-resize; touch-action: none; }
-.terminal-resizer:hover, .terminal-resizer:focus-visible { background: var(--theme-accent); }
+.terminal-resizer { position: relative; height: 5px; cursor: ns-resize; }
 .terminal-tab { color: var(--theme-textMuted); border-bottom: 2px solid transparent; }
 .terminal-tab.is-active { color: var(--theme-accentText); border-bottom-color: var(--theme-accent); background: var(--theme-accentSoft); }
 </style>

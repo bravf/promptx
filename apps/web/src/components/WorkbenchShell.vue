@@ -10,6 +10,7 @@ import { createMobileTimelineHistoryState, getMobileTimelineTaskId, hasMobileTim
 import { readCollapsedProjectIds, writeCollapsedProjectIds } from '../lib/projectExpansionStorage.js'
 import { groupRecentSessions, readSessionListView, writeSessionListView } from '../lib/sessionListView.js'
 import { readSplitTimelineState, resolveSplitTimelineState, writeSplitTimelineState } from '../lib/splitTimelineStorage.js'
+import { useSidebarResize } from '../composables/useSidebarResize.js'
 import ConfirmDialog from './ConfirmDialog.vue'
 import AgentProviderIcon from './AgentProviderIcon.vue'
 import DirectorySearchInput from './DirectorySearchInput.vue'
@@ -35,6 +36,9 @@ const listDate = ref(new Date())
 const loading = ref(true)
 const initialDataReady = ref(false)
 const error = ref('')
+const shellElement = ref(null)
+const sidebarResize = useSidebarResize(shellElement)
+const { width: sidebarWidth, maxWidth: sidebarMaxWidth, dragging: sidebarDragging } = sidebarResize
 const desktopWorkbench = ref(null)
 const desktopProjectId = ref('')
 const visibleDesktopTaskIds = ref([])
@@ -521,7 +525,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="v2-shell relative grid h-full min-h-0 overflow-hidden">
+  <div ref="shellElement" class="v2-shell relative grid h-full min-h-0 overflow-hidden" :class="{ 'is-resizing-sidebar': sidebarDragging }" :style="{ '--sidebar-width': `${sidebarWidth}px` }">
     <div v-if="loading" class="v2-loading-skeleton absolute inset-0 z-30 grid grid-cols-[240px_minmax(0,1fr)]" role="status" aria-label="正在加载工作区">
       <div class="border-r p-3"><div class="skeleton-line h-7 w-24" /><div class="skeleton-line mt-5 h-9 w-full" /><div class="skeleton-line mt-3 h-8 w-4/5" /><div class="skeleton-line mt-2 h-8 w-3/5" /></div>
       <div class="p-4"><div class="skeleton-line h-8 w-40" /><div class="mx-auto mt-16 max-w-3xl space-y-3"><div class="skeleton-line h-12 w-3/4" /><div class="skeleton-line h-20 w-5/6" /><div class="skeleton-line h-12 w-2/3" /></div></div>
@@ -590,6 +594,8 @@ onBeforeUnmount(() => {
       </div>
       <footer class="border-t p-2"><PxButton variant="ghost" size="sm" class="settings-entry h-9 w-full justify-start gap-2 px-2 text-left text-xs" @click="openManagedDialog('settings')"><Settings class="h-4 w-4 shrink-0" /><span>设置</span></PxButton></footer>
     </aside>
+
+    <div class="workspace-sidebar-divider theme-resize-handle" :class="{ 'is-resizing': sidebarDragging }" role="separator" aria-label="调整工作区侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarWidth" :aria-valuemin="sidebarResize.minWidth" :aria-valuemax="sidebarMaxWidth" :aria-valuetext="`${sidebarWidth} 像素`" tabindex="0" title="拖动调整左栏宽度，双击恢复默认" @pointerdown="sidebarResize.start" @pointermove="sidebarResize.resize" @pointerup="sidebarResize.stop" @pointercancel="sidebarResize.stop" @lostpointercapture="sidebarResize.stop" @keydown="sidebarResize.resizeKey" @dblclick="sidebarResize.reset" />
 
     <main class="timeline-workspace grid min-h-0 min-w-0" :class="mobileView === 'timeline' ? 'mobile-panel-active' : 'mobile-panel-hidden'" :inert="isMobile && mobileView !== 'timeline'" :aria-hidden="isMobile ? mobileView !== 'timeline' : undefined">
       <DesktopWorkbench v-show="!isMobile" ref="desktopWorkbench" :tasks="allTasks" :projects="projects" :ready="initialDataReady" :mobile="isMobile" :fallback-task-id="primaryTaskId" @focus-task="focusDesktopTask" @agent-event="upsertTaskAgent" @changed="refreshProjects" />
@@ -677,7 +683,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.v2-shell { --workspace-gap: 0.5rem; grid-template-columns: 240px minmax(0, 1fr); column-gap: var(--workspace-gap); border: 0; }
+.v2-shell { --workspace-gap: 0.5rem; grid-template-columns: var(--sidebar-width, 240px) 8px minmax(0, 1fr); border: 0; }
+.v2-shell.is-resizing-sidebar { user-select: none; cursor: col-resize; }
+.workspace-sidebar-divider { position: relative; cursor: col-resize; }
 .workspace-sidebar.panel { border: 0; box-shadow: inset 0 1px 0 var(--theme-panelHighlight); }
 .timeline-workspace { grid-template-columns: minmax(0, 1fr); }
 .timeline-workspace.is-split {
@@ -735,8 +743,8 @@ onBeforeUnmount(() => {
 .import-provider-filter { color: var(--theme-textMuted); }
 .import-provider-filter:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 .import-provider-filter.is-active { background: var(--theme-appPanelActive); color: var(--theme-textPrimary); }
-@media (max-width: 900px) { .v2-shell { grid-template-columns: 200px minmax(0, 1fr); } }
 @media (max-width: 720px) {
+  .workspace-sidebar-divider { display: none; }
   .v2-loading-skeleton { display: block; }
   .v2-loading-skeleton > div:first-child { display: none; }
   .v2-shell { display: block; border: 0; border-radius: 0; }

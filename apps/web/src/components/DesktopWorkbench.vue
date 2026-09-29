@@ -20,6 +20,7 @@ const rootElement = ref(null)
 const layout = ref(createLayout())
 const contextProjectId = ref('')
 const dragging = ref('')
+const resizingId = ref('')
 const dropTarget = ref(null)
 const initialized = ref(false)
 const mountedPanels = ref(new Set())
@@ -127,13 +128,14 @@ function startResize(event, rect) {
   if (event.button !== 0) return
   event.preventDefault()
   resizeCleanup?.()
+  resizingId.value = rect.node.id
   const bounds = rootElement.value.getBoundingClientRect()
   const horizontal = rect.node.axis === 'x'
   const move = event => {
     const position = horizontal ? (event.clientX - bounds.left) / bounds.width * 100 : (event.clientY - bounds.top) / bounds.height * 100
     rect.node.ratio = Math.max(0.15, Math.min(0.85, (position - (horizontal ? rect.x : rect.y)) / (horizontal ? rect.w : rect.h)))
   }
-  resizeCleanup = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', resizeCleanup); window.removeEventListener('pointercancel', resizeCleanup); resizeCleanup = null }
+  resizeCleanup = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', resizeCleanup); window.removeEventListener('pointercancel', resizeCleanup); resizeCleanup = null; resizingId.value = '' }
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', resizeCleanup)
   window.addEventListener('pointercancel', resizeCleanup)
@@ -236,7 +238,7 @@ defineExpose({ openSession, openSettings })
       <TaskTerminal v-else-if="panel.type === 'terminal'" class="workbench-terminal" :task-id="panel.taskId" :visible="panel.active" embedded @close="close(panel.id)" />
       <V2SettingsDialog v-else-if="panel.type === 'settings'" open embedded @close="close(panel.id)" @changed="emit('changed')" />
     </section>
-    <div v-for="rect in geometry.dividers" :key="rect.node.id" class="workbench-divider absolute z-20" :style="dividerStyle(rect)" role="separator" :aria-orientation="rect.node.axis === 'x' ? 'vertical' : 'horizontal'" aria-label="调整分区大小" :aria-valuenow="Math.round(rect.node.ratio * 100)" aria-valuemin="15" aria-valuemax="85" tabindex="0" @pointerdown="startResize($event, rect)" @keydown="resizeKey($event, rect.node)" />
+    <div v-for="rect in geometry.dividers" :key="rect.node.id" class="workbench-divider theme-resize-handle absolute z-20" :class="{ 'is-resizing': resizingId === rect.node.id }" :style="dividerStyle(rect)" role="separator" :aria-orientation="rect.node.axis === 'x' ? 'vertical' : 'horizontal'" aria-label="调整分区大小" :aria-valuenow="Math.round(rect.node.ratio * 100)" aria-valuemin="15" aria-valuemax="85" tabindex="0" @pointerdown="startResize($event, rect)" @keydown="resizeKey($event, rect.node)" />
     <template v-if="dragging">
       <div v-for="rect in geometry.leaves" :key="rect.group.id" class="workbench-drop-zone absolute z-30" :style="rectStyle(rect, true)" @dragover="dragOver($event, rect)" @drop="drop($event, rect)">
         <div v-if="dropTarget?.groupId === rect.group.id" class="workbench-drop-preview absolute inset-0 flex items-center justify-center text-xs" :class="dropTarget.direction">{{ dropTarget.direction ? '松开以拆分' : '松开以移动标签' }}</div>
@@ -293,8 +295,6 @@ defineExpose({ openSession, openSettings })
 .tab-menu { opacity: 0; }
 .workbench-tab:hover .tab-menu, .workbench-tab:focus-within .tab-menu { opacity: 1; }
 .workbench-attention { width: 6px; height: 6px; border-radius: 50%; background: var(--theme-warning); }
-.workbench-divider { touch-action: none; }
-.workbench-divider:hover, .workbench-divider:focus-visible { background: var(--theme-accent); }
 .workbench-drop-preview { border: 1px dashed var(--theme-accent); background: color-mix(in srgb, var(--theme-accent) 20%, transparent); color: var(--theme-textPrimary); pointer-events: none; }
 .workbench-drop-preview.left { right: 50%; }
 .workbench-drop-preview.right { left: 50%; }

@@ -47,7 +47,7 @@ function resizeKey(event) {
 <template>
   <div ref="pane" class="inspector-split min-h-0 min-w-0 flex-1" :class="{ 'is-dragging': dragging }" :style="{ gridTemplateColumns: columns }">
     <slot name="list" />
-    <div class="inspector-divider" role="separator" aria-orientation="vertical" :aria-label="props.label" :aria-valuenow="Math.round(currentRatio)" aria-valuemin="15" aria-valuemax="75" tabindex="0" title="拖动调整宽度，双击恢复默认" @pointerdown="start" @pointermove="resize" @pointerup="stop" @pointercancel="stop" @lostpointercapture="dragging = false" @keydown="resizeKey" @dblclick="ratio = null" />
+    <div class="inspector-divider theme-resize-handle" :class="{ 'is-resizing': dragging }" role="separator" aria-orientation="vertical" :aria-label="props.label" :aria-valuenow="Math.round(currentRatio)" aria-valuemin="15" aria-valuemax="75" tabindex="0" title="拖动调整宽度，双击恢复默认" @pointerdown="start" @pointermove="resize" @pointerup="stop" @pointercancel="stop" @lostpointercapture="dragging = false" @keydown="resizeKey" @dblclick="ratio = null" />
     <slot />
   </div>
 </template>
@@ -55,8 +55,6 @@ function resizeKey(event) {
 <style scoped>
 .inspector-split { display: grid; grid-template-columns: min(240px, 30%) 5px minmax(0, 1fr); }
 .inspector-split.is-dragging { user-select: none; }
-.inspector-divider { position: relative; cursor: col-resize; touch-action: none; background: transparent; outline: none; }
-.inspector-divider::after { content: ''; position: absolute; inset: 0 2px; background: var(--theme-borderDefault); }
-.inspector-divider:hover::after, .inspector-divider:focus-visible::after, .is-dragging .inspector-divider::after { inset-inline: 0; background: var(--theme-accent); }
+.inspector-divider { position: relative; cursor: col-resize; }
 @media (max-width: 720px) { .inspector-split { grid-template-columns: min(240px, 38%) 5px minmax(0, 1fr); } }
 </style>

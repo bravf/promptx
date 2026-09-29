@@ -147,6 +147,15 @@ body {
 }
 
 @layer components {
+  /* 拖动命中区域由布局决定，高亮始终只画中间 2px。 */
+  .theme-resize-handle { touch-action: none; outline: none; background: transparent; }
+  .theme-resize-handle::after { content: ''; position: absolute; border-radius: 2px; background: transparent; pointer-events: none; }
+  .theme-resize-handle[aria-orientation='vertical']::after { top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); }
+  .theme-resize-handle[aria-orientation='horizontal']::after { left: 0; right: 0; top: 50%; height: 2px; transform: translateY(-50%); }
+  .theme-resize-handle:hover::after,
+  .theme-resize-handle:focus-visible::after,
+  .theme-resize-handle.is-resizing::after { background: var(--theme-accent); }
+
   .app-shell {
     @apply relative flex h-dvh min-h-screen flex-col transition-colors;
     background: var(--theme-appBg);
