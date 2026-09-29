@@ -1,8 +1,11 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Bot, Check, ChevronRight, Circle, CircleAlert, CircleDot, FileDiff, FileText, LoaderCircle, Wrench } from 'lucide-vue-next'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
+import { Bot, Check, ChevronRight, Circle, CircleDot, LoaderCircle } from 'lucide-vue-next'
 import { formatElapsedTime, getTurnActivityState, userMessageCopyText } from '../lib/timelinePresentation.js'
-import { workspaceLinksForTool } from '../lib/timelineWorkspaceLinks.js'
+import { isToolExpanded, toolExpansionKey } from '../lib/toolExpansion.js'
+import { useToolPreferences } from '../composables/useToolPreferences.js'
+import { isRemoteTransport } from '../lib/transport.js'
+import TimelineToolCall from './TimelineToolCall.vue'
 import TimelineMarkdown from './TimelineMarkdown.vue'
 import TimelineMessageMeta from './TimelineMessageMeta.vue'
 import TimelineUserMessage from './TimelineUserMessage.vue'
@@ -19,6 +22,15 @@ const props = defineProps({
 const emit = defineEmits(['rendered', 'open-workspace-path'])
 
 const expanded = ref(props.running)
+const manualProcess = ref(false)
+const pauseTimelineFollow = inject('pauseTimelineFollow', () => {})
+const expansionState = inject('toolExpansion', new Map())
+const epoch = inject('timelineEpoch', ref(''))
+const { autoExpand } = useToolPreferences()
+const remote = isRemoteTransport()
+const hasOpenTools = computed(() => props.turn.processEntries.some(entry => entry.item?.type === 'tool_call' && isToolExpanded({
+  enabled: autoExpand.value, remote, manual: expansionState.get(toolExpansionKey(epoch.value, entry.turnId, entry.item.callId)),
+})))
 const clock = ref(Date.now())
 let clockTimer = null
 
@@ -44,6 +56,12 @@ const heading = computed(() => {
   return `思考中 · ${elapsed}`
 })
 
+function toggleProcess() {
+  if (!expanded.value) pauseTimelineFollow()
+  manualProcess.value = true
+  expanded.value = !expanded.value
+}
+
 function syncClock() {
   clearInterval(clockTimer)
   clockTimer = null
@@ -53,13 +71,9 @@ function syncClock() {
   }
 }
 
-function toolLinks(entry) {
-  return workspaceLinksForTool(entry.item, props.workspaceCwd)
-}
-
 watch(() => props.running, (running, wasRunning) => {
   if (running && !wasRunning) expanded.value = true
-  else if (!running && wasRunning) expanded.value = false
+  else if (!running && wasRunning && !manualProcess.value && !hasOpenTools.value) expanded.value = false
   syncClock()
 }, { immediate: true })
 
@@ -74,7 +88,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
     </article>
 
     <section v-if="showProcess" class="process-group mb-5 ml-7">
-      <button v-if="hasProcessEntries" type="button" class="process-toggle theme-muted-text inline-flex items-center gap-1.5 py-1 text-left text-xs" :aria-expanded="expanded" @click="expanded = !expanded">
+      <button v-if="hasProcessEntries" type="button" class="process-toggle theme-muted-text inline-flex items-center gap-1.5 py-1 text-left text-xs" :aria-expanded="expanded" @click="toggleProcess">
         <span>{{ heading }}</span>
         <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform" :class="expanded ? 'rotate-90' : ''" />
       </button>
@@ -83,27 +97,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
         <div v-for="entry in visibleProcessEntries" :key="`${entry.seqStart}-${entry.item.callId || entry.item.type}`" class="process-entry py-1.5 text-xs">
           <TimelineMarkdown v-if="entry.item.type === 'assistant_message'" class="theme-secondary-text" :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
           <div v-else-if="entry.item.type === 'reasoning'" class="theme-secondary-text whitespace-pre-wrap leading-5">{{ entry.item.text }}</div>
-          <div v-else-if="entry.item.type === 'tool_call'" class="flex min-w-0 items-start gap-2">
-            <Wrench class="theme-muted-text mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
-                <span class="truncate font-medium">{{ entry.item.name }}</span>
-                <Check v-if="entry.item.status === 'completed'" class="h-3.5 w-3.5 shrink-0" />
-                <LoaderCircle v-else-if="entry.item.status === 'running' && running && entry.turnId === activeTurnId" class="h-3.5 w-3.5 shrink-0 animate-spin" />
-                <CircleAlert v-else-if="entry.item.status === 'failed'" class="theme-danger-text h-3.5 w-3.5 shrink-0" aria-label="工具执行失败" />
-                <Circle v-else-if="entry.item.status === 'running'" class="theme-muted-text h-3.5 w-3.5 shrink-0" aria-label="本轮已结束，未收到工具完成状态" />
-              </div>
-              <div v-if="entry.item.detail?.command || entry.item.detail?.type" class="theme-muted-text mt-0.5 truncate font-mono text-[10px]">{{ entry.item.detail?.command || entry.item.detail?.type }}</div>
-              <div v-if="toolLinks(entry).length" class="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1">
-                <button v-for="link in toolLinks(entry)" :key="`${link.intent}:${link.path}`" type="button" class="workspace-path-link inline-flex h-auto min-h-0 min-w-0 items-center justify-start gap-1 border-0 p-0 text-left font-mono text-[10px]" :title="link.path" @click="emit('open-workspace-path', link)">
-                  <FileDiff v-if="link.intent === 'diff'" class="h-3 w-3 shrink-0" />
-                  <FileText v-else class="h-3 w-3 shrink-0" />
-                  <span class="truncate">{{ link.path }}<template v-if="link.line">:{{ link.line }}</template></span>
-                </button>
-              </div>
-              <div v-if="entry.item.error?.message" class="theme-danger-text mt-1 [overflow-wrap:anywhere]">{{ entry.item.error.message }}</div>
-            </div>
-          </div>
+          <TimelineToolCall v-else-if="entry.item.type === 'tool_call'" :entry="entry" :task-id="taskId" :workspace-cwd="workspaceCwd" :running="running" :active-turn-id="activeTurnId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
           <div v-else-if="entry.item.type === 'todo'" class="space-y-1">
             <div v-for="(item, index) in entry.item.items" :key="`${index}-${item.text}`" class="theme-secondary-text flex items-start gap-2">
               <Check v-if="item.status === 'completed'" class="mt-0.5 h-3.5 w-3.5 shrink-0" />

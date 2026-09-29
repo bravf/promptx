@@ -1,3 +1,4 @@
+import { waitForSocketCapacity } from './socketBackpressure.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
@@ -502,6 +503,7 @@ export class RelayService {
           : response.body
         for await (const chunk of responseBody) {
           for (const part of splitBytes(chunk)) {
+            await waitForSocketCapacity(channel.socket, controller.signal)
             this.sendEncrypted(channel, {
               type: 'response.body',
               requestId: request.requestId,

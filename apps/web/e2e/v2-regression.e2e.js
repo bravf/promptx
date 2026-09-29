@@ -299,12 +299,12 @@ test('V2 全面桌面交互回归', async (t) => {
   await processToggle.click()
   await page.getByText('先分析代码结构').waitFor()
   await page.getByText('读取文件', { exact: true }).waitFor()
-  await page.locator('.workspace-path-link[title="src/main.js"]').last().click()
+  await page.locator('.workspace-path-link[title="查看当前 Diff：src/main.js"]').last().click()
   await page.getByText('没有可显示的文本 Diff', { exact: true }).waitFor()
   assert.equal(await page.getByLabel('正在加载 Diff').filter({ visible: true }).count(), 0)
   await page.getByRole('button', { name: '关闭标签 Diff · 主回归会话', exact: true }).click()
   await page.locator('.workspace-inspector').waitFor({ state: 'detached' })
-  await page.locator('.workspace-path-link[title="README.md"]').click()
+  await page.locator('.workspace-path-link[title="查看当前 Diff：README.md"]').click()
   await page.getByText('+工作区修改', { exact: true }).waitFor()
   assert.equal(await page.getByText('只能访问工作区内的相对路径。', { exact: true }).count(), 0)
   await page.getByRole('button', { name: '关闭标签 Diff · 主回归会话', exact: true }).click()
@@ -1208,6 +1208,7 @@ test('子任务在发起轮次内展示结果，主回复结束仍等待子任�
   const turn = repository.listTurns(fixture.task.id)[0]
   repository.upsertProviderTask(agent.id, { id: 'review', originTurnId: turn.id, kind: 'local_agent', title: '检查接口边界', status: 'completed', summary: '### 子 Agent 最终结果\n\n发现 **两处边界问题**，建议增加参数校验。' })
   repository.upsertProviderTask(agent.id, { id: 'database', originTurnId: turn.id, kind: 'local_agent', title: '检查数据库访问', status: 'running', summary: '正在检查事务与连接释放。' })
+  repository.upsertProviderTask(agent.id, { id: 'child-command', parentTaskId: 'review', originTurnId: null, kind: 'local_bash', title: '子 Agent 内部验证命令', status: 'completed', summary: '内部命令验证完成' })
   for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
     const page = await fixture.browser.newPage({ viewport })
     const failures = collectPageFailures(page)
@@ -1219,6 +1220,10 @@ test('子任务在发起轮次内展示结果，主回复结束仍等待子任�
     await page.getByLabel('等待子任务 · 1', { exact: true }).waitFor()
     await group.getByText('检查接口边界', { exact: true }).click()
     await group.getByText('子 Agent 最终结果', { exact: true }).waitFor()
+    const childCommand = group.locator('[data-task-id="review"] [data-task-id="child-command"]')
+    await childCommand.getByText('子 Agent 内部验证命令', { exact: true }).click()
+    await childCommand.getByText('内部命令验证完成', { exact: true }).waitFor()
+    assert.equal(await group.locator(':scope > div > .background-task').count(), 2)
     assert.equal(await page.locator('.timeline-subagents').count(), 1)
     await assertNoHorizontalOverflow(page)
     await saveScreenshot(page, `subagents-${viewport.width}.png`)
@@ -1504,13 +1509,13 @@ test('结束轮次的遗留工具不转圈，当前工具运行时转圈，取�
   await page.getByText('回归基线已经准备完成。').waitFor()
   const turns = page.locator('.timeline-turn')
   await turns.first().locator('.process-toggle').click()
-  const oldTool = page.locator('.process-entry').filter({ hasText: '旧图片工具' })
+  const oldTool = page.locator('.process-entry').filter({ has: page.getByRole('button', { name: /读取文件/ }).and(page.locator('[title="旧图片工具"]')) })
   await oldTool.waitFor()
   assert.equal(await oldTool.locator('.animate-spin').count(), 0)
   await oldTool.getByLabel('本轮已结束，未收到工具完成状态').waitFor()
   await page.getByPlaceholder('向 Agent 发送消息').fill('保持运行，检查工具状态')
   await page.getByRole('button', { name: '发送', exact: true }).click()
-  const currentTool = page.locator('.process-entry').filter({ hasText: '当前图片工具' })
+  const currentTool = page.locator('.process-entry').filter({ has: page.getByRole('button', { name: /读取文件/ }).and(page.locator('[title="当前图片工具"]')) })
   await currentTool.locator('.animate-spin').waitFor()
   assert.equal(await oldTool.locator('.animate-spin').count(), 0)
   await page.getByRole('button', { name: '停止', exact: true }).click()
@@ -1615,6 +1620,290 @@ test('文件标签播放 WAV、M4A、MP4，并兼容旧文件类型返回', asyn
       assert.equal(await inspector.getByText('文件过大，暂不支持预览', { exact: true }).count(), 0)
       await assertNoHorizontalOverflow(page)
     }
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
+})
+
+test('本地默认展开历史与实时工具，保留手动收起和任务结束时的查看状态', { timeout: 60000 }, async t => {
+  const fixture = await createFixture(t)
+  const page = await fixture.browser.newPage({ viewport: { width: 1440, height: 1000 } })
+  const failures = collectPageFailures(page)
+  const requests = []
+  page.on('request', request => { if (request.url().includes('/tool-calls/detail')) requests.push(request.url()) })
+  await page.goto(fixture.baseUrl)
+  await page.getByText('回归基线已经准备完成。').waitFor()
+  await page.locator('.timeline-turn').first().locator('.process-toggle').click()
+  assert.equal(await page.locator('.tool-details').count(), 0)
+  assert.equal(requests.length, 0)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '执行过程', exact: true }).click()
+  const preference = page.getByRole('checkbox', { name: '自动展开工具详情', exact: true })
+  assert.equal(await preference.isChecked(), false)
+  await preference.check()
+  await page.getByRole('tab', { name: '主回归会话', exact: true }).click()
+  const history = page.locator('.timeline-turn').first()
+  await history.locator('.tool-details').first().waitFor()
+  assert.deepEqual(await history.locator('.tool-toggle').evaluateAll(elements => elements.map(el => el.getAttribute('aria-expanded'))), ['true', 'true'])
+  await history.locator('.tool-details').first().getByText('读取文件', { exact: true }).waitFor()
+  let liveRuntime
+  const toolEvent = (id, status = 'running', output = '自动展开输出') => ({ type: 'tool_call', callId: id, name: id, status, detail: { type: 'commandExecution', command: `echo ${id}`, aggregatedOutput: output } })
+  fixture.runtimeRecords.onTurn = (_, runtime) => {
+    liveRuntime = runtime
+    runtime.emit('timeline', toolEvent('auto-first'))
+    runtime.emit('timeline', toolEvent('auto-second'))
+  }
+  await page.getByPlaceholder('向 Agent 发送消息').fill('保持运行，验证自动展开')
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  const process = page.locator('.timeline-turn').last()
+  const first = process.locator('.timeline-tool').filter({ has: page.locator('.tool-toggle[title="auto-first"]') })
+  const second = process.locator('.timeline-tool').filter({ has: page.locator('.tool-toggle[title="auto-second"]') })
+  await first.getByText('自动展开输出', { exact: true }).waitFor()
+  await second.getByText('自动展开输出', { exact: true }).waitFor()
+  await first.locator('.tool-toggle').click()
+  liveRuntime.emit('timeline', toolEvent('auto-first', 'completed', '手动收起后更新'))
+  liveRuntime.emit('timeline', toolEvent('auto-second', 'completed', '自动展开输出\n完成后继续查看'))
+  liveRuntime.emit('turnCompleted', { usage: { inputTokens: 10, outputTokens: 5 } })
+  await page.getByRole('button', { name: '发送', exact: true }).waitFor()
+  await second.locator('.tool-output').filter({ hasText: '完成后继续查看' }).waitFor()
+  assert.equal(await first.locator('.tool-toggle').getAttribute('aria-expanded'), 'false')
+  assert.equal(await process.locator('.process-toggle').getAttribute('aria-expanded'), 'true')
+  await process.locator('.process-toggle').click()
+  await process.locator('.process-toggle').click()
+  assert.equal(await first.locator('.tool-toggle').getAttribute('aria-expanded'), 'false')
+  await second.locator('.tool-output').filter({ hasText: '完成后继续查看' }).waitFor()
+  const beforeReload = requests.length
+  await page.reload()
+  await page.getByText('回归基线已经准备完成。').waitFor()
+  assert.equal(await page.locator('.tool-details').count(), 0)
+  assert.equal(requests.length, beforeReload)
+  await page.locator('.timeline-turn').last().locator('.process-toggle').click()
+  await first.locator('.tool-output').filter({ hasText: '手动收起后更新' }).waitFor()
+  await second.locator('.tool-output').filter({ hasText: '完成后继续查看' }).waitFor()
+  assert.equal(await first.locator('.tool-toggle').getAttribute('aria-expanded'), 'true')
+  assert.ok(requests.length > beforeReload)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '执行过程', exact: true }).click()
+  assert.equal(await preference.isChecked(), true)
+  await assertNoHorizontalOverflow(page)
+  assert.deepEqual(failures, [])
+})
+
+test('自动展开异步增高持续跟随，桌面上滚与手机触摸暂停，手动展开保留位置', { timeout: 90000 }, async t => {
+  for (const mobile of [false, true]) {
+    const fixture = await createFixture(t)
+    const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1440, height: 844 }, isMobile: mobile, hasTouch: mobile })
+    const failures = collectPageFailures(page)
+    await page.addInitScript(() => localStorage.setItem('promptx:tools:auto-expand', 'true'))
+    let runtime, releaseDetail, detailStarted
+    const heldDetail = new Promise(resolve => { releaseDetail = resolve })
+    const detailRequest = new Promise(resolve => { detailStarted = resolve })
+    t.after(() => releaseDetail())
+    await page.route('**/tool-calls/detail?*', async route => {
+      const response = await route.fetch()
+      detailStarted()
+      await heldDetail
+      await route.fulfill({ response })
+    })
+    fixture.runtimeRecords.onTurn = (_, current) => {
+      runtime = current
+      current.emit('timeline', { type: 'tool_call', callId: 'scroll-tool', name: '滚动测试命令', status: 'running', detail: { type: 'commandExecution', command: 'echo scroll-test', aggregatedOutput: '逐步加载的日志内容\n'.repeat(90) } })
+    }
+    await page.goto(fixture.baseUrl)
+    if (mobile) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    await page.getByText('回归基线已经准备完成。').waitFor()
+    await page.getByPlaceholder('向 Agent 发送消息').fill('保持运行，测试自动展开滚动')
+    await page.getByRole('button', { name: '发送', exact: true }).click()
+    await detailRequest
+    const timeline = page.locator('.timeline:visible')
+    const waitAtBottom = () => page.waitForFunction(() => {
+      const el = [...document.querySelectorAll('.timeline')].find(el => el.clientHeight > 0)
+      return el && el.scrollHeight - el.clientHeight - el.scrollTop <= 2
+    }, null, { timeout: 5000 }).catch(async error => {
+      error.message += JSON.stringify(await page.evaluate(() => ({ top: document.querySelector('.timeline')?.scrollTop, height: document.querySelector('.timeline')?.scrollHeight, jump: document.querySelector('.timeline-jump-button')?.textContent })))
+      throw error
+    })
+    await waitAtBottom()
+    releaseDetail()
+    const tool = page.locator('.timeline-tool').filter({ has: page.locator('.tool-toggle[title="滚动测试命令"]') })
+    await tool.getByRole('button', { name: '展开更多已加载内容', exact: true }).waitFor()
+    await waitAtBottom()
+    // 模拟图片、字体等未发送 rendered 事件的延迟排版，验证 ResizeObserver 兜底。
+    await tool.locator('.tool-details').evaluate(el => {
+      const late = document.createElement('div')
+      late.className = 'late-layout'
+      late.style.height = '480px'
+      el.append(late)
+    })
+    await waitAtBottom()
+    assert.equal(await page.locator('.timeline-jump-button').count(), 0)
+    await tool.locator('.late-layout').evaluate(el => el.remove())
+    await waitAtBottom()
+    const beforeUp = await timeline.evaluate(el => el.scrollTop)
+    const bounds = await timeline.boundingBox()
+    if (mobile) {
+      const cdp = await page.context().newCDPSession(page)
+      await cdp.send('Input.synthesizeScrollGesture', { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 3), yDistance: 250, speed: 600, gestureSourceType: 'touch' })
+      await cdp.detach()
+    } else {
+      await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+      await page.mouse.wheel(0, -250)
+    }
+    await page.getByRole('button', { name: '正在生成，回到底部', exact: true }).waitFor()
+    await page.waitForFunction(top => document.querySelector('.timeline').scrollTop < top - 50, beforeUp)
+    // 固定阅读点，后续更新不可把阅读点拖回底部。
+    await timeline.evaluate(el => { el.scrollTop = 180; el.dispatchEvent(new Event('scroll')) })
+    const readingTop = await timeline.evaluate(el => el.scrollTop)
+    runtime.emit('timeline', { type: 'assistant_message', phase: 'commentary', text: '阅读期间的新进度\n'.repeat(40) })
+    await page.getByText('阅读期间的新进度', { exact: false }).first().waitFor()
+    assert.ok(Math.abs(await timeline.evaluate(el => el.scrollTop) - readingTop) < 3)
+    await page.getByRole('button', { name: '正在生成，回到底部', exact: true }).click()
+    await waitAtBottom()
+    runtime.emit('timeline', { type: 'assistant_message', phase: 'commentary', text: '恢复跟随后追加内容\n'.repeat(20) })
+    await page.getByText('恢复跟随后追加内容', { exact: false }).first().waitFor()
+    await waitAtBottom()
+    // 浏览器键盘及滚动条方向判断：上滚暂停，手动滚到底恢复。
+    await timeline.focus()
+    const beforePageUp = await timeline.evaluate(el => el.scrollTop)
+    await page.keyboard.press('PageUp')
+    await page.getByRole('button', { name: '正在生成，回到底部', exact: true }).waitFor()
+    await page.waitForFunction(top => document.querySelector('.timeline').scrollTop < top - 50, beforePageUp)
+    await page.keyboard.press('ControlOrMeta+End')
+    await waitAtBottom()
+    await page.locator('.timeline-jump-button').waitFor({ state: 'detached' })
+    // 模拟滚动条拖动，未通过滚轮或触摸事件也能恢复跟随。
+    await timeline.evaluate(el => { el.scrollTop -= 200; el.dispatchEvent(new Event('scroll')) })
+    await page.getByRole('button', { name: '正在生成，回到底部', exact: true }).waitFor()
+    await timeline.evaluate(el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')) })
+    await waitAtBottom()
+    await page.locator('.timeline-jump-button').waitFor({ state: 'detached' })
+    runtime.emit('turnCompleted', { usage: { inputTokens: 1, outputTokens: 1 } })
+    await page.getByRole('button', { name: '发送', exact: true }).waitFor()
+    await waitAtBottom()
+    // 返回工具按钮所在位置，点击只扩大本地正文，不强制跳到最新消息。
+    const more = tool.getByRole('button', { name: '展开更多已加载内容', exact: true })
+    await more.scrollIntoViewIfNeeded()
+    const beforeMore = await timeline.evaluate(el => el.scrollTop)
+    const beforeText = await tool.locator('.tool-output').last().textContent()
+    await more.click()
+    await page.waitForFunction(length => [...document.querySelectorAll('.tool-output')].at(-1)?.textContent.length > length, beforeText.length)
+    assert.ok(Math.abs(await timeline.evaluate(el => el.scrollTop) - beforeMore) < 3)
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
+})
+
+test('工具详情在桌面和手机原地展开，Relay 按需分页并缓存完成结果', { timeout: 90000 }, async t => {
+  const fixture = await createFixture(t)
+  const repository = fixture.app.sqliteRepository
+  const turn = repository.createTurn(fixture.task.id, 'tool-details')
+  repository.updateTurn(turn.id, { status: 'completed' })
+  repository.appendTimeline(fixture.task.id, turn.id, { type: 'user_message', clientMessageId: 'tool-details', content: [{ type: 'text', text: '测试工具详情' }] })
+  repository.appendTimeline(fixture.task.id, turn.id, { type: 'tool_call', callId: 'large-bash', name: 'Bash', status: 'completed', detail: { type: 'claude_tool', input: { command: 'echo detail-demo', description: '详情演示' }, output: '日志内容😀\n'.repeat(50000) } })
+  const examples = [
+    { callId: 'native-diff', name: 'Codex 修改', detail: { type: 'fileChange', changes: [{ path: 'demo.js', diff: '@@ -1,1 +1,1 @@\n-const value = 1\n+const value = 2' }] } },
+    { callId: 'edit-diff', name: 'Edit', detail: { type: 'claude_tool', input: { file_path: '/tmp/demo.js', old_string: 'const value = 1', new_string: 'const value = 3' } } },
+    { callId: 'read-code', name: 'Read', detail: { type: 'claude_tool', input: { file_path: '/tmp/demo.js' }, output: 'const value = "hello"' } },
+    { callId: 'ansi-shell', name: '终端命令', detail: { type: 'commandExecution', command: 'echo status', cwd: '/tmp', aggregatedOutput: '\u001b[32m完成\u001b[0m', exitCode: 0, durationMs: 1234 } },
+  ]
+  for (const example of examples) repository.appendTimeline(fixture.task.id, turn.id, { type: 'tool_call', status: 'completed', ...example })
+  repository.appendTimeline(fixture.task.id, turn.id, { type: 'assistant_message', phase: 'final_answer', text: '详情测试就绪' })
+  const relay = await startRelayServer({ logger: false, webDistDir: webRoot, config: { host: '127.0.0.1', port: 0 } })
+  const service = new RelayService({ localBaseUrl: fixture.baseUrl, logger: false, configPath: path.join(fixture.root, 'detail-relay.json'), identityPath: path.join(fixture.root, 'detail-identity.json') })
+  t.after(async () => { service.stop(); await relay.close() })
+  service.updateConfig({ enabled: true, relayUrl: `ws://127.0.0.1:${relay.port}/relay/ws`, appUrl: `http://127.0.0.1:${relay.port}` })
+  const requests = []
+  const forward = service.forward.bind(service)
+  service.forward = (channel, request) => {
+    if (request.path.includes('/tool-calls/detail')) requests.push(request.path)
+    return forward(channel, request)
+  }
+  for (const remote of [false, true]) {
+    const page = await fixture.browser.newPage({ viewport: remote ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: remote })
+    const failures = collectPageFailures(page)
+    const localRequests = []
+    // 即使浏览器曾开启本地自动展开，Relay 仍保持按需读取。
+    if (remote) await page.addInitScript(() => localStorage.setItem('promptx:tools:auto-expand', 'true'))
+    page.on('request', request => { if (request.url().includes('/tool-calls/detail')) localRequests.push(request.url()) })
+    if (remote) {
+      for (let attempts = 0; !service.getStatus().connected && attempts < 100; attempts++) await new Promise(resolve => setTimeout(resolve, 20))
+      assert.equal(service.getStatus().connected, true)
+    }
+    await page.goto(remote ? service.getOffer().url : fixture.baseUrl)
+    await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    const process = page.locator('.timeline-turn').filter({ hasText: '测试工具详情' })
+    await process.locator('.process-toggle').click()
+    const tool = process.locator('.timeline-tool').filter({ hasText: '详情演示' })
+    await tool.waitFor()
+    assert.equal(remote ? requests.length : localRequests.length, 0)
+    await tool.locator('.tool-toggle').click()
+    await tool.getByText('echo detail-demo', { exact: true }).waitFor()
+    await tool.getByRole('button', { name: '加载更多', exact: true }).waitFor()
+    assert.equal(await page.getByRole('dialog').count(), 0)
+    const initialLength = await tool.locator('.tool-output').last().textContent().then(text => text.length)
+    const beforeExpand = remote ? requests.length : localRequests.length
+    await tool.getByRole('button', { name: '展开更多已加载内容', exact: true }).click()
+    await page.waitForFunction(length => [...document.querySelectorAll('.tool-output')].at(-1)?.textContent.length > length, initialLength)
+    assert.equal(remote ? requests.length : localRequests.length, beforeExpand)
+    assert.equal(await tool.locator('.tool-output').last().evaluate(el => getComputedStyle(el).whiteSpace), 'pre-wrap')
+    assert.equal(await tool.locator('.tool-output').last().evaluate(el => el.scrollHeight <= el.clientHeight + 1), true)
+    await tool.getByRole('button', { name: '加载更多', exact: true }).click()
+    await page.waitForFunction(() => ![...document.querySelectorAll('.tool-details')].some(element => element.textContent.includes('加载中')))
+    assert.ok((remote ? requests.length : localRequests.length) > beforeExpand)
+    const before = remote ? requests.length : localRequests.length
+    await tool.locator('.tool-toggle').click()
+    await tool.locator('.tool-toggle').click()
+    await tool.getByText('echo detail-demo', { exact: true }).waitFor()
+    assert.equal(remote ? requests.length : localRequests.length, before)
+    await process.locator('.process-toggle').click()
+    await process.locator('.process-toggle').click()
+    await tool.getByText('echo detail-demo', { exact: true }).waitFor()
+    assert.equal(remote ? requests.length : localRequests.length, before)
+    assert.equal(await tool.getByRole('button', { name: '重新加载', exact: true }).count(), 0)
+    await tool.locator('pre span[style]').first().waitFor()
+    for (const title of ['Codex 修改', 'Edit']) {
+      const row = process.locator('.timeline-tool').filter({ has: page.locator(`.tool-toggle[title="${title}"]`) })
+      await row.locator('.tool-toggle').click()
+      await row.locator('.tool-diff-add').waitFor()
+      await row.locator('.tool-diff-delete').waitFor()
+      assert.equal(await row.getByText('记录未提供执行结果', { exact: true }).count(), 0)
+      assert.equal(await row.getByText('输入参数', { exact: true }).count(), 0)
+      assert.notEqual(await row.locator('.tool-diff-add').evaluate(el => getComputedStyle(el).backgroundColor), await row.locator('.tool-diff-delete').evaluate(el => getComputedStyle(el).backgroundColor))
+      await row.locator('mark').first().waitFor()
+      assert.equal(await row.locator('.tool-output').evaluate(el => getComputedStyle(el).whiteSpace), 'pre')
+      await row.getByRole('button', { name: '自动换行', exact: true }).click()
+      assert.equal(await row.locator('.tool-output').evaluate(el => getComputedStyle(el).whiteSpace), 'pre-wrap')
+    }
+    const read = process.locator('.timeline-tool').filter({ has: page.locator('.tool-toggle[title="Read"]') })
+    await read.locator('.tool-toggle').click()
+    await read.locator('pre span[style]').first().waitFor()
+    const shell = process.locator('.timeline-tool').filter({ has: page.locator('.tool-toggle[title="终端命令"]') })
+    await shell.locator('.tool-toggle').click()
+    await shell.locator('pre span[style*="successText"]').waitFor()
+    await shell.locator('.tool-result-meta').getByText('耗时 1.2 秒', { exact: true }).waitFor()
+    await shell.locator('.tool-directory').getByText('/tmp', { exact: true }).waitFor()
+    if (!remote) {
+      await page.evaluate(() => localStorage.setItem('promptx:theme-id', 'promptx-stone-dark'))
+      await page.reload()
+      await process.locator('.process-toggle').click()
+      const diff = process.locator('.timeline-tool').filter({ has: page.locator('.tool-toggle[title="Codex 修改"]') })
+      await diff.locator('.tool-toggle').click()
+      await diff.locator('.tool-diff-add').waitFor()
+      assert.equal(await page.locator('html').getAttribute('data-theme'), 'promptx-stone-dark')
+    } else {
+      fixture.runtimeRecords.onTurn = (_, runtime) => {
+        runtime.emit('timeline', { type: 'tool_call', callId: 'relay-live', name: 'Relay 实时命令', status: 'completed', detail: { type: 'commandExecution', command: 'echo relay', aggregatedOutput: 'relay' } })
+      }
+      const beforeLive = requests.length
+      await page.getByPlaceholder('向 Agent 发送消息').fill('保持运行，验证 Relay 不自动展开')
+      await page.getByRole('button', { name: '发送', exact: true }).click()
+      const live = page.locator('.tool-toggle[title="Relay 实时命令"]')
+      await live.waitFor()
+      assert.equal(await live.getAttribute('aria-expanded'), 'false')
+      assert.equal(requests.length, beforeLive)
+      await page.getByRole('button', { name: '停止', exact: true }).click()
+    }
+    await assertNoHorizontalOverflow(page)
     assert.deepEqual(failures, [])
     await page.close()
   }

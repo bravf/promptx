@@ -110,6 +110,7 @@ export class ClaudeRuntime extends EventEmitter {
     this.activeRunId = null
     this.backgroundTasks = new BackgroundTasks(this)
     this.toolCalls = new Map()
+    this.toolParents = new Map()
     this.controlState = createControlState({ requestedModelId: modelId, requestedReasoningEffort: this.reasoningEffort })
   }
 
@@ -219,6 +220,7 @@ export class ClaudeRuntime extends EventEmitter {
         }
         if (this.runningQuery !== stream || this.closing) return
         if (isClaudeNoResponsePlaceholder(message)) continue
+        this.consumeToolOwnership(message)
         if (message.type === 'system') this.consumeTask(message)
         if (message.type === 'user' && !message.parent_tool_use_id && Array.isArray(message.message?.content)) {
           for (const block of message.message.content) {
@@ -263,10 +265,23 @@ export class ClaudeRuntime extends EventEmitter {
     }
   }
 
+  consumeToolOwnership(message) {
+    const calls = message.type === 'assistant'
+      ? (message.message?.content || []).filter(block => block.type === 'tool_use').map(block => block.id)
+      : message.type === 'tool_progress' ? [message.tool_use_id] : []
+    for (const callId of calls) {
+      const parentCallId = message.parent_tool_use_id || null
+      this.toolParents.set(callId, parentCallId)
+      for (const task of this.backgroundTasks.tasks.values()) {
+        if (task.callId === callId && task.parentCallId !== parentCallId) this.backgroundTasks.update({ id: task.id, parentCallId })
+      }
+    }
+  }
+
   consumeTask(message) {
     const id = message.task_id
     if (message.subtype === 'task_started') {
-      this.backgroundTasks.update({ id, callId: message.tool_use_id, title: message.description || '后台任务', kind: message.task_type || 'task', status: 'running', background: Boolean(message.is_backgrounded), ambient: Boolean(message.ambient || message.skip_transcript), depth: message.spawn_depth || 1 })
+      this.backgroundTasks.update({ id, callId: message.tool_use_id, ...(this.toolParents.has(message.tool_use_id) ? { parentCallId: this.toolParents.get(message.tool_use_id) } : {}), title: message.description || '后台任务', kind: message.task_type || 'task', status: 'running', background: Boolean(message.is_backgrounded), ambient: Boolean(message.ambient || message.skip_transcript), depth: message.spawn_depth || 1 })
     } else if (id && this.backgroundTasks.tasks.has(id)) {
       if (message.subtype === 'task_notification') this.backgroundTasks.update({ id, status: taskStatus(message.status), summary: message.summary || '', usage: message.usage })
       if (message.subtype === 'task_updated') {

@@ -245,19 +245,29 @@ export function mapClaudeHistorySnapshot(sessionId, content, revision = '') {
   }
 }
 
-function readClaudeBackgroundTasks(file) {
+export function readClaudeBackgroundTasks(file) {
   const directory = file.slice(0, -'.jsonl'.length) + '/subagents'
-  if (!fs.existsSync(directory)) return []
-  return fs.readdirSync(directory).filter(name => /^agent-[a-zA-Z0-9_-]+\.meta\.json$/.test(name)).flatMap(name => {
+  const backgroundToolOwners = []
+  if (!fs.existsSync(directory)) return { backgroundTasks: [], backgroundToolOwners }
+  const backgroundTasks = fs.readdirSync(directory).filter(name => /^agent-[a-zA-Z0-9_-]+\.meta\.json$/.test(name)).flatMap(name => {
     try {
       const meta = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'))
-      if (meta.spawnDepth !== 1 || !meta.toolUseId) return []
+      if (!meta.toolUseId) return []
       const records = parseLines(readStableHistoryFile(path.join(directory, name.replace('.meta.json', '.jsonl'))).content || '')
+      const id = name.slice(6, -10)
+      for (const entry of records) {
+        if (entry.type !== 'assistant' || !Array.isArray(entry.message?.content)) continue
+        for (const block of entry.message.content) if (block.type === 'tool_use' && block.id) backgroundToolOwners.push({ callId: block.id, parentTaskId: id, parentCallId: meta.toolUseId })
+      }
       const last = records.filter(entry => entry.type === 'assistant').at(-1)
       const finished = last?.message?.stop_reason === 'end_turn'
       return [{ id: name.slice(6, -10), callId: meta.toolUseId, title: meta.description || 'Claude 子 Agent', kind: 'local_agent', status: finished ? 'completed' : 'interrupted', summary: textContent(last?.message?.content), background: meta.requestShape === 'background', historyOnly: true }]
     } catch { return [] }
   })
+  // 嵌套 Agent 同样使用其发起调用恢复父子关系。
+  const owners = new Map(backgroundToolOwners.map(owner => [owner.callId, owner]))
+  for (const task of backgroundTasks) Object.assign(task, owners.get(task.callId) || {})
+  return { backgroundTasks, backgroundToolOwners }
 }
 
 export function readClaudeHistorySnapshot({ cwd, sessionId, knownRevision = '', cursor = 0 }) {
@@ -265,7 +275,7 @@ export function readClaudeHistorySnapshot({ cwd, sessionId, knownRevision = '', 
   const file = resolveHistoryPath(cwd, sessionId)
   if (!file) return { status: 'unavailable' }
   const result = readStableHistoryFileRange(file, { knownRevision, cursor })
-  if (result.status !== 'ready') return result.status === 'unchanged' ? { ...result, sourceId: sessionId, backgroundTasks: readClaudeBackgroundTasks(file) } : result
+  if (result.status !== 'ready') return result.status === 'unchanged' ? { ...result, sourceId: sessionId, ...readClaudeBackgroundTasks(file) } : result
   const records = parseJsonLinesWithOffsets(result.content, result.baseOffset)
   const snapshot = mapClaudeHistorySnapshot(sessionId, result.content, result.revision)
   let safeCursor = result.content.endsWith('\n')
@@ -277,7 +287,7 @@ export function readClaudeHistorySnapshot({ cwd, sessionId, knownRevision = '', 
   }
   return {
     ...snapshot,
-    backgroundTasks: readClaudeBackgroundTasks(file),
+    ...readClaudeBackgroundTasks(file),
     completeness: result.baseOffset > 0 && !result.reset ? 'incremental' : 'full',
     cursor: safeCursor,
   }

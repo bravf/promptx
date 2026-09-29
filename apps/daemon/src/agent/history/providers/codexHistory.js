@@ -1,3 +1,4 @@
+import { codexToolStatus } from '../../../../../../packages/protocol/src/toolDetails.js'
 import { parseJsonLinesWithOffsets, readStableHistoryFileRange, toIsoTimestamp } from '../historySnapshot.js'
 
 function threadRevision(thread) {
@@ -14,12 +15,6 @@ function textParts(parts = []) {
 function normalizedItemType(value) {
   if (typeof value !== 'string' || !value) return ''
   return value[0].toLowerCase() + value.slice(1)
-}
-
-function toolStatus(value) {
-  if (['completed', 'failed', 'canceled'].includes(value)) return value
-  if (value === 'declined') return 'canceled'
-  return 'running'
 }
 
 function userContent(content = []) {
@@ -84,7 +79,7 @@ export function mapCodexHistoryItem(item, { completed = false } = {}) {
       type: 'tool_call',
       callId: item.id,
       name: names[type],
-      status: toolStatus(item.status || (completed ? 'completed' : undefined)),
+      status: codexToolStatus(item, completed ? 'completed' : 'running'),
       detail: { type, ...item },
       ...(item.error?.message ? { error: { message: item.error.message } } : {}),
     },
@@ -271,8 +266,15 @@ export function mapCodexRolloutSnapshot(thread, content, revision = '') {
           type: 'mcpToolCall',
           tool: payload.name || '工具调用',
           status: 'running',
-          arguments: payload.arguments,
+          arguments: payload.arguments ?? payload.input,
         }, timestamp)
+      } else if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
+        const callId = payload.call_id || payload.id
+        const target = turn.items.find(entry => entry.item?.callId === callId)
+        if (target) {
+          target.item.detail.result = payload.output
+          target.item.status = payload.is_error ? 'failed' : 'completed'
+        }
       }
     }
   }

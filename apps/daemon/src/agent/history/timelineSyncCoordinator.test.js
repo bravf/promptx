@@ -356,3 +356,24 @@ test('历史补齐子任务轮次归属，空结果不覆盖已有摘要，实�
   assert.equal(saved[1].originTurnId, 'local-grok')
   assert.equal(saved[1].status, 'running')
 })
+
+test('历史原生父子关系纠正未归属和错误归属的命令，保留实时状态和摘要', () => {
+  const saved = [
+    { id: 'agent-child', callId: 'spawn', originTurnId: 'request', status: 'completed' },
+    { id: 'shell-1', callId: 'bash-1', originTurnId: null, status: 'completed', summary: '完整输出' },
+    { id: 'shell-2', callId: 'bash-2', originTurnId: 'wrong-request', status: 'running' },
+  ]
+  const coordinator = new TimelineSyncCoordinator({ repository: {
+    getAgent: () => ({ backgroundTasks: saved }), listTurns: () => [],
+    listTimelineRows: () => [{ turnId: 'request', item: { type: 'tool_call', callId: 'spawn' } }],
+    upsertProviderTask: (_, task) => Object.assign(saved.find(item => item.id === task.id), task),
+  }, eventHub: { publish() {} } })
+  coordinator.mergeBackgroundTasks({ id: 'agent', taskId: 'task' }, { backgroundTasks: { tasks: new Map([['shell-2', {}]]) } }, [], [
+    { callId: 'bash-1', parentTaskId: 'agent-child', parentCallId: 'spawn' },
+    { callId: 'bash-2', parentTaskId: 'agent-child', parentCallId: 'spawn' },
+  ])
+  assert.deepEqual(saved.slice(1).map(item => item.originTurnId), ['request', 'request'])
+  assert.equal(saved[1].summary, '完整输出')
+  assert.equal(saved[2].status, 'running')
+  assert.equal(saved[2].parentTaskId, 'agent-child')
+})

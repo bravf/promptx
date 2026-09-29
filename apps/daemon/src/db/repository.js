@@ -300,6 +300,8 @@ export function createRepository(db) {
         WHERE id = ? AND task_id = ? AND history_state != 'confirmed'`).run(nowIso(), turnId, taskId)
     }
 
+    // 原地纠正历史行也必须换 epoch，使工具详情和已展示的旧版本同时失效。
+    if (updatedRows > 0 && input.mode !== 'rebuild') epoch = randomUUID()
     const syncedAt = nowIso()
     db.prepare(`INSERT INTO agent_timeline_sync_state
       (task_id, provider_id, source_id, manifest_json, synced_at)
@@ -593,6 +595,16 @@ export function createRepository(db) {
         ? db.prepare('SELECT * FROM agent_timeline_rows WHERE task_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?').all(taskId, seq, safeLimit)
         : db.prepare('SELECT * FROM agent_timeline_rows WHERE task_id = ? ORDER BY seq DESC LIMIT ?').all(taskId, safeLimit)
       return rows.reverse().map(mapTimelineRow)
+    },
+    getToolRevision(taskId, turnId, callId) {
+      return db.prepare(`SELECT MAX(seq) AS revision FROM agent_timeline_rows
+        WHERE task_id = ? AND turn_id IS ? AND json_extract(item_json, '$.callId') = ? AND item_type = 'tool_call'`)
+        .get(taskId, turnId || null, callId)?.revision || 0
+    },
+    listToolRows(taskId, turnId, callId, after = 0) {
+      return db.prepare(`SELECT * FROM agent_timeline_rows
+        WHERE task_id = ? AND turn_id IS ? AND json_extract(item_json, '$.callId') = ? AND item_type = 'tool_call'
+        AND seq > ? ORDER BY seq`).all(taskId, turnId || null, callId, after).map(mapTimelineRow)
     },
     listTimelineRows(taskId) {
       return db.prepare('SELECT * FROM agent_timeline_rows WHERE task_id = ? ORDER BY seq').all(taskId).map(mapTimelineRow)

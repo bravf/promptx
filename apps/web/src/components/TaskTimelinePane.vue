@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { reactive, computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
 import { ArrowDown, ArrowLeft, Bot, CircleAlert, Columns2, FileDiff, Files, Info, LoaderCircle, TerminalSquare, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
@@ -31,6 +31,8 @@ const emit = defineEmits(['focus', 'back', 'split', 'close', 'agent-event', 'cha
 const parentTimelineVisible = inject('timelineVisible', ref(true))
 provide('timelineVisible', computed(() => props.visible && parentTimelineVisible.value))
 const taskDrafts = new Map()
+const toolExpansion = reactive(new Map())
+provide('toolExpansion', toolExpansion)
 
 const { isDark } = useTheme()
 const rows = ref([])
@@ -47,11 +49,14 @@ const sendBlockedReason = ref('')
 const settingsLoading = ref(false)
 const error = ref('')
 const timelineEpoch = ref('')
+provide('timelineEpoch', timelineEpoch)
 const hasOlderHistory = ref(false)
 const loadingOlderHistory = ref(false)
 const followingTimeline = ref(true)
 const hasNewTimelineItems = ref(false)
 const timelineElement = ref(null)
+const timelineContent = ref(null)
+provide('pauseTimelineFollow', pauseTimelineFollow)
 const inspectorDrawer = ref(null)
 const drawerMode = ref(null)
 const terminalOpen = ref(false)
@@ -59,9 +64,11 @@ const terminalOpen = ref(false)
 let eventSource = null
 let timelineRequestVersion = 0
 let positioningTimeline = false
-let markdownScrollFrame = null
-let timelineBottomPinTimer = null
-let timelineBottomPinVersion = 0
+let timelineScrollFrame = null
+let timelineResizeObserver = null
+let lastTimelineHeight = 0
+let lastTimelineViewportHeight = 0
+let timelineTouchY = null
 let lastTimelineScrollTop = 0
 let inspectorRefreshTimer = null
 let timelineWakeSyncAt = 0
@@ -115,7 +122,6 @@ function restoreTimelineCache(taskId) {
 
 function resetTimeline() {
   timelineRequestVersion += 1
-  releaseTimelineBottomPin()
   positioningTimeline = true
   displayedTaskId.value = ''
   agentControl.value = null
@@ -185,14 +191,11 @@ async function reconcileTerminalTaskTurns(task = props.task) {
 function applyTaskAgentEvent(agent) {
   if (!agent || agent.taskId !== activeTaskId.value) return
   const wasRunning = isRunning.value || sending.value
-  const shouldPinAfterCompletion = wasRunning && agent.lifecycle !== 'running' && followingTimeline.value
+  const shouldFollowAfterCompletion = wasRunning && agent.lifecycle !== 'running' && followingTimeline.value
   sending.value = agent.lifecycle === 'running'
   emit('agent-event', agent)
   reconcileTerminalTaskTurns({ ...props.task, ...agent, id: agent.taskId })
-  if (shouldPinAfterCompletion) {
-    pinTimelineToBottom(timelineRequestVersion)
-    scrollToBottom({ force: true })
-  }
+  if (shouldFollowAfterCompletion) scheduleTimelineFollow()
 }
 
 async function stopAllTasks() {
@@ -210,7 +213,6 @@ async function selectTask(taskId) {
     return
   }
   const requestVersion = ++timelineRequestVersion
-  releaseTimelineBottomPin()
   positioningTimeline = true
   draftContent.value = taskDrafts.get(taskId)?.map((item) => ({ ...item })) || []
   const hasCachedTimeline = restoreTimelineCache(taskId)
@@ -247,8 +249,7 @@ async function selectTask(taskId) {
     hasOlderHistory.value = result.timeline.hasOlder
     displayedTaskId.value = taskId
     cacheTimeline(taskId)
-    pinTimelineToBottom(requestVersion)
-    await scrollToBottom({ force: true })
+    await scrollToBottom()
     if (requestVersion !== timelineRequestVersion || activeTaskId.value !== taskId) return
     positioningTimeline = false
     closeEvents()
@@ -331,42 +332,70 @@ function fillTimelineViewport() {
   if (element && element.scrollHeight <= element.clientHeight) loadOlderHistory()
 }
 
-function timelineIsPinnedToBottom() {
-  return timelineBottomPinVersion > 0 && timelineBottomPinVersion === timelineRequestVersion
+// 跟随状态表达用户意图，内容变高本身不能取消跟随。
+function pauseTimelineFollow() {
+  followingTimeline.value = false
+  if (timelineScrollFrame) cancelAnimationFrame(timelineScrollFrame)
+  timelineScrollFrame = null
 }
 
-function releaseTimelineBottomPin() {
-  if (timelineBottomPinTimer) clearTimeout(timelineBottomPinTimer)
-  timelineBottomPinTimer = null
-  timelineBottomPinVersion = 0
-}
-
-function pinTimelineToBottom(requestVersion = timelineRequestVersion) {
-  releaseTimelineBottomPin()
-  timelineBottomPinVersion = requestVersion
-  timelineBottomPinTimer = setTimeout(() => {
-    if (timelineBottomPinVersion === requestVersion) releaseTimelineBottomPin()
-  }, 3000)
+function recordTimelinePosition(element) {
+  lastTimelineScrollTop = element.scrollTop
+  lastTimelineHeight = element.scrollHeight
+  lastTimelineViewportHeight = element.clientHeight
 }
 
 function handleTimelineScroll(event) {
   if (!props.visible) return
   const element = event.currentTarget
   const previousScrollTop = lastTimelineScrollTop
-  lastTimelineScrollTop = element.scrollTop
+  const stableSize = element.scrollHeight === lastTimelineHeight && element.clientHeight === lastTimelineViewportHeight
+  recordTimelinePosition(element)
   if (positioningTimeline) return
-  if (timelineIsPinnedToBottom()) {
-    if (element.scrollTop + 1 >= previousScrollTop) return
-    releaseTimelineBottomPin()
+  // 滚动条拖动及键盘滚动的兜底；忽略内容重排引发的滚动位置修正。
+  if (stableSize && element.scrollTop < previousScrollTop - 1) pauseTimelineFollow()
+  else if (stableSize && element.scrollTop > previousScrollTop + 1 && isTimelineAtBottom(element)) {
+    followingTimeline.value = true
+    hasNewTimelineItems.value = false
+    scheduleTimelineFollow()
   }
-  const atBottom = isTimelineAtBottom(element)
-  followingTimeline.value = atBottom
-  if (atBottom) hasNewTimelineItems.value = false
   if (element.scrollTop <= 64) loadOlderHistory()
+}
+
+function handleTimelineWheel(event) {
+  if (event.deltaY < 0 && Math.abs(event.deltaY) >= Math.abs(event.deltaX)) pauseTimelineFollow()
+  else if (event.deltaY > 0 && isTimelineAtBottom(event.currentTarget)) jumpToLatest()
+}
+
+function handleTimelineTouchStart(event) {
+  timelineTouchY = event.touches[0]?.clientY ?? null
+}
+
+function handleTimelineTouchMove(event) {
+  const y = event.touches[0]?.clientY
+  if (timelineTouchY !== null && y > timelineTouchY + 1) pauseTimelineFollow()
+  else if (timelineTouchY !== null && y < timelineTouchY - 1 && isTimelineAtBottom(event.currentTarget)) jumpToLatest()
+  timelineTouchY = y ?? null
+}
+
+function handleTimelineKeydown(event) {
+  if (event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return
+  if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || event.key === ' ' && event.shiftKey) {
+    pauseTimelineFollow()
+    event.preventDefault()
+    const element = event.currentTarget
+    const top = event.key === 'Home' ? 0 : element.scrollTop - (event.key === 'ArrowUp' ? 40 : element.clientHeight * 0.9)
+    element.scrollTo({ top, behavior: 'instant' })
+  }
+  else if (event.key === 'End') {
+    event.preventDefault()
+    jumpToLatest()
+  }
 }
 
 async function syncVisibleTimeline() {
   if (!props.visible || document.visibilityState !== 'visible' || !activeTaskId.value) return
+  scheduleTimelineFollow()
   const now = Date.now()
   if (now - timelineWakeSyncAt < 2_000) return
   timelineWakeSyncAt = now
@@ -426,12 +455,11 @@ function openEvents(taskId, epoch, seq) {
     if (!props.visible || activeTaskId.value !== taskId) return
     const { row } = JSON.parse(event.data)
     if (rows.value.some((item) => item.seq === row.seq)) return
-    const shouldFollow = isTimelineAtBottom(timelineElement.value)
+    const shouldFollow = followingTimeline.value
     rows.value.push(row)
     cacheTimeline(taskId)
     if (row.item?.type === 'tool_call' && ['completed', 'failed', 'canceled'].includes(row.item.status)) scheduleInspectorRefresh()
-    followingTimeline.value = shouldFollow
-    if (shouldFollow) scrollToBottom()
+    if (shouldFollow) scheduleTimelineFollow()
     else hasNewTimelineItems.value = true
   })
   eventSource.addEventListener('agent', (event) => applyTaskAgentEvent(JSON.parse(event.data).agent))
@@ -526,42 +554,57 @@ async function updateAgentSettings(input) {
   }
 }
 
-async function scrollToBottom({ force = false, behavior = 'auto' } = {}) {
+async function scrollToBottom() {
+  const requestVersion = timelineRequestVersion
   await nextTick()
-  if (!force && !followingTimeline.value) return
+  if (!followingTimeline.value || !props.visible || !parentTimelineVisible.value || document.hidden || requestVersion !== timelineRequestVersion) return
   const element = timelineElement.value
-  if (!props.visible) return
-  element?.scrollTo({ top: element.scrollHeight, behavior })
-  if (element) lastTimelineScrollTop = element.scrollTop
-  followingTimeline.value = true
+  if (!element) return
+  element.scrollTo({ top: element.scrollHeight, behavior: 'instant' })
+  recordTimelinePosition(element)
   hasNewTimelineItems.value = false
 }
 
 function jumpToLatest() {
   followingTimeline.value = true
-  scrollToBottom({ force: true, behavior: 'smooth' })
+  // 立即终止浏览器尚未结束的 PageUp/触摸惯性，避免下一帧被旧滚动取消。
+  const element = timelineElement.value
+  if (element) {
+    element.scrollTo({ top: element.scrollHeight, behavior: 'instant' })
+    recordTimelinePosition(element)
+  }
+  hasNewTimelineItems.value = false
+  scheduleTimelineFollow()
 }
 
-function handleMarkdownRendered() {
-  if ((!followingTimeline.value && !timelineIsPinnedToBottom()) || markdownScrollFrame) return
-  markdownScrollFrame = requestAnimationFrame(() => {
-    markdownScrollFrame = null
-    const force = timelineIsPinnedToBottom()
-    if (followingTimeline.value || force) scrollToBottom({ force })
+function scheduleTimelineFollow() {
+  if (!followingTimeline.value || !props.visible || !parentTimelineVisible.value || document.hidden || timelineScrollFrame) return
+  timelineScrollFrame = requestAnimationFrame(() => {
+    timelineScrollFrame = null
+    scrollToBottom()
   })
 }
+
+watch([timelineElement, timelineContent], ([element, content]) => {
+  timelineResizeObserver?.disconnect()
+  timelineResizeObserver = new ResizeObserver(scheduleTimelineFollow)
+  if (element) timelineResizeObserver.observe(element)
+  if (content) timelineResizeObserver.observe(content)
+}, { flush: 'post' })
+watch(parentTimelineVisible, visible => { if (visible) scheduleTimelineFollow() })
 
 function handleGlobalKeydown(event) {
   if (event.key === 'Escape' && props.focused && drawerMode.value) drawerMode.value = null
 }
 
 watch(activeTaskId, (taskId) => {
+  toolExpansion.clear()
   terminalOpen.value = false
   drawerMode.value = null
   if (props.visible) selectTask(taskId)
 }, { immediate: true })
 watch(() => props.visible, async (visible) => {
-  if (!visible) { closeEvents(); releaseTimelineBottomPin(); return }
+  if (!visible) { closeEvents(); return }
   if (!timelineEpoch.value) { selectTask(activeTaskId.value); return }
   await nextTick()
   if (timelineElement.value) timelineElement.value.scrollTop = lastTimelineScrollTop
@@ -582,8 +625,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
   document.removeEventListener('visibilitychange', syncVisibleTimeline)
   closeEvents()
-  if (markdownScrollFrame) cancelAnimationFrame(markdownScrollFrame)
-  releaseTimelineBottomPin()
+  if (timelineScrollFrame) cancelAnimationFrame(timelineScrollFrame)
+  timelineResizeObserver?.disconnect()
   if (inspectorRefreshTimer) clearTimeout(inspectorRefreshTimer)
 })
 </script>
@@ -614,18 +657,18 @@ onBeforeUnmount(() => {
 
     <template v-if="task">
       <div class="relative min-h-0 flex-1">
-        <div ref="timelineElement" class="timeline h-full overflow-y-auto" @scroll.passive="handleTimelineScroll">
+        <div ref="timelineElement" class="timeline h-full overflow-y-auto" tabindex="0" @scroll.passive="handleTimelineScroll" @wheel.passive="handleTimelineWheel" @touchstart.passive="handleTimelineTouchStart" @touchmove.passive="handleTimelineTouchMove" @keydown="handleTimelineKeydown">
           <div v-if="timelineSyncError && !timelineHasContent" class="flex h-full items-center justify-center p-8 text-center"><div class="max-w-sm"><p class="error-row rounded-sm border px-3 py-2 text-left text-xs">Timeline 同步失败：{{ timelineSyncError }}</p><PxButton variant="secondary" size="sm" class="mt-3" @click="selectTask(activeTaskId)">重试</PxButton></div></div>
           <div v-else-if="!entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">开始一段新的协作</p><p class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
-          <div v-else class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
+          <div v-else ref="timelineContent" class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
-              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="groupedTurnTiming(entry, turnTimings)" :running="processIsRunning(entry)" :active-turn-id="latestTurnId" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" @rendered="handleMarkdownRendered" @open-workspace-path="openProjectPath">
-                <template #subagents><TimelineSubagents :tasks="entry.turnIds.flatMap(id => backgroundGroups.get(id) || [])" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" :stopping="stoppingTasks" @stop-all="stopAllTasks" @rendered="handleMarkdownRendered" @open-workspace-path="openProjectPath" /></template>
+              <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="groupedTurnTiming(entry, turnTimings)" :running="processIsRunning(entry)" :active-turn-id="latestTurnId" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" @rendered="scheduleTimelineFollow" @open-workspace-path="openProjectPath">
+                <template #subagents><TimelineSubagents :tasks="entry.turnIds.flatMap(id => backgroundGroups.get(id) || [])" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" :stopping="stoppingTasks" @stop-all="stopAllTasks" @rendered="scheduleTimelineFollow" @open-workspace-path="openProjectPath" /></template>
               </TimelineTurn>
               <article v-else-if="entry.item?.type === 'error'" class="error-row mb-5 ml-7 rounded-sm border px-3 py-2 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.message }}</article>
               <article v-else-if="entry.item?.type === 'system_notice'" class="theme-muted-text mb-5 ml-7 text-xs" :data-timeline-seq="entry.seqEnd">{{ entry.item.text }}</article>
             </template>
-            <TimelineSubagents :tasks="backgroundGroups.get('') || []" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" :stopping="stoppingTasks" @stop-all="stopAllTasks" @rendered="handleMarkdownRendered" @open-workspace-path="openProjectPath" />
+            <TimelineSubagents :tasks="backgroundGroups.get('') || []" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" :stopping="stoppingTasks" @stop-all="stopAllTasks" @rendered="scheduleTimelineFollow" @open-workspace-path="openProjectPath" />
             <div v-if="!isRunning && activity.count" class="theme-muted-text mb-3 ml-7 flex items-center gap-2 text-xs" role="status"><LoaderCircle class="h-3.5 w-3.5 animate-spin" />等待 {{ activity.count }} 个子任务结束</div>
             <div class="timeline-generating-slot ml-7 flex h-8 items-start">
               <div class="timeline-generating-indicator flex items-center gap-1" :class="isRunning || sending ? 'is-visible' : ''" role="status" :aria-hidden="!(isRunning || sending)" :aria-label="isRunning || sending ? '正在生成' : undefined">

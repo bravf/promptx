@@ -1,3 +1,4 @@
+import { ToolDetailStore } from '../timeline/toolDetailStore.js'
 import {
   CreateProjectInputSchema,
   CreateTaskInputSchema,
@@ -100,6 +101,7 @@ async function resolveProjectInput(input) {
 export function registerRoutes(app, context) {
   const { repository, timelineStore, providerRegistry, agentManager, sessionImport, eventHub, assetsDir, corsPolicy,
     directoryPicker, taskLifecycle, environmentService, gitDelivery } = context
+  const toolDetailStore = new ToolDetailStore(repository)
   let directoryPickerOpen = false
 
   function presentEvent(event) {
@@ -315,6 +317,10 @@ export function registerRoutes(app, context) {
     const updated = repository.clearAgentAttention(agent.id)
     eventHub.publish(agent.id, { type: 'agent', agent: updated })
     return { agent: updated }
+  })
+  app.get('/api/v2/tasks/:taskId/tool-calls/detail', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store')
+    return toolDetailStore.read(request.params.taskId, request.query)
   })
   app.get('/api/v2/tasks/:taskId/timeline', async (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)

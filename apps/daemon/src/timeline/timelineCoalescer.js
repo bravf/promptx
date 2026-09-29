@@ -24,7 +24,11 @@ export class TimelineCoalescer {
     }
     const index = buffer.indexes.get(key)
     if (index !== undefined && item.type === 'tool_call') {
-      buffer.entries[index] = payload
+      const previous = buffer.entries[index]
+      const detail = { ...previous.item.detail, ...item.detail }
+      if (item.detail?.outputDelta !== undefined) detail.outputDelta = `${previous.item.detail?.outputDelta || ''}${item.detail.outputDelta}`
+      else if (item.detail?.aggregatedOutput !== undefined) delete detail.outputDelta
+      buffer.entries[index] = { ...payload, item: { ...previous.item, ...item, detail } }
     } else if (index !== undefined) {
       const previous = buffer.entries[index]
       previous.item = { ...previous.item, text: `${previous.item.text}${item.text}` }

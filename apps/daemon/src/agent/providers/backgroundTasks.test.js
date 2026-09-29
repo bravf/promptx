@@ -6,6 +6,16 @@ import { grokProvider } from './grok.js'
 import { AcpRuntime } from './acp.js'
 import { mapClaudeHistorySnapshot } from '../history/providers/claudeHistory.js'
 
+test('Claude 命令在 task_started 前后都能通过子消息关联父 Agent', () => {
+  const runtime = new ClaudeRuntime({ cwd: '/tmp' })
+  runtime.consumeToolOwnership({ type: 'assistant', parent_tool_use_id: 'spawn', message: { content: [{ type: 'tool_use', id: 'shell-1' }] } })
+  runtime.consumeTask({ subtype: 'task_started', task_id: 'cmd-1', tool_use_id: 'shell-1', task_type: 'local_bash' })
+  runtime.consumeTask({ subtype: 'task_started', task_id: 'cmd-2', tool_use_id: 'shell-2', task_type: 'local_bash' })
+  runtime.consumeToolOwnership({ type: 'tool_progress', parent_tool_use_id: 'spawn', tool_use_id: 'shell-2' })
+  assert.equal(runtime.backgroundTasks.tasks.get('cmd-1').parentCallId, 'spawn')
+  assert.equal(runtime.backgroundTasks.tasks.get('cmd-2').parentCallId, 'spawn')
+})
+
 test('Claude 后台状态跨主轮次，自动续跑且子消息不会混入主正文', async () => {
   const runtime = new ClaudeRuntime({ cwd: '/tmp' })
   runtime.activeRunId = 'user-1'

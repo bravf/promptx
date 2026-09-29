@@ -123,6 +123,9 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
       `)
       db.pragma(`user_version = ${DATABASE_VERSION}`)
     })()
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_timeline_tool_call
+      ON agent_timeline_rows(task_id, turn_id, json_extract(item_json, '$.callId'), seq)
+      WHERE item_type = 'tool_call'`)
     return db
   } catch (error) {
     db.close()

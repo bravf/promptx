@@ -1,3 +1,4 @@
+import { codexToolStatus } from '../../../../../packages/protocol/src/toolDetails.js'
 import { BackgroundTasks, taskStatus } from './backgroundTasks.js'
 import { EventEmitter } from 'node:events'
 import { JsonRpcProcess } from '../jsonRpcProcess.js'
@@ -43,7 +44,7 @@ function normalizeItem(item, status = 'running') {
       type: 'tool_call',
       callId: item.id,
       name: toolNames[item.type],
-      status,
+      status: codexToolStatus(item, status),
       detail: { type: item.type, ...item },
     }
   }
@@ -343,6 +344,10 @@ export class CodexRuntime extends EventEmitter {
         contextUsage: normalizeContextUsage(usage.last?.totalTokens, usage.modelContextWindow),
       }
       this.emit('controlState', this.controlState)
+      return
+    }
+    if (method === 'item/commandExecution/outputDelta') {
+      this.emit('timeline', { type: 'tool_call', callId: params.itemId, name: '终端命令', status: 'running', detail: { type: 'commandExecution', outputDelta: params.delta || '' } })
       return
     }
     if (method === 'item/agentMessage/delta') {

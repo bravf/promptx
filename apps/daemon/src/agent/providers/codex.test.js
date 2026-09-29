@@ -148,3 +148,15 @@ test('Codex 会话解归档后的 writer 冲突仍转换为结构化中文错误
   })
   runtime.close()
 })
+
+test('Codex 转发命令输出增量并保留失败或取消终态', () => {
+  const { runtime } = createRuntime(() => ({}))
+  const items = []
+  runtime.on('timeline', item => items.push(item))
+  runtime.onNotification({ method: 'item/commandExecution/outputDelta', params: { itemId: 'shell', delta: 'test output' } })
+  runtime.onNotification({ method: 'item/completed', params: { item: { type: 'commandExecution', id: 'shell', exitCode: 1, status: 'completed' } } })
+  runtime.onNotification({ method: 'item/completed', params: { item: { type: 'commandExecution', id: 'denied', status: 'declined' } } })
+  assert.equal(items[0].detail.outputDelta, 'test output')
+  assert.equal(items[1].status, 'failed')
+  assert.equal(items[2].status, 'canceled')
+})

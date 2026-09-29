@@ -14,7 +14,7 @@ function mergeToolItem(previous, next) {
     ...next,
     detail: next.detail?.type === 'unknown' && previous.detail?.type !== 'unknown'
       ? previous.detail
-      : next.detail,
+      : { ...previous.detail, ...next.detail },
     metadata: previous.metadata || next.metadata
       ? { ...previous.metadata, ...next.metadata }
       : undefined,

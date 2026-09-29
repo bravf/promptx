@@ -1,3 +1,4 @@
+import { resolveBackgroundTaskOwnership } from '../backgroundTaskOwnership.js'
 import { reconcileHistory } from './historyReconciler.js'
 import { materializeHistoryImages } from './historyImages.js'
 import { assertHistorySnapshot, HISTORY_RECONCILER_VERSION } from './historySnapshot.js'
@@ -132,12 +133,17 @@ export class TimelineSyncCoordinator {
     return sync
   }
 
-  mergeBackgroundTasks(agent, runtime, tasks = []) {
-    if (!tasks.length) return
+  mergeBackgroundTasks(agent, runtime, tasks = [], toolOwners = []) {
+    if (!tasks.length && !toolOwners.length) return
     const savedTasks = this.repository.getAgent?.(agent.id)?.backgroundTasks || []
     const turns = this.repository.listTurns(agent.taskId, 10000)
     const rows = this.repository.listTimelineRows(agent.taskId)
-    for (const task of tasks) {
+    const ownership = new Map(toolOwners.map(owner => [owner.callId, owner]))
+    const incoming = new Map(tasks.map(task => [task.id, { ...task, ...ownership.get(task.callId) }]))
+    for (const saved of savedTasks) {
+      if (!incoming.has(saved.id) && ownership.has(saved.callId)) incoming.set(saved.id, { ...saved, ...ownership.get(saved.callId) })
+    }
+    for (const task of incoming.values()) {
       const saved = savedTasks.find(item => item.id === task.id)
       const live = runtime.backgroundTasks?.tasks.get(task.id)
       const call = rows.find(row => row.turnId && row.item.type === 'tool_call' && (
@@ -146,9 +152,10 @@ export class TimelineSyncCoordinator {
         || row.item.detail?.receiverThreadIds?.includes(task.id)
       ))
       const source = turns.find(turn => task.originSourceTurnId && [turn.providerPromptId, turn.nativeTurnId].includes(task.originSourceTurnId))
-      const originTurnId = saved?.originTurnId || call?.turnId || source?.id || null
+      const originTurnId = call?.turnId || source?.id || saved?.originTurnId || null
+      const parent = { ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}), ...(task.parentCallId ? { parentCallId: task.parentCallId } : {}) }
       if (live) {
-        if (originTurnId && originTurnId !== saved?.originTurnId) this.repository.upsertProviderTask?.(agent.id, { id: task.id, originTurnId })
+        if (originTurnId !== saved?.originTurnId || Object.keys(parent).length) this.repository.upsertProviderTask?.(agent.id, { id: task.id, originTurnId, ...parent })
         continue
       }
       const patch = { ...task, originTurnId }
@@ -156,6 +163,12 @@ export class TimelineSyncCoordinator {
       if (saved && ['completed', 'failed', 'canceled'].includes(saved.status)
         && ['interrupted', 'running', 'pending'].includes(task.status)) patch.status = saved.status
       this.repository.upsertProviderTask?.(agent.id, patch)
+    }
+    const merged = this.repository.getAgent?.(agent.id)?.backgroundTasks || []
+    const callTurns = new Map(rows.filter(row => row.item.type === 'tool_call' && row.turnId).map(row => [row.item.callId, row.turnId]))
+    for (const task of resolveBackgroundTaskOwnership(merged, callTurns)) {
+      const previous = merged.find(item => item.id === task.id)
+      if (task.originTurnId !== previous.originTurnId || task.parentTaskId !== previous.parentTaskId) this.repository.upsertProviderTask?.(agent.id, { id: task.id, originTurnId: task.originTurnId, ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}) })
     }
     this.eventHub.publish(agent.id, { type: 'agent', agent: this.repository.getAgent?.(agent.id) })
   }
@@ -192,7 +205,7 @@ export class TimelineSyncCoordinator {
     }
     if (snapshot.status === 'unchanged') {
       if (snapshot.sourceId && [agent.nativeHandle?.sessionId, runtime.sessionId].includes(snapshot.sourceId)) {
-        this.mergeBackgroundTasks(agent, runtime, snapshot.backgroundTasks)
+        this.mergeBackgroundTasks(agent, runtime, snapshot.backgroundTasks, snapshot.backgroundToolOwners)
       }
       return this.publishSynced(agent.id, agent.taskId, { syncedAt: syncState?.syncedAt })
     }
@@ -219,7 +232,7 @@ export class TimelineSyncCoordinator {
       checkedTurnIds,
     })
     if (plan.mode === 'noop') {
-      this.mergeBackgroundTasks(agent, runtime, snapshot.backgroundTasks)
+      this.mergeBackgroundTasks(agent, runtime, snapshot.backgroundTasks, snapshot.backgroundToolOwners)
       return this.publishSynced(agent.id, agent.taskId, { syncedAt: syncState?.syncedAt })
     }
     const applied = this.repository.applyTimelineSync(agent.taskId, {
@@ -228,7 +241,7 @@ export class TimelineSyncCoordinator {
       sourceId: snapshot.sourceId,
       expectedNextSeq: beforeState.nextSeq,
     })
-    this.mergeBackgroundTasks(agent, runtime, snapshot.backgroundTasks)
+    this.mergeBackgroundTasks(agent, runtime, snapshot.backgroundTasks, snapshot.backgroundToolOwners)
     const timelineChanged = applied.mode === 'rebuild' || applied.rows.length > 0 || applied.updatedRows > 0
     if (applied.mode === 'rebuild' || applied.updatedRows > 0) {
       this.eventHub.publish(agent.id, {

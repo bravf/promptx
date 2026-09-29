@@ -25,6 +25,8 @@ export const ProviderTaskSchema = z.object({
   status: z.enum(['pending', 'running', 'completed', 'failed', 'canceled', 'interrupted']),
   summary: z.string().optional(),
   originTurnId: z.string().nullable().optional(),
+  parentTaskId: z.string().nullable().optional(),
+  parentCallId: z.string().nullable().optional(),
   background: z.boolean().optional(),
   ambient: z.boolean().optional(),
 }).passthrough()

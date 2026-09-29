@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { TimelineCoalescer } from '../timeline/timelineCoalescer.js'
 import { DEFAULT_AGENT_TITLE, deriveAgentTitle } from './sessionTitle.js'
 import { TimelineSyncCoordinator } from './history/timelineSyncCoordinator.js'
+import { resolveBackgroundTaskOwnership } from './backgroundTaskOwnership.js'
 
 function nowIso() {
   return new Date().toISOString()
@@ -29,6 +30,25 @@ export class AgentManager {
       getRuntime: (agent) => this.getRuntime(agent),
       getActiveTurnId: (agentId) => this.activeTurns.get(agentId)?.id || '',
     })
+  }
+
+  reconcileBackgroundTaskOwnership(agent) {
+    const tasks = this.repository.getAgent(agent.id)?.backgroundTasks || []
+    if (!tasks.length) return
+    if (!this.toolOwnerSessions.has(agent.id)) {
+      for (const row of this.repository.listTimelineRows(agent.taskId)) if (row.item.type === 'tool_call') this.toolOwners.set(`${agent.id}:${row.item.callId}`, row.turnId || null)
+      this.toolOwnerSessions.add(agent.id)
+    }
+    const callTurns = new Map(tasks.map(task => [task.callId, this.toolOwners.get(`${agent.id}:${task.callId}`)]))
+    let changed = false
+    for (const resolved of resolveBackgroundTaskOwnership(tasks, callTurns)) {
+      const saved = tasks.find(item => item.id === resolved.id)
+      if (saved.originTurnId !== resolved.originTurnId || saved.parentTaskId !== resolved.parentTaskId) {
+        this.repository.upsertProviderTask(agent.id, { id: resolved.id, originTurnId: resolved.originTurnId, ...(resolved.parentTaskId ? { parentTaskId: resolved.parentTaskId } : {}) })
+        changed = true
+      }
+    }
+    if (changed) this.eventHub.publish(agent.id, { type: 'agent', agent: this.repository.getAgent(agent.id) })
   }
 
   getRuntime(agent) {
@@ -63,7 +83,8 @@ export class AgentManager {
     runtime.on('backgroundTask', (task) => {
       if (this.runtimes.get(agent.id) !== runtime) return
       const previous = this.repository.getAgent(agent.id)?.backgroundTasks?.find(item => item.id === task.id)
-      this.repository.upsertProviderTask(agent.id, { ...task, originTurnId: previous?.originTurnId || this.activeTurns.get(agent.id)?.id || null })
+      this.repository.upsertProviderTask(agent.id, { ...task, originTurnId: previous?.originTurnId || (agent.providerId !== 'claude' || task.parentCallId === null ? this.activeTurns.get(agent.id)?.id : null) || null })
+      this.reconcileBackgroundTaskOwnership(agent)
       const updated = this.repository.getAgent(agent.id)
       if (updated.backgroundTasks.some(item => ['running', 'pending'].includes(item.status) && !item.ambient)) {
         this.repository.updateAgent(agent.id, { requiresAttention: false, attentionReason: null, attentionAt: null })
@@ -87,6 +108,7 @@ export class AgentManager {
         const key = `${agent.id}:${item.callId}`
         if (!this.toolOwners.has(key)) {
           this.toolOwners.set(key, turn?.id || null)
+          this.reconcileBackgroundTaskOwnership(agent)
         }
         const owner = this.toolOwners.get(key)
         if (owner !== turn?.id) { this.commitTimeline({ agentId: agent.id, turnId: owner, item }); return }

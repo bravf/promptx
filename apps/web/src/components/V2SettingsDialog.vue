@@ -10,6 +10,8 @@ import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
 import { v2Api } from '../lib/v2Api.js'
 import { writeClipboardText } from '../lib/clipboard.js'
+import { useToolPreferences } from '../composables/useToolPreferences.js'
+import { isRemoteTransport } from '../lib/transport.js'
 import ArchivedTasksSettings from './ArchivedTasksSettings.vue'
 
 const props = defineProps({
@@ -22,6 +24,8 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'changed'])
 const activeSection = ref('appearance')
+const { autoExpand, setAutoExpand } = useToolPreferences()
+const remoteTransport = isRemoteTransport()
 const relayLoading = ref(false)
 const relaySaving = ref(false)
 const relayError = ref('')
@@ -33,6 +37,7 @@ const confirmReset = ref(false)
 
 const sections = [
   { id: 'appearance', label: '外观', icon: Palette },
+  ...(!remoteTransport ? [{ id: 'timeline', label: '执行过程', icon: Settings2 }] : []),
   { id: 'archive', label: '归档', icon: Archive },
   { id: 'remote', label: '远程访问', icon: RadioTower },
   { id: 'about', label: '关于', icon: Info },
@@ -174,6 +179,14 @@ watch(
           <p class="theme-muted-text mt-1 text-xs">选择 PromptX 的界面皮肤。</p>
         </div>
         <ThemeToggle />
+      </section>
+
+      <section v-else-if="activeSection === 'timeline' && !remoteTransport" class="mx-auto w-full max-w-2xl">
+        <h2 class="theme-heading mb-5 text-lg font-semibold">执行过程</h2>
+        <label class="flex items-start justify-between gap-4 py-3">
+          <span><span class="theme-heading block text-sm font-medium">自动展开工具详情</span><span class="theme-muted-text mt-2 block text-xs leading-5">本地直连时，执行过程中的命令、文件修改等详情默认展开，包括历史记录。手动收起后保持收起，Relay 访问仍需手动展开。设置保存在当前浏览器。</span></span>
+          <input type="checkbox" class="mt-1 h-4 w-4 shrink-0" :checked="autoExpand" aria-label="自动展开工具详情" @change="setAutoExpand($event.target.checked)" />
+        </label>
       </section>
 
       <ArchivedTasksSettings v-else-if="activeSection === 'archive'" @changed="emit('changed')" />
