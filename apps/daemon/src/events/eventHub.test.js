@@ -16,3 +16,13 @@ test('EventHub 全局订阅会收到所有 Agent 事件，并可退订', () => {
   hub.publish('agent-1', { type: 'agent', agent: { id: 'agent-1' } })
   assert.equal(agentEvents.length, 2)
 })
+
+test('一个订阅者异常不阻断其他订阅者或业务写入', () => {
+  const errors = [], events = []
+  const hub = new EventHub(error => errors.push(error))
+  hub.subscribe('a', () => { throw new Error('客户端断开') })
+  hub.subscribe('a', event => events.push(event))
+  hub.publish('a', { type: 'timeline' })
+  assert.equal(errors.length, 1)
+  assert.deepEqual(events, [{ type: 'timeline' }])
+})

@@ -1,13 +1,11 @@
 import {
+  SessionCipher, deriveSessionKeys, sessionTranscript, randomToken,
   buildRelayWebSocketUrl,
   decodeBase64,
-  decryptPayload,
   deriveSharedKey,
   encodeBase64,
-  encryptPayload,
   generateKeyPair,
   importPublicKey,
-  NonceReplayWindow,
   parseJsonFrame,
   splitBytes,
 } from '@promptx/relay'
@@ -52,7 +50,7 @@ export class EncryptedRelayConnection {
     this.requestIdleTimeoutMs = Number(options.requestIdleTimeoutMs) || REQUEST_IDLE_TIMEOUT_MS
     this.socket = null
     this.sharedKey = null
-    this.seenNonces = new NonceReplayWindow()
+    this.cipher = null
     this.pending = new Map()
     this.connectPromise = null
     this.reconnectTimer = null
@@ -83,10 +81,12 @@ export class EncryptedRelayConnection {
     clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
     this.sharedKey = null
-    this.seenNonces = new NonceReplayWindow()
+    this.cipher = null
     this.updateStatus({ state: this.reconnectAttempt ? 'reconnecting' : 'connecting', error: '' })
-    this.connectPromise = new Promise((resolve, reject) => {
+    const connection = new Promise((resolve, reject) => {
+      let handshakeSettled = false
       const keyPair = generateKeyPair()
+      const hello = { type: 'e2ee.hello', v: 3, clientPublicKeyB64: keyPair.publicKeyB64, clientNonce: randomToken(), acceptBodyEncodings: this.DecompressionStreamClass ? ['gzip'] : [] }
       const sharedKey = deriveSharedKey(keyPair.secretKey, importPublicKey(this.offer.daemonPublicKeyB64))
       const url = buildRelayWebSocketUrl(this.offer.relay.url, {
         role: 'client',
@@ -100,32 +100,39 @@ export class EncryptedRelayConnection {
       this.socket = socket
       socket.binaryType = 'arraybuffer'
       const failHandshake = (error) => {
-        if (this.socket !== socket || this.status.state === 'ready') return
+        if (handshakeSettled) return
+        handshakeSettled = true
+        clearTimeout(handshakeTimer)
         reject(error)
       }
       socket.addEventListener('open', () => {
         if (this.socket !== socket) return
-        socket.send(JSON.stringify({
-          type: 'e2ee.hello',
-          clientPublicKeyB64: keyPair.publicKeyB64,
-          acceptBodyEncodings: this.DecompressionStreamClass ? ['gzip'] : [],
-        }))
+        socket.send(JSON.stringify(hello))
       })
       socket.addEventListener('message', (event) => {
         if (this.socket !== socket) return
-        if (!this.sharedKey) {
-          const frame = typeof event.data === 'string' ? parseJsonFrame(event.data) : null
-          if (frame?.type !== 'e2ee.ready' || frame.v !== 2) {
-            socket.close(4003, 'invalid_e2ee_ready')
-            failHandshake(new Error('Relay E2EE 握手失败。'))
-            return
+        if (this.status.state !== 'ready') {
+          try {
+            if (!this.cipher) {
+              const frame = typeof event.data === 'string' ? parseJsonFrame(event.data) : null
+              if (frame?.type !== 'e2ee.challenge' || frame.v !== 3) throw new Error('远程协议已升级，请重新配对。')
+              const keys = deriveSessionKeys(sharedKey, this.offer.pairingKeyB64, sessionTranscript(this.offer.serverId, hello, frame.challenge))
+              this.cipher = new SessionCipher(keys.clientToServer, keys.serverToClient)
+              socket.send(this.cipher.encrypt(JSON.stringify({ type: 'e2ee.auth' })))
+              return
+            }
+            const ready = JSON.parse(this.cipher.decrypt(event.data))
+            if (ready.type !== 'e2ee.ready' || ready.v !== 3) throw new Error('配对认证失败。')
+            handshakeSettled = true
+            this.sharedKey = sharedKey
+            clearTimeout(handshakeTimer)
+            this.reconnectAttempt = 0
+            this.updateStatus({ state: 'ready', error: '', connectedAt: new Date().toISOString() })
+            resolve()
+          } catch (error) {
+            failHandshake(error)
+            socket.close(4003, 'invalid_pairing')
           }
-          this.sharedKey = sharedKey
-          clearTimeout(handshakeTimer)
-          this.seenNonces = new NonceReplayWindow()
-          this.reconnectAttempt = 0
-          this.updateStatus({ state: 'ready', error: '', connectedAt: new Date().toISOString() })
-          resolve()
           return
         }
         this.handleEncryptedMessage(event.data)
@@ -135,20 +142,22 @@ export class EncryptedRelayConnection {
       })
       socket.addEventListener('close', () => {
         clearTimeout(handshakeTimer)
-        if (this.socket !== socket) return
         const error = new Error('PromptX Relay 连接已断开。')
         failHandshake(error)
+        if (this.socket !== socket) return
         this.socket = null
         this.sharedKey = null
+        this.cipher = null
         this.connectPromise = null
         this.failPending(error)
         this.updateStatus({ state: 'disconnected', error: error.message })
         this.scheduleReconnect()
       })
     }).finally(() => {
-      if (this.status.state === 'ready') this.connectPromise = null
+      if (this.connectPromise === connection) this.connectPromise = null
     })
-    return this.connectPromise
+    this.connectPromise = connection
+    return connection
   }
 
   scheduleReconnect() {
@@ -164,7 +173,7 @@ export class EncryptedRelayConnection {
   handleEncryptedMessage(payload) {
     try {
       if (typeof payload === 'string') throw new Error('Relay 返回了未加密业务数据。')
-      const plaintext = decryptPayload(this.sharedKey, payload, this.seenNonces)
+      const plaintext = this.cipher.decrypt(payload)
       if (typeof plaintext !== 'string') throw new Error('Relay 响应类型无效。')
       const frame = parseJsonFrame(plaintext)
       if (!frame) throw new Error('Relay 响应格式无效。')
@@ -210,7 +219,14 @@ export class EncryptedRelayConnection {
       return
     }
     if (frame.type === 'response.body') {
-      record.controller.enqueue(new Uint8Array(decodeBase64(frame.chunk)))
+      const chunk = new Uint8Array(decodeBase64(frame.chunk))
+      if (chunk.byteLength > record.controller.desiredSize) {
+        record.controller.error(new Error('远程响应消费过慢，已停止传输。'))
+        this.sendFrame({ type: 'request.cancel', requestId: record.requestId })
+        this.finishRecord(record)
+        return
+      }
+      record.controller.enqueue(chunk)
       return
     }
     if (frame.type === 'response.end') {
@@ -257,7 +273,7 @@ export class EncryptedRelayConnection {
 
   sendFrame(frame) {
     if (!this.sharedKey || this.socket?.readyState !== this.WebSocketClass.OPEN) throw new Error('PromptX Relay 尚未连接。')
-    this.socket.send(encryptPayload(this.sharedKey, JSON.stringify(frame)))
+    this.socket.send(this.cipher.encrypt(JSON.stringify(frame)))
   }
 
   async request(path, options = {}) {
@@ -266,10 +282,20 @@ export class EncryptedRelayConnection {
     const requestId = createRequestId()
     const method = String(options.method || 'GET').toUpperCase()
     const headers = new Headers(options.headers || {})
+    if (this.pending.size >= 64) throw new Error('远程并发请求过多，请稍后重试。')
     const body = await serializeBody(options.body, headers)
+    if (body.byteLength > 64 * 1024 * 1024) throw new Error('请求超过 64 MB 限制。')
     if (options.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
     let controller
-    const stream = new ReadableStream({ start(value) { controller = value } })
+    const stream = new ReadableStream({
+      start(value) { controller = value },
+      cancel: () => {
+        const record = this.pending.get(requestId)
+        if (!record) return
+        try { this.sendFrame({ type: 'request.cancel', requestId }) } catch {}
+        this.finishRecord(record)
+      },
+    }, { highWaterMark: 4 * 1024 * 1024, size: chunk => chunk.byteLength })
     const responsePromise = new Promise((resolve, reject) => {
       const record = {
         requestId,
@@ -295,15 +321,25 @@ export class EncryptedRelayConnection {
       this.pending.set(requestId, record)
       this.touchRecord(record)
     })
+    // 上传背压等待期间，取消可能先拒绝响应，先注册处理防止未处理 rejection。
+    responsePromise.catch(() => {})
     try {
       this.sendFrame({ type: 'request.start', requestId, method, path, headers: headersToObject(headers) })
       for (const chunk of splitBytes(body)) {
+        if (!this.pending.has(requestId) || options.signal?.aborted) throw new DOMException('已取消', 'AbortError')
+        const started = Date.now()
+        while (this.socket?.bufferedAmount > 512 * 1024) {
+          if (options.signal?.aborted) throw new DOMException('已取消', 'AbortError')
+          if (Date.now() - started > this.requestIdleTimeoutMs) throw new Error('远程发送超时。')
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
         this.sendFrame({ type: 'request.body', requestId, chunk: encodeBase64(chunk) })
       }
-      this.sendFrame({ type: 'request.end', requestId })
+      if (this.pending.has(requestId)) this.sendFrame({ type: 'request.end', requestId })
     } catch (error) {
       const record = this.pending.get(requestId)
       if (record) {
+        try { this.sendFrame({ type: 'request.cancel', requestId }) } catch {}
         record.reject(error)
         this.finishRecord(record)
       }
@@ -318,6 +354,7 @@ export class EncryptedRelayConnection {
     this.socket?.close(1000, 'client_closed')
     this.socket = null
     this.sharedKey = null
+    this.cipher = null
     this.connectPromise = null
     this.failPending(new Error('PromptX Relay 已关闭。'))
   }

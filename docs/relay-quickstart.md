@@ -19,20 +19,20 @@ promptx start
 http://127.0.0.1:3001
 ```
 
-进入“设置 -> 远程访问”。PromptX 默认连接：
+进入“设置 -> 远程访问”，手动启用 Relay。新安装默认关闭；默认服务地址为：
 
 ```text
 wss://px.mushayu.com/relay/ws
 ```
 
-状态变为“已连接”后，可以：
+状态变为“已连接”后，点击“显示配对链接”，可以：
 
 - 用手机扫描二维码；
 - 或复制完整配对链接到手机打开。
 
-链接中的 `#offer=` 包含随机 `serverId` 和 daemon 公钥。URL Fragment 不会发送给普通 HTTP 服务，但完整链接仍等同远程访问凭证，不要公开分享。
+链接中的 `#offer=` 包含 `serverId`、daemon 公钥与 32 字节配对秘密。URL Fragment 不会发送给普通 HTTP 服务，但完整链接仍等同远程访问凭证，不要公开分享。
 
-需要让旧链接失效时，点击“重置远程身份”。PromptX 会生成新的 `serverId` 和 Curve25519 密钥对。
+需要让旧链接失效时，点击“重置远程身份”。PromptX 会生成新的身份签名密钥、Curve25519 密钥对、配对秘密与 `serverId`。
 
 本机身份保存在：
 
@@ -41,6 +41,8 @@ wss://px.mushayu.com/relay/ws
 ```
 
 文件权限为 `0600`，不要复制或上传其中的私钥。
+
+协议 v3 不兼容旧链接，需要本机 Daemon、Web 和 Relay 同步升级后重新配对。身份文件沿用旧文件名，但内部版本为 3。升级不会清空会话数据。
 
 ## Relay 运维
 
@@ -76,7 +78,7 @@ curl http://127.0.0.1:3030/health
 ```json
 {
   "ok": true,
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "connectedDaemons": 1,
   "connectedClients": 1
 }

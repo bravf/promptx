@@ -312,3 +312,17 @@ test('匹配本地 Turn 时保留含附件的用户消息，只补 Provider 输�
   })
   assert.deepEqual(result.rows.map((row) => row.item.type), ['assistant_message'])
 })
+
+test('附件提交的原生文本与本地附件消息对账，不产生重复轮次', () => {
+  const turn = { ...localTurn('local', '', 'local-client', '2026-09-04T10:00:00.000Z'), taskId: 'task' }
+  const asset = { taskId: 'task', name: 'notes.txt', mimeType: 'text/plain', size: 10, storagePath: '/private/uploads/notes.txt' }
+  const rows = localRows(turn, '分析这个附件', '结果')
+  rows[0].item.content.push({ type: 'file', assetId: 'asset', name: asset.name, mimeType: asset.mimeType, size: asset.size })
+  const nativeText = '分析这个附件\nUploaded file: notes.txt\nPath: /private/uploads/notes.txt\nMIME: text/plain\nSize: 10 bytes'
+  const snapshot = { sourceId: 'session', turns: [providerTurn('native', nativeText)] }
+  const result = reconcileHistory({ snapshot, localRows: rows, localTurns: [turn], getAsset: () => asset })
+  assert.equal(result.turns[0].localTurnId, 'local')
+  assert.equal(result.rows.filter(row => row.item.type === 'user_message').length, 0)
+  const unrelated = reconcileHistory({ snapshot: { ...snapshot, turns: [providerTurn('native', `${nativeText}\n不同请求`)] }, localRows: rows, localTurns: [turn], getAsset: () => asset })
+  assert.equal(unrelated.turns[0].localTurnId, undefined)
+})

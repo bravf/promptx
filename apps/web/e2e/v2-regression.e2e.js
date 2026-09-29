@@ -487,6 +487,9 @@ test('V2 全面桌面交互回归', async (t) => {
   consumeExpectedResourceError(failures)
   await relayAddress.fill('ws://127.0.0.1:9999/relay')
   await relayAddress.blur()
+  const relayToggle = page.locator('.relay-toggle input')
+  if (!(await relayToggle.isChecked())) await relayToggle.check()
+  await page.getByRole('button', { name: '显示配对链接', exact: true }).click()
   await page.getByText('配对链接', { exact: true }).waitFor()
   await page.getByRole('button', { name: '重置远程身份' }).click()
   await page.getByRole('button', { name: '取消', exact: true }).click()
@@ -1077,9 +1080,9 @@ test('Timeline 加载工作区外绝对路径图片，支持重试且拒绝非�
   const endpoint = `/api/v2/tasks/${fixture.task.id}/local-image/content`
   const textPath = path.join(fixture.root, 'private.txt')
   fs.writeFileSync(textPath, 'not an image')
-  assert.equal((await fixture.app.inject({ url: `${endpoint}?${new URLSearchParams({ path: textPath })}` })).statusCode, 415)
-  assert.equal((await fixture.app.inject({ url: `${endpoint}?path=relative.png` })).statusCode, 400)
-  const restricted = await fixture.app.inject({ url: `/api/v2/tasks/${fixture.task.id}/file/content?${new URLSearchParams({ path: filePath })}` })
+  assert.equal((await fixture.app.inject({ headers: { host: new URL(fixture.baseUrl).host }, url: `${endpoint}?${new URLSearchParams({ path: textPath })}` })).statusCode, 415)
+  assert.equal((await fixture.app.inject({ headers: { host: new URL(fixture.baseUrl).host }, url: `${endpoint}?path=relative.png` })).statusCode, 400)
+  const restricted = await fixture.app.inject({ headers: { host: new URL(fixture.baseUrl).host }, url: `/api/v2/tasks/${fixture.task.id}/file/content?${new URLSearchParams({ path: filePath })}` })
   assert.equal(restricted.statusCode, 400)
   const mobile = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   await mobile.goto(fixture.baseUrl)
@@ -1907,4 +1910,63 @@ test('工具详情在桌面和手机原地展开，Relay 按需分页并缓存�
     assert.deepEqual(failures, [])
     await page.close()
   }
+})
+
+test('手机草稿在跨断点横竖屏切换后保留，返回时没有重复输入框', { timeout: 30000 }, async t => {
+  const fixture = await createFixture(t)
+  const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true })
+  await page.goto(fixture.baseUrl, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+  const composer = page.getByPlaceholder('向 Agent 发送消息').filter({ visible: true })
+  await composer.fill('旋转后保留的草稿')
+  await page.setViewportSize({ width: 844, height: 390 })
+  await page.locator('.desktop-workbench').waitFor()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('.timeline-workspace > .task-timeline-pane').waitFor()
+  await composer.waitFor()
+  assert.equal(await composer.inputValue(), '旋转后保留的草稿')
+  assert.equal(await composer.count(), 1)
+})
+
+test('工具持续输出不饿死详情刷新，分页期间结束仍刷新最终元数据', { timeout: 45000 }, async t => {
+  const fixture = await createFixture(t)
+  const page = await fixture.browser.newPage({ viewport: { width: 1440, height: 1000 } })
+  await page.addInitScript(() => localStorage.setItem('promptx:tools:auto-expand', 'true'))
+  await page.goto(fixture.baseUrl)
+  await page.getByText('回归基线已经准备完成。').waitFor()
+  let runtime, tick = 0, output = '初始输出\n'
+  const emitTool = (status = 'running', extra = {}) => runtime.emit('timeline', {
+    type: 'tool_call', callId: 'refresh-test', name: '刷新回归', status,
+    detail: { type: 'commandExecution', command: 'echo refresh-test', aggregatedOutput: output, ...extra },
+  })
+  fixture.runtimeRecords.onTurn = (_, value) => { runtime = value; emitTool() }
+  await page.getByPlaceholder('向 Agent 发送消息').fill('保持运行，刷新回归')
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  const tool = page.locator('.timeline-tool').filter({ has: page.locator('.tool-toggle[title="刷新回归"]') })
+  await tool.locator('.tool-output').filter({ hasText: '初始输出' }).waitFor()
+  const interval = setInterval(() => { output += `增量 ${++tick}\n`; emitTool() }, 80)
+  try {
+    // 数据持续到达期间必须出现新输出，不能等流停止后才请求详情。
+    await tool.locator('.tool-output').filter({ hasText: '增量 2' }).waitFor({ timeout: 5000 })
+  } finally { clearInterval(interval) }
+  output += '长输出\n'.repeat(20000)
+  emitTool()
+  const more = tool.getByRole('button', { name: '加载更多', exact: true })
+  await more.waitFor()
+  let finishDuringPage = false
+  await page.route('**/tool-calls/detail?**', async route => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get('section') === 'output' && !finishDuringPage) {
+      finishDuringPage = true
+      const response = await route.fetch()
+      emitTool('completed', { exitCode: 0, durationMs: 9000 })
+      runtime.emit('turnCompleted', {})
+      await page.waitForTimeout(250)
+      await route.fulfill({ response })
+    } else await route.continue()
+  })
+  await more.click()
+  await tool.locator('.tool-result-meta').getByText('耗时 9.0 秒', { exact: true }).waitFor()
+  assert.equal(finishDuringPage, true)
+  assert.equal(await tool.getByRole('button', { name: '重新加载', exact: true }).count(), 0)
 })

@@ -24,10 +24,21 @@ import { GitDeliveryService } from './git/gitDeliveryService.js'
 
 export async function createApp(options = {}) {
   const app = Fastify({ logger: options.logger ?? true })
+  app.setErrorHandler((error, request, reply) => {
+    request.log.error(error)
+    const statusCode = error.name === 'ZodError' ? 400 : (error.statusCode || 500)
+    reply.code(statusCode).send({
+      error: error.code || (statusCode === 400 ? 'invalid_request' : 'internal_error'),
+      message: error.message,
+      ...(error.risk ? { risk: error.risk } : {}),
+      ...(error.git ? { git: error.git } : {}),
+    })
+  })
   const corsPolicy = createCorsPolicy(options.allowedOrigins, () => app.server.address()?.port)
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin
-    if (request.url.startsWith('/api/') && origin && !corsPolicy.allows(origin)) {
+    if (!corsPolicy.allowsHost(request.headers.host)) return reply.code(403).send({ error: 'host_not_allowed', message: 'Daemon 仅接受本地 Host。' })
+    if ((origin && !corsPolicy.allows(origin)) || (!origin && ['cross-site', 'same-site'].includes(request.headers['sec-fetch-site']))) {
       return reply.code(403).send({ error: 'origin_not_allowed', message: '该网页来源不能访问 PromptX Daemon。' })
     }
   })
@@ -63,7 +74,7 @@ export async function createApp(options = {}) {
   })
   app.decorate('sqliteRepository', repository)
   registerTerminalRoutes(app, repository)
-  repository.failActiveTurnsOnStartup()
+
   registerRoutes(app, {
     repository,
     timelineStore,
@@ -79,12 +90,16 @@ export async function createApp(options = {}) {
     gitDelivery,
   })
   const relay = new RelayService({
-    localBaseUrl: options.localBaseUrl || `http://127.0.0.1:${process.env.PORT || process.env.PROMPTX_DAEMON_PORT || 3001}`,
+    localBaseUrl: options.localBaseUrl || `http://127.0.0.1:${process.env.PROMPTX_DAEMON_PORT || 3001}`,
     logger: app.log,
     ...(options.relayOptions || {}),
   })
   registerRelayRoutes(app, relay)
-  if (options.relay !== false) relay.start()
+  app.addHook('onListen', async () => {
+    repository.failActiveTurnsOnStartup()
+    relay.localBaseUrl = `http://127.0.0.1:${app.server.address().port}`
+    if (options.relay !== false) relay.start()
+  })
   const defaultWebRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist')
   const webRoot = options.webRoot === false ? '' : path.resolve(options.webRoot || defaultWebRoot)
   if (webRoot && fs.existsSync(path.join(webRoot, 'index.html'))) {
@@ -95,16 +110,6 @@ export async function createApp(options = {}) {
       return reply.sendFile('index.html')
     })
   }
-  app.setErrorHandler((error, request, reply) => {
-    request.log.error(error)
-    const statusCode = error.name === 'ZodError' ? 400 : (error.statusCode || 500)
-    reply.code(statusCode).send({
-      error: error.code || (statusCode === 400 ? 'invalid_request' : 'internal_error'),
-      message: error.message,
-      ...(error.risk ? { risk: error.risk } : {}),
-      ...(error.git ? { git: error.git } : {}),
-    })
-  })
   app.addHook('onClose', async () => {
     relay.stop()
     await agentManager.shutdown()

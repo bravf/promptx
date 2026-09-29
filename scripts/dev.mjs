@@ -42,8 +42,8 @@ async function findAvailablePort(host, preferredPort) {
   throw new Error(`找不到可用的 Web 端口（${preferredPort}-${preferredPort + 99}）。`)
 }
 
-const host = String(process.env.HOST || process.env.PROMPTX_DEV_HOST || DEFAULT_HOST).trim() || DEFAULT_HOST
-const daemonPort = Math.max(1, Number(process.env.PORT || process.env.PROMPTX_DAEMON_PORT) || DEFAULT_DAEMON_PORT)
+const host = String(process.env.PROMPTX_DEV_HOST || DEFAULT_HOST).trim() || DEFAULT_HOST
+const daemonPort = Math.max(1, Number(process.env.PROMPTX_DAEMON_PORT) || DEFAULT_DAEMON_PORT)
 const preferredWebPort = Math.max(1, Number(process.env.WEB_PORT || process.env.PROMPTX_WEB_PORT) || DEFAULT_WEB_PORT)
 const webPort = await findAvailablePort(host, preferredWebPort)
 const pnpm = resolvePnpmCommand()
@@ -55,8 +55,7 @@ console.log(`[promptx-dev] Daemon: http://${host}:${daemonPort}`)
 console.log('[promptx-dev] 按 Ctrl+C 可同时停止服务。')
 
 const daemon = spawnChild(pnpm, ['--filter', '@promptx/daemon', 'dev'], {
-  HOST: host,
-  PORT: String(daemonPort),
+  PROMPTX_DAEMON_HOST: host,
   PROMPTX_DAEMON_PORT: String(daemonPort),
   PROMPTX_ALLOWED_ORIGINS: allowedOrigins,
 })

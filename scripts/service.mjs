@@ -10,8 +10,8 @@ const daemonEntry = path.join(rootDir, 'apps', 'daemon', 'src', 'index.js')
 const runtimeDir = path.join(path.resolve(process.env.PROMPTX_HOME || path.join(os.homedir(), '.promptx')), 'run')
 const stateFile = path.join(runtimeDir, 'service-v2.json')
 const logFile = path.join(runtimeDir, 'promptx-v2.log')
-const host = String(process.env.HOST || '127.0.0.1').trim() || '127.0.0.1'
-const port = Math.max(1, Number(process.env.PORT || process.env.PROMPTX_DAEMON_PORT) || 3001)
+const host = String(process.env.PROMPTX_DAEMON_HOST || '127.0.0.1').trim() || '127.0.0.1'
+const port = Math.max(1, Number(process.env.PROMPTX_DAEMON_PORT) || 3001)
 const baseUrl = `http://${host}:${port}`
 
 function readState() {
@@ -40,7 +40,7 @@ async function start() {
     cwd: rootDir,
     detached: true,
     stdio: ['ignore', fd, fd],
-    env: { ...process.env, HOST: host, PORT: String(port), PROMPTX_DAEMON_PORT: String(port) },
+    env: { ...process.env, PROMPTX_DAEMON_HOST: host, PROMPTX_DAEMON_PORT: String(port) },
   })
   fs.closeSync(fd)
   child.unref()

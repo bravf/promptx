@@ -1,3 +1,4 @@
+import { filePromptText } from '../promptAttachments.js'
 import { createHistoryManifest, historyItemKey, TERMINAL_HISTORY_STATUSES } from './historySnapshot.js'
 
 const LEGACY_MATCH_TIME_WINDOW_MS = 5_000
@@ -108,7 +109,7 @@ function shouldImportProviderItem(entry, rows) {
   return !typeRows.some((row) => JSON.stringify(row.item) === JSON.stringify(entry.item))
 }
 
-function matchProviderTurns(settled, localTurns, localRows) {
+function matchProviderTurns(settled, localTurns, localRows, getAsset) {
   const orderedLocal = chronologicalTurns(localTurns)
   const byPrompt = new Map()
   const byRuntime = new Map()
@@ -119,7 +120,16 @@ function matchProviderTurns(settled, localTurns, localRows) {
     if (turn.nativeTurnId) byRuntime.set(turn.nativeTurnId, turn)
     if (turn.clientMessageId) byClient.set(turn.clientMessageId, turn)
     const text = localUserText(localRows, turn.id)
-    if (text) byText.set(text, [...(byText.get(text) || []), turn])
+    const user = localRows.find(row => row.turnId === turn.id && row.item.type === 'user_message')?.item
+    const providerText = getAsset && user?.content.some(block => block.type === 'file')
+      ? contentText(user.content.map(block => {
+        if (block.type !== 'file') return block
+        const asset = getAsset(block.assetId)
+        return asset?.taskId === turn.taskId ? { type: 'text', text: filePromptText({ ...asset, absolutePath: asset.storagePath }) } : block
+      })) : ''
+    for (const candidateText of new Set([text, providerText].filter(Boolean))) {
+      byText.set(candidateText, [...(byText.get(candidateText) || []), turn])
+    }
   }
 
   const matched = new Map()
@@ -157,6 +167,7 @@ export function reconcileHistory({
   localTurns = [],
   syncState = null,
   checkedTurnIds = [],
+  getAsset = null,
 }) {
   // 仅依据原始历史明确标记的消息身份清理旧占位内容，不按文字删除正常消息。
   const ignoredIdentities = new Set((snapshot.ignoredItems || []).flatMap(itemIdentities))
@@ -199,7 +210,7 @@ export function reconcileHistory({
     return { mode: 'noop', changed: false, manifest, turns: [], rows: [], checkedTurnIds, confirmedTurnIds: [] }
   }
   const settled = snapshot.turns.filter((turn) => TERMINAL_HISTORY_STATUSES.has(turn.status))
-  const matched = matchProviderTurns(settled, localTurns, localRows)
+  const matched = matchProviderTurns(settled, localTurns, localRows, getAsset)
   const turns = settled.map((turn) => publicTurn(turn, matched.get(turn.sourceTurnId)?.id))
   const rows = []
 

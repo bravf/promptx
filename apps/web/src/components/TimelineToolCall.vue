@@ -57,11 +57,11 @@ function toggleExpanded() {
 }
 
 function stop() {
-  generation++; clearTimeout(timer); controller?.abort(); controller = null; loading.value = false
+  generation++; clearTimeout(timer); timer = null; controller?.abort(); controller = null; loading.value = false
 }
 async function load(section = null) {
   if (!canLoad.value || loading.value) return
-  clearTimeout(timer)
+  clearTimeout(timer); timer = null
   const token = generation
   const revision = props.entry.seqEnd
   const key = cacheKey.value
@@ -88,7 +88,7 @@ async function load(section = null) {
       data.value = result
       loadedRevision = revision
     }
-    client.put(key, data.value)
+    if (loadedRevision === revision) client.put(key, data.value)
     await nextTick(); emit('rendered')
   } catch (reason) {
     if (token !== generation || reason.name === 'AbortError') return
@@ -99,13 +99,12 @@ async function load(section = null) {
   } finally {
     if (token === generation) {
       loading.value = false
-      if (!error.value && props.entry.seqEnd !== revision && canLoad.value) schedule()
+      if (!error.value && loadedRevision !== props.entry.seqEnd && canLoad.value) schedule()
     }
   }
 }
 function schedule() {
-  clearTimeout(timer)
-  if (!canLoad.value || loading.value) return
+  if (!canLoad.value || loading.value || timer) return
   if (!data.value) {
     const cached = client.get(cacheKey.value)
     if (cached) { data.value = cached; loadedRevision = props.entry.seqEnd; return }

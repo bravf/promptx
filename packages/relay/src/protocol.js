@@ -1,4 +1,4 @@
-export const RELAY_PROTOCOL_VERSION = 2
+export const RELAY_PROTOCOL_VERSION = 3
 export const RELAY_CHUNK_BYTES = 256 * 1024
 
 export function buildRelayWebSocketUrl(relayUrl, parameters = {}) {

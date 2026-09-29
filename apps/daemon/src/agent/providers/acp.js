@@ -1,3 +1,4 @@
+import { childEnvironment, terminateChild } from '../../runtime/processControl.js'
 import { spawn } from 'node:child_process'
 import { BackgroundTasks } from './backgroundTasks.js'
 import { EventEmitter } from 'node:events'
@@ -103,6 +104,8 @@ export class AcpRuntime extends EventEmitter {
     this.controlState = createControlState({ requestedModelId: modelId, requestedReasoningEffort: this.reasoningEffort })
   }
 
+  async prepareTurn() { await this.connect() }
+
   async connect() {
     if (this.connection && this.connected) return
     if (this.connectPromise) return this.connectPromise
@@ -122,10 +125,12 @@ export class AcpRuntime extends EventEmitter {
     }
     const child = spawn(this.command, this.args, {
       cwd: this.cwd,
-      env: this.env,
+      env: childEnvironment(this.env),
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      detached: process.platform !== 'win32',
     })
+    child.promptxProcessGroup = process.platform !== 'win32'
     const childReady = new Promise((resolve, reject) => {
       child.once('spawn', resolve)
       child.once('error', reject)
@@ -154,6 +159,7 @@ export class AcpRuntime extends EventEmitter {
         clientInfo: { name: 'promptx', title: 'PromptX', version: '2.0.0' },
         clientCapabilities: {},
       })
+      if (this.child !== child) throw new Error('ACP 连接已关闭。')
       this.agentCapabilities = initialized.agentCapabilities || {}
       if (this.sessionId && (!this.capabilities.resume || !this.agentCapabilities.loadSession)) {
         throw Object.assign(new Error('该 ACP Agent 不支持恢复会话。'), { code: 'acp_resume_unsupported' })
@@ -161,6 +167,7 @@ export class AcpRuntime extends EventEmitter {
       const result = this.sessionId
         ? await connection.loadSession({ sessionId: this.sessionId, cwd: this.cwd, mcpServers: [] })
         : await connection.newSession({ cwd: this.cwd, mcpServers: [] })
+      if (this.child !== child) throw new Error('ACP 连接已关闭。')
       this.sessionId = result.sessionId || this.sessionId
       this.emit('handle', { sessionId: this.sessionId })
       this.sessionControls = {
@@ -179,7 +186,7 @@ export class AcpRuntime extends EventEmitter {
       }
       this.connected = false
       this.acceptUpdates = false
-      if (!child.killed) child.kill('SIGTERM')
+      terminateChild(child)
       throw error
     }
   }
@@ -398,7 +405,7 @@ export class AcpRuntime extends EventEmitter {
     this.connection = null
     this.connected = false
     this.acceptUpdates = false
-    if (child && !child.killed) child.kill('SIGTERM')
+    terminateChild(child)
   }
 }
 

@@ -1,3 +1,4 @@
+import { childEnvironment } from '../../runtime/processControl.js'
 import { randomUUID } from 'node:crypto'
 import { isClaudeNoResponsePlaceholder } from './claudeMessages.js'
 import { BackgroundTasks, taskStatus } from './backgroundTasks.js'
@@ -114,6 +115,8 @@ export class ClaudeRuntime extends EventEmitter {
     this.controlState = createControlState({ requestedModelId: modelId, requestedReasoningEffort: this.reasoningEffort })
   }
 
+  async prepareTurn() { await this.connect() }
+
   async connect() {
     if (this.runningQuery && this.connected) return
     if (this.connectPromise) return this.connectPromise
@@ -135,6 +138,7 @@ export class ClaudeRuntime extends EventEmitter {
       prompt: inputQueue,
       options: {
         cwd: this.cwd,
+        env: childEnvironment(),
         ...(this.sessionId ? { resume: this.sessionId } : {}),
         ...(this.modelId ? { model: this.modelId } : {}),
         ...(this.reasoningEffort ? { effort: this.reasoningEffort, thinking: { type: 'adaptive' } } : {}),

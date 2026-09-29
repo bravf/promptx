@@ -836,7 +836,8 @@ test('重启后保留后台任务与摘要，运行中任务标记中断并提�
     app.sqliteRepository.upsertProviderTask(agent.id, { id: 'done', title: '已完成', status: 'completed', summary: '保留报告' })
     await app.close()
     app = await createApp(options)
-    const restored = (await app.inject({ method: 'GET', url: `/api/v2/tasks/${task.id}/agent` })).json().agent
+    await app.listen({ host: '127.0.0.1', port: 0 })
+    const restored = (await app.inject({ method: 'GET', url: `/api/v2/tasks/${task.id}/agent`, headers: { host: `127.0.0.1:${app.server.address().port}` } })).json().agent
     assert.equal(restored.backgroundTasks.find(item => item.id === 'running').status, 'interrupted')
     assert.equal(restored.backgroundTasks.find(item => item.id === 'done').summary, '保留报告')
     assert.equal(restored.attentionReason, 'error')
@@ -866,4 +867,23 @@ test('最后一个后台任务结束才提示完成，自动汇总开始清除�
     runtime.emit('turnCompleted', { nativeTurnId: 'summary-failure' })
     assert.equal(app.sqliteRepository.getTaskAgent(task.id).attentionReason, 'error')
   } finally { await app.close() }
+})
+
+test('生产静态入口仍校验 Host、Origin 和编码路径，校验错误返回 400', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-security-api-'))
+  fs.writeFileSync(path.join(root, 'index.html'), '<html>PromptX</html>')
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: root, assetsDir: path.join(root, 'assets'), relay: false,
+    relayOptions: { configPath: path.join(root, 'relay.json'), identityPath: path.join(root, 'identity.json') } })
+  t.after(async () => { await app.close(); fs.rmSync(root, { recursive: true, force: true }) })
+  for (const url of ['/api/v2/projects', '/%61pi/v2/projects', '/api%2fv2/projects', '/']) {
+    assert.equal((await app.inject({ url, headers: { origin: 'https://evil.example' } })).statusCode, 403)
+    assert.equal((await app.inject({ url, headers: { host: 'rebind.evil.example:3001' } })).statusCode, 403)
+    assert.equal((await app.inject({ url, headers: { 'sec-fetch-site': 'cross-site' } })).statusCode, 403)
+  }
+  const invalid = await app.inject({ method: 'POST', url: '/api/v2/projects', payload: {} })
+  assert.equal(invalid.statusCode, 400, invalid.body)
+  const config = await app.inject({ url: '/api/v2/relay/config' })
+  assert.equal(config.json().config.enabled, false)
+  assert.equal(config.json().pairing, undefined)
+  assert.equal((await app.inject({ method: 'POST', url: '/api/v2/relay/pairing' })).statusCode, 409)
 })

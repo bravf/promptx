@@ -41,10 +41,32 @@ function badRequest(message) {
   return error
 }
 
+function sseWriteRaw(raw, text) {
+  if (raw.destroyed || raw.writableEnded) return
+  if (raw.writableLength + Buffer.byteLength(text) > 4 * 1024 * 1024) {
+    raw.destroy()
+    return
+  }
+  raw.write(text)
+}
+
 function sseWrite(raw, event) {
-  if (event.type === 'timeline') raw.write(`id: ${event.epoch}:${event.row.seq}\n`)
-  raw.write(`event: ${event.type}\n`)
-  raw.write(`data: ${JSON.stringify(event)}\n\n`)
+  sseWriteRaw(raw, `${event.type === 'timeline' ? `id: ${event.epoch}:${event.row.seq}\n` : ''}event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+}
+
+function initializeSse(request, reply, corsPolicy) {
+  reply.hijack()
+  const raw = reply.raw
+  const unsubscribes = []
+  const heartbeat = setInterval(() => sseWriteRaw(raw, ': heartbeat\n\n'), 15000)
+  heartbeat.unref?.()
+  raw.once('error', () => raw.destroy())
+  raw.once('close', () => {
+    clearInterval(heartbeat)
+    unsubscribes.forEach(unsubscribe => unsubscribe())
+  })
+  raw.writeHead(200, createSseHeaders(request.headers.origin, origin => corsPolicy.allows(origin)))
+  return { raw, unsubscribes }
 }
 
 export function createSseHeaders(origin = '', allowsOrigin = () => false) {
@@ -487,77 +509,56 @@ export function registerRoutes(app, context) {
   })
 
   app.get('/api/v2/events', (request, reply) => {
-    reply.hijack()
-    const raw = reply.raw
-    raw.writeHead(200, createSseHeaders(request.headers.origin, (origin) => corsPolicy.allows(origin)))
+    const { raw, unsubscribes } = initializeSse(request, reply, corsPolicy)
     const writeTask = (agent) => sseWrite(raw, { type: 'task', task: repository.getTask(agent.taskId), agent })
-    const unsubscribe = eventHub.subscribeAll((event) => {
+    unsubscribes.push(eventHub.subscribeAll((event) => {
       if (event.type === 'agent') writeTask(event.agent)
-    })
-    repository.listAllAgents().forEach(writeTask)
-    const heartbeat = setInterval(() => raw.write(': heartbeat\n\n'), 15000)
-    heartbeat.unref?.()
-    raw.on('close', () => {
-      clearInterval(heartbeat)
-      unsubscribe()
-    })
+    }))
+    try { repository.listAllAgents().forEach(writeTask) } catch { raw.destroy() }
   })
   app.post('/api/v2/task-events', (request, reply) => {
     const { subscriptions } = TaskEventSubscriptionsSchema.parse(request.body)
-    reply.hijack()
-    const raw = reply.raw
-    raw.writeHead(200, createSseHeaders(request.headers.origin, (origin) => corsPolicy.allows(origin)))
-    const unsubscribes = []
-    const heartbeat = setInterval(() => raw.write(': heartbeat\n\n'), 15000)
-    heartbeat.unref?.()
-    raw.on('close', () => {
-      clearInterval(heartbeat)
-      unsubscribes.forEach(unsubscribe => unsubscribe())
-    })
-    for (const subscription of subscriptions) {
-      const write = event => sseWrite(raw, { type: 'task-event', subscriptionId: subscription.id, event: presentEvent(event) })
-      const agent = repository.getTaskAgent(subscription.taskId)
-      if (!agent) { write({ type: 'unavailable' }); continue }
-      unsubscribes.push(eventHub.subscribe(agent.id, write))
-      if (subscription.snapshot) {
-        let cursor = parseCursor(subscription.cursor)
-        let snapshot
-        do {
-          snapshot = timelineStore.fetch(subscription.taskId, { direction: cursor ? 'after' : 'tail', cursor, mode: 'presented' })
-          if (snapshot.reset) write({ type: 'reset', timeline: snapshot })
-          else snapshot.rows.forEach(row => write({ type: 'timeline', epoch: snapshot.epoch, row }))
-          cursor = { epoch: snapshot.epoch, seq: snapshot.rows.at(-1)?.seq || 0 }
-        } while (snapshot.hasNewer && snapshot.rows.length)
-        write({ type: 'agent', agent: repository.getAgent(agent.id) })
-        write({ type: 'timeline-synced', sync: { status: 'current', turns: repository.listTurns(subscription.taskId, 1000) } })
-        const control = agentManager.controlStates.get(agent.id)
-        if (control) write({ type: 'control', control })
-        void agentManager.syncTimeline(agent.id).catch(error => request.log.warn(error, 'Timeline 重连同步失败'))
+    const { raw, unsubscribes } = initializeSse(request, reply, corsPolicy)
+    try {
+      for (const subscription of subscriptions) {
+        const write = event => sseWrite(raw, { type: 'task-event', subscriptionId: subscription.id, event: presentEvent(event) })
+        const agent = repository.getTaskAgent(subscription.taskId)
+        if (!agent) { write({ type: 'unavailable' }); continue }
+        unsubscribes.push(eventHub.subscribe(agent.id, write))
+        if (subscription.snapshot) {
+          let cursor = parseCursor(subscription.cursor)
+          let snapshot
+          do {
+            snapshot = timelineStore.fetch(subscription.taskId, { direction: cursor ? 'after' : 'tail', cursor, mode: 'presented' })
+            if (snapshot.reset) write({ type: 'reset', timeline: snapshot })
+            else snapshot.rows.forEach(row => write({ type: 'timeline', epoch: snapshot.epoch, row }))
+            cursor = { epoch: snapshot.epoch, seq: snapshot.rows.at(-1)?.seq || 0 }
+          } while (snapshot.hasNewer && snapshot.rows.length)
+          write({ type: 'agent', agent: repository.getAgent(agent.id) })
+          write({ type: 'timeline-synced', sync: { status: 'current', turns: repository.listTurns(subscription.taskId, 1000) } })
+          const control = agentManager.controlStates.get(agent.id)
+          if (control) write({ type: 'control', control })
+          void agentManager.syncTimeline(agent.id).catch(error => request.log.warn(error, 'Timeline 重连同步失败'))
+        }
+        write({ type: 'ready' })
       }
-      write({ type: 'ready' })
-    }
+    } catch { raw.destroy() }
   })
   app.get('/api/v2/tasks/:taskId/events', (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)
     if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
-    reply.hijack()
-    const raw = reply.raw
-    raw.writeHead(200, createSseHeaders(request.headers.origin, (origin) => corsPolicy.allows(origin)))
-    const unsubscribe = eventHub.subscribe(agent.id, (event) => sseWrite(raw, presentEvent(event)))
-    const cursor = parseCursor(request.headers['last-event-id'] || request.query.cursor)
-    const snapshot = timelineStore.fetch(request.params.taskId, { direction: cursor ? 'after' : 'tail', cursor, mode: 'presented' })
-    if (snapshot.reset) sseWrite(raw, { type: 'reset', timeline: snapshot })
-    else snapshot.rows.forEach((row) => sseWrite(raw, { type: 'timeline', epoch: snapshot.epoch, row }))
-    sseWrite(raw, { type: 'agent', agent: repository.getAgent(agent.id) })
-    sseWrite(raw, { type: 'timeline-synced', sync: { status: 'current', turns: repository.listTurns(request.params.taskId, 1000) } })
-    const control = agentManager.controlStates.get(agent.id)
-    if (control) sseWrite(raw, { type: 'control', control })
-    void agentManager.syncTimeline(agent.id).catch((error) => request.log.warn(error, 'Timeline 重连同步失败'))
-    const heartbeat = setInterval(() => raw.write(': heartbeat\n\n'), 15000)
-    heartbeat.unref?.()
-    raw.on('close', () => {
-      clearInterval(heartbeat)
-      unsubscribe()
-    })
+    const { raw, unsubscribes } = initializeSse(request, reply, corsPolicy)
+    unsubscribes.push(eventHub.subscribe(agent.id, (event) => sseWrite(raw, presentEvent(event))))
+    try {
+      const cursor = parseCursor(request.headers['last-event-id'] || request.query.cursor)
+      const snapshot = timelineStore.fetch(request.params.taskId, { direction: cursor ? 'after' : 'tail', cursor, mode: 'presented' })
+      if (snapshot.reset) sseWrite(raw, { type: 'reset', timeline: snapshot })
+      else snapshot.rows.forEach((row) => sseWrite(raw, { type: 'timeline', epoch: snapshot.epoch, row }))
+      sseWrite(raw, { type: 'agent', agent: repository.getAgent(agent.id) })
+      sseWrite(raw, { type: 'timeline-synced', sync: { status: 'current', turns: repository.listTurns(request.params.taskId, 1000) } })
+      const control = agentManager.controlStates.get(agent.id)
+      if (control) sseWrite(raw, { type: 'control', control })
+      void agentManager.syncTimeline(agent.id).catch((error) => request.log.warn(error, 'Timeline 重连同步失败'))
+    } catch { raw.destroy() }
   })
 }

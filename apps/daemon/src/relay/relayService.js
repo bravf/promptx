@@ -6,14 +6,12 @@ import { createGzip } from 'node:zlib'
 import WebSocket from 'ws'
 
 import {
+  SessionCipher, deriveSessionKeys, sessionTranscript, randomToken, signChallenge, relayAuthTranscript,
   buildRelayWebSocketUrl,
   createConnectionOfferUrl,
-  decryptPayload,
   deriveSharedKey,
-  encryptPayload,
   importPublicKey,
   importSecretKey,
-  NonceReplayWindow,
   parseJsonFrame,
   RELAY_CHUNK_BYTES,
   splitBytes,
@@ -96,7 +94,7 @@ function normalizeAppUrl(value) {
 
 function normalizeConfig(input = {}, previous = {}) {
   return {
-    enabled: booleanValue(input.enabled, previous.enabled ?? true),
+    enabled: booleanValue(input.enabled, previous.enabled ?? false),
     relayUrl: normalizeWebSocketUrl(input.relayUrl ?? previous.relayUrl ?? DEFAULT_RELAY_URL),
     appUrl: normalizeAppUrl(input.appUrl ?? previous.appUrl ?? DEFAULT_APP_URL),
   }
@@ -173,9 +171,10 @@ export class RelayService {
 
   getOffer() {
     const offer = {
-      v: 2,
+      v: 3,
       serverId: this.identity.serverId,
       daemonPublicKeyB64: this.identity.publicKeyB64,
+      pairingKeyB64: this.identity.pairingKeyB64,
       relay: { url: this.config.relayUrl },
     }
     return { offer, url: createConnectionOfferUrl(this.config.appUrl, offer) }
@@ -294,7 +293,15 @@ export class RelayService {
     })
   }
 
+  sendIdentityProof(socket, frame, connectionId = '') {
+    if (frame?.type !== 'relay.challenge' || frame.v !== 3) return false
+    socket.send(JSON.stringify({ type: 'relay.auth', publicKeyB64: this.identity.signPublicKeyB64,
+      signature: signChallenge(this.identity.signSecretKeyB64, relayAuthTranscript(this.identity.serverId, connectionId, frame.challenge)) }))
+    return true
+  }
+
   handleControlFrame(frame) {
+    if (this.sendIdentityProof(this.controlSocket, frame)) return
     if (frame.type === 'relay.ready') {
       const now = new Date().toISOString()
       Object.assign(this.status, {
@@ -369,8 +376,11 @@ export class RelayService {
     const channel = {
       connectionId,
       socket,
-      sharedKey: null,
-      seenNonces: new NonceReplayWindow(),
+      identityProved: false,
+      cipher: null,
+      authenticated: false,
+      requestIds: new Set(),
+      bufferedBytes: 0,
       requests: new Map(),
       acceptedBodyEncodings: new Set(),
       handshakeTimer: null,
@@ -379,7 +389,7 @@ export class RelayService {
     this.status.activeClientCount = this.channels.size
     socket.on('open', () => {
       channel.handshakeTimer = setTimeout(() => {
-        if (!channel.sharedKey) this.closeChannel(channel, 1008, 'e2ee_handshake_timeout')
+        if (!channel.authenticated) this.closeChannel(channel, 1008, 'e2ee_handshake_timeout')
       }, E2EE_HANDSHAKE_TIMEOUT_MS)
       channel.handshakeTimer.unref?.()
     })
@@ -394,34 +404,36 @@ export class RelayService {
   }
 
   handleChannelMessage(channel, data, isBinary) {
-    if (!channel.sharedKey) {
-      if (isBinary) return this.closeChannel(channel, 1008, 'e2ee_handshake_required')
-      const hello = parseJsonFrame(data.toString())
-      if (hello?.type !== 'e2ee.hello') return this.closeChannel(channel, 1008, 'invalid_e2ee_hello')
-      try {
-        channel.acceptedBodyEncodings = new Set(
-          (Array.isArray(hello.acceptBodyEncodings) ? hello.acceptBodyEncodings : [])
-            .map((value) => String(value).toLowerCase())
-            .filter((value) => value === 'gzip'),
-        )
-        channel.sharedKey = deriveSharedKey(
-          importSecretKey(this.identity.secretKeyB64),
-          importPublicKey(hello.clientPublicKeyB64),
-        )
-        clearTimeout(channel.handshakeTimer)
-        channel.handshakeTimer = null
-        channel.socket.send(JSON.stringify({ type: 'e2ee.ready', v: 2 }))
-      } catch {
-        this.closeChannel(channel, 1008, 'invalid_client_key')
+    if (!isBinary) {
+      const frame = parseJsonFrame(data.toString())
+      if (!channel.identityProved && this.sendIdentityProof(channel.socket, frame, channel.connectionId)) {
+        channel.identityProved = true
+        return
       }
+      if (channel.cipher || frame?.type !== 'e2ee.hello' || frame.v !== 3) return this.closeChannel(channel, 1008, 'invalid_e2ee_hello')
+      try {
+        const challenge = randomToken()
+        const transcript = sessionTranscript(this.identity.serverId, frame, challenge)
+        const shared = deriveSharedKey(importSecretKey(this.identity.secretKeyB64), importPublicKey(frame.clientPublicKeyB64))
+        const keys = deriveSessionKeys(shared, this.identity.pairingKeyB64, transcript)
+        channel.cipher = new SessionCipher(keys.serverToClient, keys.clientToServer)
+        channel.acceptedBodyEncodings = new Set((frame.acceptBodyEncodings || []).filter(value => value === 'gzip'))
+        channel.socket.send(JSON.stringify({ type: 'e2ee.challenge', v: 3, challenge }))
+      } catch { this.closeChannel(channel, 1008, 'invalid_client_key') }
       return
     }
-    if (!isBinary) return this.closeChannel(channel, 1008, 'unencrypted_frame')
     try {
-      const plaintext = decryptPayload(channel.sharedKey, data, channel.seenNonces)
+      const plaintext = channel.cipher.decrypt(data)
       if (typeof plaintext !== 'string') throw new Error('不支持的 Relay 业务帧。')
       const frame = parseJsonFrame(plaintext)
       if (!frame) throw new Error('Relay 业务帧格式无效。')
+      if (!channel.authenticated) {
+        if (frame.type !== 'e2ee.auth') throw new Error('配对认证失败。')
+        channel.authenticated = true
+        clearTimeout(channel.handshakeTimer)
+        this.sendEncrypted(channel, { type: 'e2ee.ready', v: 3 })
+        return
+      }
       this.handleRequestFrame(channel, frame)
     } catch (error) {
       this.status.lastError = error.message
@@ -431,9 +443,11 @@ export class RelayService {
 
   handleRequestFrame(channel, frame) {
     const requestId = String(frame.requestId || '')
-    if (!/^req_[A-Za-z0-9_-]{12,}$/.test(requestId)) return
+    if (!/^req_[A-Za-z0-9_-]{12,128}$/.test(requestId)) return
     if (frame.type === 'request.start') {
-      if (channel.requests.has(requestId)) return
+      if (channel.requestIds.has(requestId)) return
+      if (channel.requests.size >= 64 || channel.requestIds.size >= 100000) return this.closeChannel(channel, 1008, 'request_limit')
+      channel.requestIds.add(requestId)
       channel.requests.set(requestId, {
         requestId,
         method: String(frame.method || 'GET').toUpperCase(),
@@ -442,36 +456,44 @@ export class RelayService {
         body: [],
         bodyBytes: 0,
         controller: null,
+        state: 'receiving',
+        timer: setTimeout(() => this.expireRequest(channel, requestId), 30000),
       })
       return
     }
     const request = channel.requests.get(requestId)
     if (!request) return
     if (frame.type === 'request.body') {
+      if (request.state !== 'receiving') return
       const chunk = Buffer.from(String(frame.chunk || ''), 'base64')
       request.bodyBytes += chunk.byteLength
-      if (request.bodyBytes > MAX_REQUEST_BODY_BYTES) {
+      channel.bufferedBytes += chunk.byteLength
+      if (request.bodyBytes > MAX_REQUEST_BODY_BYTES || channel.bufferedBytes > MAX_REQUEST_BODY_BYTES) {
         this.sendEncrypted(channel, {
           type: 'response.error',
           requestId,
           code: 'relay_request_too_large',
           message: '远程请求内容超过 64 MB 限制。',
         })
-        channel.requests.delete(requestId)
+        this.finishRequest(channel, request)
         return
       }
       request.body.push(chunk)
     } else if (frame.type === 'request.end') {
-      this.forward(channel, request)
+      if (request.state !== 'receiving') return
+      request.state = 'forwarding'
+      clearTimeout(request.timer)
+      request.timer = setTimeout(() => this.expireRequest(channel, requestId), 30000)
+      void this.forward(channel, request)
     } else if (frame.type === 'request.cancel') {
       request.controller?.abort()
-      channel.requests.delete(requestId)
+      this.finishRequest(channel, request)
     }
   }
 
   sendEncrypted(channel, frame) {
-    if (!channel.sharedKey || channel.socket.readyState !== WebSocket.OPEN) return
-    const encrypted = encryptPayload(channel.sharedKey, JSON.stringify(frame))
+    if (!channel.authenticated || channel.socket.readyState !== WebSocket.OPEN) return
+    const encrypted = channel.cipher.encrypt(JSON.stringify(frame))
     channel.socket.send(Buffer.from(encrypted))
   }
 
@@ -480,12 +502,17 @@ export class RelayService {
     request.controller = controller
     try {
       const body = Buffer.concat(request.body)
+      request.body = []
       const response = await fetch(safeRequestUrl(this.localBaseUrl, request.path), {
         method: request.method,
         headers: { ...request.headers, 'x-promptx-relay-request': '1' },
         body: ['GET', 'HEAD'].includes(request.method) || !body.length ? undefined : body,
         signal: controller.signal,
       })
+      channel.bufferedBytes -= request.bodyBytes
+      request.bodyBytes = 0
+      clearTimeout(request.timer)
+      request.timer = setTimeout(() => this.expireRequest(channel, request.requestId), 10 * 60 * 1000)
       const bodyEncoding = channel.acceptedBodyEncodings.has('gzip') && isCompressibleResponse(response)
         ? 'gzip'
         : ''
@@ -523,12 +550,28 @@ export class RelayService {
         })
       }
     } finally {
-      channel.requests.delete(request.requestId)
+      this.finishRequest(channel, request)
     }
   }
 
+  finishRequest(channel, request) {
+    clearTimeout(request.timer)
+    channel.bufferedBytes -= request.bodyBytes
+    request.bodyBytes = 0; request.body = []
+    channel.requests.delete(request.requestId)
+  }
+
+  expireRequest(channel, requestId) {
+    const request = channel.requests.get(requestId)
+    if (!request) return
+    request.controller?.abort()
+    this.sendEncrypted(channel, { type: 'response.error', requestId, code: 'request_timeout', message: '远程请求超时，请重试。' })
+    this.finishRequest(channel, request)
+  }
+
   abortChannelRequests(channel) {
-    for (const request of channel.requests.values()) request.controller?.abort()
+    for (const request of channel.requests.values()) { request.controller?.abort(); clearTimeout(request.timer); request.bodyBytes = 0; request.body = [] }
+    channel.bufferedBytes = 0
     channel.requests.clear()
   }
 
@@ -545,12 +588,16 @@ export function registerRelayRoutes(app, relay) {
   const snapshot = () => ({
     config: relay.getConfig(),
     relay: relay.getStatus(),
-    pairing: relay.getOffer(),
   })
   app.get('/api/v2/relay/config', async () => snapshot())
   app.put('/api/v2/relay/config', async (request) => {
     relay.updateConfig(request.body || {})
     return snapshot()
+  })
+  app.post('/api/v2/relay/pairing', async (_request, reply) => {
+    reply.header('Cache-Control', 'no-store')
+    if (!relay.config.enabled) return reply.code(409).send({ error: 'relay_disabled', message: '请先启用 Relay。' })
+    return { pairing: relay.getOffer() }
   })
   app.get('/api/v2/relay/status', async () => ({ relay: relay.getStatus() }))
   app.post('/api/v2/relay/reconnect', async () => {

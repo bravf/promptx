@@ -184,3 +184,11 @@ test('视频链接标记播放目标，普通文件与外链保持原行为', as
     assert.equal((html.match(/data-workspace-video-path=/g) || []).length, 1)
   }
 })
+
+test('代码块中的美元替换符保持原文', async () => {
+  const source = "$$ $& $` $' $1"
+  const html = await renderCodexMarkdown(`\`\`\`text\n${source}\n\`\`\``)
+  const code = html.match(/<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/)?.[1]
+  assert.ok(code)
+  assert.equal(code.replace(/<[^>]+>/g, '').replaceAll('&amp;', '&').replaceAll('&#39;', "'").trim(), source)
+})

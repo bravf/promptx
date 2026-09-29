@@ -30,7 +30,7 @@ const relayLoading = ref(false)
 const relaySaving = ref(false)
 const relayError = ref('')
 const relayData = ref(null)
-const relayForm = ref({ enabled: true, relayUrl: '', appUrl: '' })
+const relayForm = ref({ enabled: false, relayUrl: '', appUrl: '' })
 const pairingQr = ref('')
 const copied = ref(false)
 const confirmReset = ref(false)
@@ -79,6 +79,15 @@ async function saveRelay() {
   } finally {
     relaySaving.value = false
   }
+}
+
+async function showPairing() {
+  relayError.value = ''
+  try {
+    const { pairing } = await v2Api.getRelayPairing()
+    relayData.value.pairing = pairing
+    await updateQr(pairing.url)
+  } catch (error) { relayError.value = error.message }
 }
 
 async function copyPairingUrl() {
@@ -221,6 +230,8 @@ watch(
               <input v-model="relayForm.appUrl" class="relay-input h-9 w-full rounded-sm px-3 font-mono text-xs" spellcheck="false" @change="saveRelay" />
             </label>
           </div>
+
+          <PxButton v-if="relayData?.config.enabled && !relayData?.pairing?.url" class="mt-5" @click="showPairing">显示配对链接</PxButton>
 
           <div v-if="relayData?.pairing?.url" class="mt-7 grid items-start gap-5 sm:grid-cols-[1fr_auto]">
             <div class="min-w-0">

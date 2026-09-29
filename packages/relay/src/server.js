@@ -1,3 +1,4 @@
+import { randomToken, relayAuthTranscript, signingServerId, verifyChallenge } from './crypto.js'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -46,7 +47,7 @@ function getWebDistRoot() {
 }
 
 function validServerId(value) {
-  return /^srv_[A-Za-z0-9_-]{20,}$/.test(String(value || ''))
+  return /^srv_[A-Za-z0-9_-]{43}$/.test(String(value || ''))
 }
 
 function validConnectionId(value) {
@@ -115,7 +116,16 @@ async function startRelayServer(options = {}) {
     sourceSocket.lastActivityAt = record.lastActivityAt
     if (target?.readyState === WebSocket.OPEN) {
       target.lastActivityAt = record.lastActivityAt
-      target.send(data, { binary: isBinary })
+      if (target.bufferedAmount + data.byteLength > config.maxPendingBytes) {
+        sourceSocket.close(1013, 'slow_peer'); target.close(1013, 'slow_peer')
+        removeConnection(record, 'client', 1013, 'slow_peer')
+        return true
+      }
+      sourceSocket.pause()
+      target.send(data, { binary: isBinary }, error => {
+        if (error) { sourceSocket.terminate(); target.terminate() }
+        else sourceSocket.resume()
+      })
       return true
     }
     return false
@@ -144,7 +154,10 @@ async function startRelayServer(options = {}) {
       pendingTimer: null,
     }
     record.pendingTimer = setTimeout(() => {
-      if (!record.serverSocket) removeConnection(record, 'client', 1013, 'daemon_connect_timeout')
+      if (!record.serverSocket) {
+        socket.close(1013, 'daemon_connect_timeout')
+        removeConnection(record, 'client', 1013, 'daemon_connect_timeout')
+      }
     }, config.pendingTimeoutMs)
     record.pendingTimer.unref?.()
     connections.set(connectionId, record)
@@ -217,16 +230,36 @@ async function startRelayServer(options = {}) {
     socket.on('error', () => {
       if (controls.get(serverId) === control) controls.delete(serverId)
     })
-    sendJson(socket, { type: 'relay.ready', v: 2 })
+    sendJson(socket, { type: 'relay.ready', v: 3 })
     sendJson(socket, {
       type: 'relay.sync',
       connectionIds: connectionsForServer(serverId).map((record) => record.connectionId),
     })
   }
 
+  function authenticateServer(socket, params, attach) {
+    attachLiveness(socket)
+    const challenge = randomToken()
+    const timer = setTimeout(() => socket.close(1008, 'auth_timeout'), 10000)
+    timer.unref?.()
+    socket.once('close', () => clearTimeout(timer))
+    socket.once('error', () => clearTimeout(timer))
+    socket.once('message', (data, binary) => {
+      clearTimeout(timer)
+      let frame
+      try { frame = JSON.parse(data.toString()) } catch {}
+      try {
+        if (binary || frame?.type !== 'relay.auth' || signingServerId(frame.publicKeyB64) !== params.serverId
+          || !verifyChallenge(frame.publicKeyB64, relayAuthTranscript(params.serverId, params.connectionId, challenge), frame.signature)) throw new Error('auth')
+        attach()
+      } catch { socket.close(1008, 'invalid_identity_proof') }
+    })
+    sendJson(socket, { type: 'relay.challenge', v: 3, challenge })
+  }
+
   wsServer.on('connection', (socket, request) => {
     const params = parseSocketRequest(request)
-    if (params.version !== '2' || !validServerId(params.serverId)) {
+    if (params.version !== '3' || !validServerId(params.serverId)) {
       socket.close(1008, 'invalid_relay_parameters')
       return
     }
@@ -235,11 +268,11 @@ async function startRelayServer(options = {}) {
       return
     }
     if (params.role === 'server' && !params.connectionId) {
-      attachControl(socket, params.serverId)
+      authenticateServer(socket, params, () => attachControl(socket, params.serverId))
       return
     }
     if (params.role === 'server' && validConnectionId(params.connectionId)) {
-      attachServerData(socket, params.serverId, params.connectionId)
+      authenticateServer(socket, params, () => attachServerData(socket, params.serverId, params.connectionId))
       return
     }
     socket.close(1008, 'invalid_relay_role')
@@ -247,7 +280,7 @@ async function startRelayServer(options = {}) {
 
   app.get('/health', async () => ({
     ok: true,
-    protocolVersion: 2,
+    protocolVersion: 3,
     connectedDaemons: controls.size,
     connectedClients: connections.size,
   }))
@@ -268,8 +301,7 @@ async function startRelayServer(options = {}) {
       socket.destroy()
       return
     }
-    const forwardedIp = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim()
-    const clientIp = forwardedIp || request.socket.remoteAddress || 'unknown'
+    const clientIp = request.socket.remoteAddress || 'unknown'
     const now = Date.now()
     const attempt = connectionAttempts.get(clientIp)
     const current = !attempt || now - attempt.windowStartedAt >= 60_000
@@ -281,6 +313,7 @@ async function startRelayServer(options = {}) {
       socket.destroy()
       return
     }
+    if (wsServer.clients.size >= config.maxTotalClients * 3) { socket.destroy(); return }
     wsServer.handleUpgrade(request, socket, head, (ws) => wsServer.emit('connection', ws, request))
   })
 

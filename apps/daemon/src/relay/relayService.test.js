@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 import WebSocket from 'ws'
 
+import { randomToken } from '../../../../packages/relay/src/crypto.js'
 import { startRelayServer } from '../../../../packages/relay/src/server.js'
 import { EncryptedRelayConnection } from '../../../web/src/lib/relayConnection.js'
 import { cleanHeaders, RelayService } from './relayService.js'
@@ -99,6 +100,8 @@ test('daemon 与浏览器通过盲 Relay 完成 E2EE JSON、SSE 和 FormData 隧
     await waitFor(() => service.getStatus().connected)
     client = new EncryptedRelayConnection(service.getOffer().offer, { WebSocketClass: WebSocket })
 
+    const unauthorized = new EncryptedRelayConnection({ ...service.getOffer().offer, pairingKeyB64: randomToken() }, { WebSocketClass: WebSocket })
+    try { await assert.rejects(unauthorized.request('/api/v2/test')) } finally { unauthorized.close() }
     const jsonResponse = await client.request('/api/v2/test')
     assert.equal(jsonResponse.status, 200)
     assert.deepEqual(await jsonResponse.json(), { ok: true, transport: '1' })
@@ -107,6 +110,12 @@ test('daemon 与浏览器通过盲 Relay 完成 E2EE JSON、SSE 和 FormData 隧
     const streamText = await streamResponse.text()
     assert.match(streamText, /event: timeline/)
     assert.match(streamText, /event: done/)
+
+    const canceledStream = await client.request('/api/v2/events')
+    await canceledStream.body.cancel()
+    await delay(40)
+    assert.equal(client.snapshot().pendingRequestCount, 0)
+    assert.equal(client.snapshot().state, 'ready')
 
     const form = new FormData()
     form.append('file', new Blob(['private-file-content'], { type: 'text/plain' }), 'private.txt')
@@ -141,4 +150,51 @@ test('daemon 与浏览器通过盲 Relay 完成 E2EE JSON、SSE 和 FormData 隧
     await relay.close()
     await new Promise((resolve) => localApi.server.close(resolve))
   }
+})
+
+test('重复 request.end 和已结束 requestId 不会重复执行，取消和过期释放缓冲', () => {
+  const service = Object.create(RelayService.prototype)
+  const channel = { requests: new Map(), requestIds: new Set(), bufferedBytes: 0 }
+  const forwarded = [], errors = []
+  service.forward = async (_channel, request) => forwarded.push(request)
+  service.sendEncrypted = (_channel, frame) => errors.push(frame)
+  const requestId = 'req_duplicate123456'
+  const start = { type: 'request.start', requestId, method: 'POST', path: '/api/v2/test' }
+  service.handleRequestFrame(channel, start)
+  service.handleRequestFrame(channel, { type: 'request.body', requestId, chunk: Buffer.from('body').toString('base64') })
+  assert.equal(channel.bufferedBytes, 4)
+  service.handleRequestFrame(channel, { type: 'request.end', requestId })
+  service.handleRequestFrame(channel, { type: 'request.end', requestId })
+  assert.equal(forwarded.length, 1)
+  service.handleRequestFrame(channel, { type: 'request.cancel', requestId })
+  assert.equal(channel.bufferedBytes, 0)
+  service.handleRequestFrame(channel, start)
+  service.handleRequestFrame(channel, { type: 'request.end', requestId })
+  assert.equal(forwarded.length, 1)
+  const secondId = 'req_timeout123456789'
+  service.handleRequestFrame(channel, { ...start, requestId: secondId })
+  service.handleRequestFrame(channel, { type: 'request.body', requestId: secondId, chunk: Buffer.from('body').toString('base64') })
+  service.expireRequest(channel, secondId)
+  assert.equal(channel.bufferedBytes, 0)
+  assert.equal(channel.requests.size, 0)
+  assert.equal(errors.at(-1).code, 'request_timeout')
+})
+
+test('握手期间主动关闭客户端会拒绝等待者，不遗留悬挂 connect', async () => {
+  const sockets = []
+  class WaitingSocket extends EventTarget {
+    static OPEN = 1
+    constructor() { super(); sockets.push(this); this.readyState = 0 }
+    close() { this.readyState = 3; queueMicrotask(() => this.dispatchEvent(new Event('close'))) }
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-relay-close-'))
+  const service = new RelayService({ configPath: path.join(root, 'config'), identityPath: path.join(root, 'identity') })
+  const client = new EncryptedRelayConnection(service.getOffer().offer, { WebSocketClass: WaitingSocket })
+  try {
+    const connecting = client.connect()
+    assert.equal(sockets.length, 1)
+    client.close()
+    await assert.rejects(connecting, /断开/)
+    assert.equal(client.connectPromise, null)
+  } finally { client.close(); service.stop(); fs.rmSync(root, { recursive: true, force: true }) }
 })

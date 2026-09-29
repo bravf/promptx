@@ -1,3 +1,4 @@
+import { withTimeout } from '../runtime/processControl.js'
 import { randomUUID } from 'node:crypto'
 import { TimelineCoalescer } from '../timeline/timelineCoalescer.js'
 import { DEFAULT_AGENT_TITLE, deriveAgentTitle } from './sessionTitle.js'
@@ -147,6 +148,17 @@ export class AgentManager {
     return runtime
   }
 
+  async runtimeOperation(agentId, runtime, operation, label, timeoutMs = 30_000) {
+    try { return await withTimeout(operation, timeoutMs, label) } catch (error) {
+      if (error.code === 'operation_timeout' && this.runtimes.get(agentId) === runtime) {
+        this.finish(agentId, 'failed', { error, runtime })
+        this.runtimes.delete(agentId)
+        runtime.close()
+      }
+      throw error
+    }
+  }
+
   async startTurn(agentId, input) {
     let agent = this.repository.getAgent(agentId)
     if (!agent) throw new Error('Agent 不存在。')
@@ -183,7 +195,7 @@ export class AgentManager {
     this.preparingTurns.add(agentId)
     try {
       runtime = this.getRuntime(agent)
-      if (typeof runtime.prepareTurn === 'function') await runtime.prepareTurn()
+      if (typeof runtime.prepareTurn === 'function') await this.runtimeOperation(agentId, runtime, () => runtime.prepareTurn(), 'Agent 初始化', 90_000)
 
       const currentAgent = this.repository.getAgent(agentId)
       if (!currentAgent) {
@@ -255,7 +267,8 @@ export class AgentManager {
   async getControlState(agentId) {
     const agent = this.repository.getAgent(agentId)
     if (!agent) throw new Error('Agent 不存在。')
-    const control = await this.getRuntime(agent).getControlState()
+    const runtime = this.getRuntime(agent)
+    const control = await this.runtimeOperation(agentId, runtime, () => runtime.getControlState(), '读取 Agent 设置', 90_000)
     this.controlStates.set(agentId, control)
     return control
   }
@@ -296,7 +309,7 @@ export class AgentManager {
     }
     const runtime = this.runtimes.get(agentId)
     if (typeof runtime?.updateSettings === 'function') {
-      const nextControl = await runtime.updateSettings({ modelId, reasoningEffort })
+      const nextControl = await this.runtimeOperation(agentId, runtime, () => runtime.updateSettings({ modelId, reasoningEffort }), '更新 Agent 设置')
       const current = this.repository.getAgent(agentId)
       const updated = this.repository.updateAgent(agentId, {
         modelId: nextControl.currentModelId,
@@ -393,11 +406,11 @@ export class AgentManager {
     if (!runtime) return false
     const errors = []
     if (all && runtime.stopBackgroundTasks) {
-      try { await runtime.stopBackgroundTasks() } catch (error) { errors.push(error) }
+      try { await this.runtimeOperation(agentId, runtime, () => runtime.stopBackgroundTasks(), '停止后台任务', 15_000) } catch (error) { errors.push(error) }
     }
     const active = this.activeTurns.has(agentId)
     if (active) {
-      try { await runtime.cancel() } catch (error) { errors.push(error) }
+      try { await this.runtimeOperation(agentId, runtime, () => runtime.cancel(), '取消任务', 15_000) } catch (error) { errors.push(error) }
     }
     if (errors.length) throw new AggregateError(errors, `部分任务停止失败：${errors.map(error => error.message).join('；')}`)
     return active || all

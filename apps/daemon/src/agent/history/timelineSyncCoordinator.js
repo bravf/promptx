@@ -226,6 +226,7 @@ export class TimelineSyncCoordinator {
     const checkedTurnIds = [...operation.checkedTurnIds]
     const plan = reconcileHistory({
       snapshot,
+      getAsset: id => this.repository.getAsset(id),
       localRows: this.repository.listTimelineRows(agent.taskId),
       localTurns: this.repository.listTurns(agent.taskId, 10000),
       syncState,

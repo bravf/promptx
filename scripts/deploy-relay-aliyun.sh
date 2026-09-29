@@ -48,11 +48,13 @@ cat > "$RELAY_STAGE/package.json" <<EOF
   "version": "$RELAY_VERSION",
   "private": false,
   "type": "module",
+  "overrides": { "brace-expansion@>=4.0.0 <5.0.12": "5.0.12" },
   "dependencies": {
-    "@fastify/static": "^9.0.0",
-    "fastify": "^5.8.2",
+    "@fastify/static": "^10.1.2",
+    "fastify": "^5.12.1",
+    "@noble/hashes": "2.0.1",
     "tweetnacl": "^1.0.3",
-    "ws": "^8.18.3"
+    "ws": "^8.21.0"
   }
 }
 EOF

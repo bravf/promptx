@@ -81,6 +81,6 @@ test('共享事件流按订阅隔离、补齐分页历史，并支持独立恢�
   const reset = await readSnapshots([{ id: 'a', taskId: a.id, cursor: 'obsolete-epoch:9999' }])
   assert.equal(reset[0].event.type, 'reset')
   assert.equal(reset[0].event.timeline.epoch, aEpoch)
-  const duplicate = await app.inject({ method: 'POST', url: '/api/v2/task-events', payload: { subscriptions: [{ id: 'a', taskId: a.id }, { id: 'a', taskId: b.id }] } })
+  const duplicate = await app.inject({ headers: { host: `127.0.0.1:${app.server.address().port}` }, method: 'POST', url: '/api/v2/task-events', payload: { subscriptions: [{ id: 'a', taskId: a.id }, { id: 'a', taskId: b.id }] } })
   assert.equal(duplicate.statusCode, 400)
 })

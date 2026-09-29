@@ -247,7 +247,7 @@ test('自定义监听端口允许本地写入、预检和 SSE，拒绝伪造 Hos
   assert.equal(response.status, 201)
   assert.equal(response.headers.get('access-control-allow-origin'), origin)
   await response.arrayBuffer()
-  const preflight = await f.app.inject({ method: 'OPTIONS', url: '/api/v2/projects', headers: { origin, 'access-control-request-method': 'PATCH' } })
+  const preflight = await f.app.inject({ method: 'OPTIONS', url: '/api/v2/projects', headers: { host: new URL(origin).host, origin, 'access-control-request-method': 'PATCH' } })
   assert.equal(preflight.statusCode, 204)
   assert.match(preflight.headers['access-control-allow-methods'], /PATCH/)
   const controller = new AbortController()

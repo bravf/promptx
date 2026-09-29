@@ -1,4 +1,5 @@
-const OFFER_VERSION = 2
+import { importPublicKey, validateToken } from './crypto.js'
+const OFFER_VERSION = 3
 const OFFER_PREFIX = '#offer='
 
 function bytesToBase64Url(bytes) {
@@ -17,12 +18,13 @@ function base64UrlToBytes(value) {
 }
 
 export function validateConnectionOffer(input) {
-  if (!input || input.v !== OFFER_VERSION) throw new Error('不支持的 Relay Offer 版本。')
+  if (!input || input.v !== OFFER_VERSION) throw new Error('远程协议已升级，请在本机设置中重新配对。')
   const serverId = String(input.serverId || '').trim()
   const daemonPublicKeyB64 = String(input.daemonPublicKeyB64 || '').trim()
   const relayUrl = String(input.relay?.url || '').trim()
   if (!/^srv_[A-Za-z0-9_-]{20,}$/.test(serverId)) throw new Error('Relay serverId 无效。')
-  if (!daemonPublicKeyB64) throw new Error('Relay daemon 公钥缺失。')
+  importPublicKey(daemonPublicKeyB64)
+  validateToken(input.pairingKeyB64)
   let parsedRelayUrl
   try {
     parsedRelayUrl = new URL(relayUrl)
@@ -34,6 +36,7 @@ export function validateConnectionOffer(input) {
     v: OFFER_VERSION,
     serverId,
     daemonPublicKeyB64,
+    pairingKeyB64: input.pairingKeyB64,
     relay: { url: parsedRelayUrl.toString() },
   }
 }
@@ -47,7 +50,7 @@ export function decodeConnectionOffer(encoded) {
   try {
     return validateConnectionOffer(JSON.parse(new TextDecoder().decode(base64UrlToBytes(encoded))))
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Relay')) throw error
+    if (error instanceof Error && (error.message.startsWith('Relay') || error.message.includes('重新配对'))) throw error
     throw new Error('Relay Offer 无法解析。')
   }
 }

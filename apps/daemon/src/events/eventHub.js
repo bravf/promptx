@@ -1,5 +1,6 @@
 export class EventHub {
-  constructor() {
+  constructor(onError = console.error) {
+    this.onError = onError
     this.listeners = new Map()
     this.globalListeners = new Set()
   }
@@ -20,7 +21,8 @@ export class EventHub {
   }
 
   publish(agentId, event) {
-    for (const listener of this.listeners.get(agentId) || []) listener(event)
-    for (const listener of this.globalListeners) listener(event)
+    for (const listener of [...(this.listeners.get(agentId) || []), ...this.globalListeners]) {
+      try { listener(event) } catch (error) { this.onError(error) }
+    }
   }
 }

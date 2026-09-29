@@ -1,3 +1,4 @@
+import { childEnvironment, terminateChild } from '../runtime/processControl.js'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { EventEmitter } from 'node:events'
@@ -6,13 +7,18 @@ export class JsonRpcProcess extends EventEmitter {
   constructor(command, args = [], options = {}) {
     super()
     this.nextId = 1
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 60_000
+    this.closed = false
     this.pending = new Map()
     this.child = spawn(command, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: childEnvironment(options.env),
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      detached: process.platform !== 'win32',
     })
+    this.child.promptxProcessGroup = process.platform !== 'win32'
+    this.child.stdin.on('error', (error) => { this.failPending(error); this.close() })
     const stdout = createInterface({ input: this.child.stdout })
     stdout.on('line', (line) => this.handleLine(line))
     this.child.stderr.on('data', (chunk) => this.emit('stderr', chunk.toString()))
@@ -36,6 +42,7 @@ export class JsonRpcProcess extends EventEmitter {
       const pending = this.pending.get(message.id)
       if (!pending) return
       this.pending.delete(message.id)
+      clearTimeout(pending.timer)
       if (message.error) pending.reject(new Error(message.error.message || 'JSON-RPC 请求失败'))
       else pending.resolve(message.result)
       return
@@ -48,15 +55,25 @@ export class JsonRpcProcess extends EventEmitter {
   }
 
   send(message) {
-    if (!this.child.stdin.writable) throw new Error('Agent 进程不可写。')
-    this.child.stdin.write(`${JSON.stringify(message)}\n`)
+    if (this.closed || !this.child.stdin.writable) throw new Error('Agent 进程不可写。')
+    this.child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+      if (error) { this.failPending(error); this.close() }
+    })
   }
 
   request(method, params = {}) {
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
-      this.send({ jsonrpc: '2.0', id, method, params })
+      const timer = setTimeout(() => {
+        this.failPending(new Error(`JSON-RPC ${method} 请求超时。`))
+        this.close()
+      }, this.requestTimeoutMs)
+      this.pending.set(id, { resolve, reject, timer })
+      try { this.send({ jsonrpc: '2.0', id, method, params }) } catch (error) {
+        clearTimeout(timer)
+        this.pending.delete(id)
+        reject(error)
+      }
     })
   }
 
@@ -69,11 +86,13 @@ export class JsonRpcProcess extends EventEmitter {
   }
 
   failPending(error) {
-    for (const pending of this.pending.values()) pending.reject(error)
+    for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error) }
     this.pending.clear()
   }
 
   close() {
-    if (!this.child.killed) this.child.kill('SIGTERM')
+    this.closed = true
+    this.failPending(new Error('Agent 连接已关闭。'))
+    terminateChild(this.child)
   }
 }

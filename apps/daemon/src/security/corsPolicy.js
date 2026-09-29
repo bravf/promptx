@@ -35,6 +35,15 @@ export function createCorsPolicy(allowedOrigins = process.env.PROMPTX_ALLOWED_OR
   const allowed = new Set([...DEFAULT_ALLOWED_ORIGINS, ...configured])
   return {
     allowedOrigins: [...allowed],
+    allowsHost(host) {
+      try {
+        if (!host || /[\s/@?#\\]/.test(host)) return false
+        const url = new URL(`http://${host}`)
+        const port = getListeningPort()
+        return ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
+          && (!port || Number(url.port || 80) === port)
+      } catch { return false }
+    },
     allows(origin) {
       if (!origin) return true
       const normalized = normalizeOrigin(origin)

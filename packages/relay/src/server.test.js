@@ -9,10 +9,12 @@ import WebSocket from 'ws'
 
 import { readRelayServerConfig, startRelayServer } from './server.js'
 
-const serverId = 'srv_abcdefghijklmnopqrstuvwxyz123456'
+import { generateSigningKeyPair, signingServerId, signChallenge, relayAuthTranscript } from './crypto.js'
+const signing = generateSigningKeyPair()
+const serverId = signingServerId(signing.publicKeyB64)
 
-function openSocket(url) {
-  return new Promise((resolve, reject) => {
+async function openSocket(url, authenticate = true) {
+  const socket = await new Promise((resolve, reject) => {
     const socket = new WebSocket(url)
     socket.testMessages = []
     socket.testMessageWaiters = []
@@ -25,6 +27,13 @@ function openSocket(url) {
     socket.once('open', () => resolve(socket))
     socket.once('error', reject)
   })
+  if (authenticate && new URL(url).searchParams.get('role') === 'server') {
+    const challenge = await nextJson(socket)
+    assert.equal(challenge.type, 'relay.challenge')
+    socket.send(JSON.stringify({ type: 'relay.auth', publicKeyB64: signing.publicKeyB64, signature: signChallenge(signing.secretKeyB64, relayAuthTranscript(serverId, new URL(url).searchParams.get('connectionId'), challenge.challenge)) }))
+    await delay(10)
+  }
+  return socket
 }
 
 function nextMessage(socket) {
@@ -85,7 +94,7 @@ test('Relay 提供同一份 Web 应用和健康状态', async () => {
     const health = await fetch(`http://127.0.0.1:${relay.port}/health`).then((response) => response.json())
     assert.deepEqual(health, {
       ok: true,
-      protocolVersion: 2,
+      protocolVersion: 3,
       connectedDaemons: 0,
       connectedClients: 0,
     })
@@ -98,7 +107,7 @@ test('Relay 提供同一份 Web 应用和健康状态', async () => {
 
 test('控制连接收到客户端 connectionId，数据连接双向原样转发文本和密文', async () => {
   const relay = await startTestRelay()
-  const base = `ws://127.0.0.1:${relay.port}/relay/ws?v=2&serverId=${serverId}`
+  const base = `ws://127.0.0.1:${relay.port}/relay/ws?v=3&serverId=${serverId}`
   let control
   let client
   let daemon
@@ -141,7 +150,7 @@ test('控制连接收到客户端 connectionId，数据连接双向原样转发�
 
 test('客户端先连接时会缓存握手帧，daemon 上线后通过 sync 接管', async () => {
   const relay = await startTestRelay()
-  const base = `ws://127.0.0.1:${relay.port}/relay/ws?v=2&serverId=${serverId}`
+  const base = `ws://127.0.0.1:${relay.port}/relay/ws?v=3&serverId=${serverId}`
   let control
   let client
   let daemon
@@ -177,7 +186,7 @@ test('客户端先连接时会缓存握手帧，daemon 上线后通过 sync 接�
 
 test('Relay 持续单向下行时不会把接收端误判为空闲连接', async () => {
   const relay = await startTestRelay({ heartbeatIntervalMs: 20, idleTimeoutMs: 70 })
-  const base = `ws://127.0.0.1:${relay.port}/relay/ws?v=2&serverId=${serverId}`
+  const base = `ws://127.0.0.1:${relay.port}/relay/ws?v=3&serverId=${serverId}`
   let control
   let client
   let daemon
@@ -204,4 +213,59 @@ test('Relay 持续单向下行时不会把接收端误判为空闲连接', async
     daemon?.terminate()
     await relay.close()
   }
+})
+
+test('未持有身份私钥的连接不能替换控制连接，旧签名不能重放', async () => {
+  const relay = await startTestRelay()
+  const base = `ws://127.0.0.1:${relay.port}/relay/ws?v=3&serverId=${serverId}&role=server`
+  const sockets = []
+  try {
+    const control = await openSocket(base); sockets.push(control)
+    await nextJson(control); await nextJson(control)
+    const first = await openSocket(base, false); sockets.push(first)
+    const challenge = await nextJson(first)
+    const staleSignature = signChallenge(signing.secretKeyB64, relayAuthTranscript(serverId, '', challenge.challenge))
+    first.terminate()
+    const attacker = await openSocket(base, false); sockets.push(attacker)
+    await nextJson(attacker)
+    const closed = new Promise(resolve => attacker.once('close', resolve))
+    attacker.send(JSON.stringify({ type: 'relay.auth', publicKeyB64: signing.publicKeyB64, signature: staleSignature }))
+    assert.equal(await closed, 1008)
+    assert.equal(control.readyState, WebSocket.OPEN)
+    assert.equal(relay.controls.size, 1)
+  } finally { sockets.forEach(socket => socket.terminate()); await relay.close() }
+})
+
+test('无人接管的客户端在超时后关闭，不遗留 WebSocket', async () => {
+  const relay = await startTestRelay({ pendingTimeoutMs: 40 })
+  let client
+  try {
+    client = await openSocket(`ws://127.0.0.1:${relay.port}/relay/ws?v=3&serverId=${serverId}&role=client`)
+    const code = await new Promise(resolve => client.once('close', resolve))
+    assert.equal(code, 1013)
+    assert.equal(relay.connections.size, 0)
+  } finally { client?.terminate(); await relay.close() }
+})
+
+test('数据连接也验证角色和 connectionId，控制连接的签名不能用于数据连接', async () => {
+  const relay = await startTestRelay()
+  const base = `ws://127.0.0.1:${relay.port}/relay/ws?v=3&serverId=${serverId}`
+  const sockets = []
+  try {
+    const control = await openSocket(`${base}&role=server`); sockets.push(control)
+    await nextJson(control); await nextJson(control)
+    const connected = waitForJson(control, 'relay.connected')
+    const client = await openSocket(`${base}&role=client`); sockets.push(client)
+    const { connectionId } = await connected
+    const attacker = await openSocket(`${base}&role=server&connectionId=${connectionId}`, false); sockets.push(attacker)
+    const challenge = await nextJson(attacker)
+    const closed = new Promise(resolve => attacker.once('close', resolve))
+    attacker.send(JSON.stringify({ type: 'relay.auth', publicKeyB64: signing.publicKeyB64,
+      signature: signChallenge(signing.secretKeyB64, relayAuthTranscript(serverId, '', challenge.challenge)) }))
+    assert.equal(await closed, 1008)
+    const daemon = await openSocket(`${base}&role=server&connectionId=${connectionId}`); sockets.push(daemon)
+    const message = nextMessage(daemon)
+    client.send('legitimate-data')
+    assert.equal((await message).data.toString(), 'legitimate-data')
+  } finally { sockets.forEach(socket => socket.terminate()); await relay.close() }
 })

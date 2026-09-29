@@ -48,3 +48,12 @@ test('命令增量保留输入，完成快照不重复输出，错误退出不�
   assert.equal(codexToolStatus({ status: 'completed', exitCode: 1 }, 'completed'), 'failed')
   assert.equal(codexToolStatus({ status: 'declined' }, 'completed'), 'canceled')
 })
+
+test('带增量输出的合并工具事件仍保留命令摘要，纯增量不覆盖已有摘要', () => {
+  const combined = presentTimelineItem({ type: 'tool_call', callId: 'x', name: '终端命令', status: 'running', detail: { type: 'commandExecution', command: 'echo hello', outputDelta: 'hello' } })
+  assert.equal(combined.detail.command, 'echo hello')
+  assert.equal(combined.detail.summary, 'echo hello')
+  assert.equal(combined.detail.outputDelta, undefined)
+  const delta = presentTimelineItem({ ...combined, detail: { type: 'commandExecution', outputDelta: 'more' } })
+  assert.equal(Object.hasOwn(delta.detail, 'summary'), false)
+})

@@ -580,7 +580,9 @@ onBeforeUnmount(() => {
 
     <main class="timeline-workspace grid min-h-0 min-w-0" :class="mobileView === 'timeline' ? 'mobile-panel-active' : 'mobile-panel-hidden'" :inert="isMobile && mobileView !== 'timeline'" :aria-hidden="isMobile ? mobileView !== 'timeline' : undefined">
       <DesktopWorkbench v-show="!isMobile" ref="desktopWorkbench" :tasks="allTasks" :projects="projects" :ready="initialDataReady" :mobile="isMobile" :fallback-task-id="primaryTaskId" @focus-task="focusDesktopTask" @agent-event="upsertTaskAgent" @changed="refreshProjects" />
-      <TaskTimelinePane v-if="isMobile" :task="primaryTask" :project="projectForTask(primaryTask)" focused mobile @back="showMobileSidebar" @agent-event="upsertTaskAgent" @changed="refreshProjects" />
+      <KeepAlive>
+        <TaskTimelinePane v-if="isMobile" :visible="mobileView === 'timeline'" :task="primaryTask" :project="projectForTask(primaryTask)" focused mobile @back="showMobileSidebar" @agent-event="upsertTaskAgent" @changed="refreshProjects" />
+      </KeepAlive>
     </main>
 
     <div v-if="error" class="shell-error error-row absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-sm border px-3 py-2 text-xs"><span>{{ error }}</span><PxIconButton class="h-6 w-6" label="关闭错误提示" @click="error = ''"><X class="h-3.5 w-3.5" /></PxIconButton></div>

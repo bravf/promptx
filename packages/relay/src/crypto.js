@@ -1,4 +1,6 @@
 import nacl from 'tweetnacl'
+import { hkdf } from '@noble/hashes/hkdf.js'
+import { sha256 } from '@noble/hashes/sha2.js'
 
 const TEXT_PAYLOAD = 1
 const BINARY_PAYLOAD = 2
@@ -65,6 +67,8 @@ export function deriveSharedKey(secretKey, peerPublicKey) {
   if (secret.byteLength !== SECRET_KEY_BYTES || publicKey.byteLength !== PUBLIC_KEY_BYTES) {
     throw new Error('Curve25519 密钥长度无效。')
   }
+  const rawShared = nacl.scalarMult(secret, publicKey)
+  if (rawShared.every(byte => byte === 0)) throw new Error('拒绝低阶 Curve25519 公钥。')
   const sharedKey = nacl.box.before(publicKey, secret)
   if (!sharedKey?.byteLength) throw new Error('无法派生共享密钥。')
   return sharedKey
@@ -128,4 +132,53 @@ export function encodeBase64(bytes) {
 
 export function decodeBase64(value) {
   return toArrayBuffer(base64ToBytes(value))
+}
+
+export function generateSigningKeyPair() {
+  const pair = nacl.sign.keyPair()
+  return { publicKeyB64: encodeBase64(pair.publicKey), secretKeyB64: encodeBase64(pair.secretKey) }
+}
+export function signingServerId(publicKeyB64) {
+  const key = importKey(publicKeyB64, 32, '身份公钥')
+  return `srv_${encodeBase64(key).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/g, '')}`
+}
+export function signChallenge(secretKeyB64, transcript) {
+  return encodeBase64(nacl.sign.detached(new TextEncoder().encode(transcript), importKey(secretKeyB64, 64, '身份私钥')))
+}
+export function verifyChallenge(publicKeyB64, transcript, signatureB64) {
+  try { return nacl.sign.detached.verify(new TextEncoder().encode(transcript), importKey(signatureB64, 64, '签名'), importKey(publicKeyB64, 32, '身份公钥')) } catch { return false }
+}
+export function randomToken() { return encodeBase64(nacl.randomBytes(32)) }
+export function validateToken(value) { return importKey(value, 32, '配对密钥/挑战') }
+export function relayAuthTranscript(serverId, connectionId, challenge) {
+  return JSON.stringify(['promptx-relay-auth', 3, serverId, connectionId || '', challenge])
+}
+export function sessionTranscript(serverId, hello, challenge) {
+  validateToken(hello.clientNonce)
+  validateToken(challenge)
+  return JSON.stringify(['promptx-session', 3, serverId, hello.clientPublicKeyB64, hello.clientNonce, challenge, hello.acceptBodyEncodings || []])
+}
+export function deriveSessionKeys(sharedKey, pairingKeyB64, transcript) {
+  const shared = normalizeBytes(sharedKey)
+  if (shared.byteLength !== 32) throw new Error('共享密钥长度无效。')
+  const pair = validateToken(pairingKeyB64)
+  const inputKey = new Uint8Array(64)
+  inputKey.set(shared); inputKey.set(pair, 32)
+  const salt = sha256(new TextEncoder().encode(transcript))
+  const derive = direction => hkdf(sha256, inputKey, salt, new TextEncoder().encode(`promptx-v3:${direction}`), 32)
+  return { clientToServer: derive('client-to-server'), serverToClient: derive('server-to-client') }
+}
+
+export class SessionCipher {
+  constructor(sendKey, receiveKey) { this.sendKey = sendKey; this.receiveKey = receiveKey; this.sent = 0; this.received = 0 }
+  encrypt(payload) {
+    if (!Number.isSafeInteger(this.sent + 1)) throw new Error('会话序号耗尽。')
+    return encryptPayload(this.sendKey, JSON.stringify({ seq: ++this.sent, payload }))
+  }
+  decrypt(bytes) {
+    const frame = JSON.parse(decryptPayload(this.receiveKey, bytes))
+    if (!Number.isSafeInteger(frame.seq) || frame.seq !== this.received + 1) throw new Error('会话帧重放或顺序无效。')
+    this.received = frame.seq
+    return frame.payload
+  }
 }

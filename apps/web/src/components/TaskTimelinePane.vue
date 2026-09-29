@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { reactive, computed, defineAsyncComponent, inject, nextTick, onActivated, onDeactivated, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
 import { ArrowDown, ArrowLeft, Bot, CircleAlert, Columns2, FileDiff, Files, Info, LoaderCircle, TerminalSquare, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
@@ -28,8 +28,13 @@ const props = defineProps({
 })
 const emit = defineEmits(['focus', 'back', 'split', 'close', 'agent-event', 'changed', 'open-tab'])
 
+const deactivated = ref(false)
+const paneVisible = computed(() => props.visible && !deactivated.value)
+onActivated(() => { deactivated.value = false })
+onDeactivated(() => { deactivated.value = true; closeEvents() })
+
 const parentTimelineVisible = inject('timelineVisible', ref(true))
-provide('timelineVisible', computed(() => props.visible && parentTimelineVisible.value))
+provide('timelineVisible', computed(() => paneVisible.value && parentTimelineVisible.value))
 const taskDrafts = new Map()
 const toolExpansion = reactive(new Map())
 provide('toolExpansion', toolExpansion)
@@ -346,7 +351,7 @@ function recordTimelinePosition(element) {
 }
 
 function handleTimelineScroll(event) {
-  if (!props.visible) return
+  if (!paneVisible.value) return
   const element = event.currentTarget
   const previousScrollTop = lastTimelineScrollTop
   const stableSize = element.scrollHeight === lastTimelineHeight && element.clientHeight === lastTimelineViewportHeight
@@ -394,7 +399,7 @@ function handleTimelineKeydown(event) {
 }
 
 async function syncVisibleTimeline() {
-  if (!props.visible || document.visibilityState !== 'visible' || !activeTaskId.value) return
+  if (!paneVisible.value || document.visibilityState !== 'visible' || !activeTaskId.value) return
   scheduleTimelineFollow()
   const now = Date.now()
   if (now - timelineWakeSyncAt < 2_000) return
@@ -449,10 +454,10 @@ function applyTimelineSyncResult(sync, taskId) {
 
 function openEvents(taskId, epoch, seq) {
   closeEvents()
-  if (!props.visible) return
+  if (!paneVisible.value) return
   eventSource = createTaskEventSource(taskId, epoch ? `${epoch}:${seq || 0}` : '')
   eventSource.addEventListener('timeline', (event) => {
-    if (!props.visible || activeTaskId.value !== taskId) return
+    if (!paneVisible.value || activeTaskId.value !== taskId) return
     const { row } = JSON.parse(event.data)
     if (rows.value.some((item) => item.seq === row.seq)) return
     const shouldFollow = followingTimeline.value
@@ -557,7 +562,7 @@ async function updateAgentSettings(input) {
 async function scrollToBottom() {
   const requestVersion = timelineRequestVersion
   await nextTick()
-  if (!followingTimeline.value || !props.visible || !parentTimelineVisible.value || document.hidden || requestVersion !== timelineRequestVersion) return
+  if (!followingTimeline.value || !paneVisible.value || !parentTimelineVisible.value || document.hidden || requestVersion !== timelineRequestVersion) return
   const element = timelineElement.value
   if (!element) return
   element.scrollTo({ top: element.scrollHeight, behavior: 'instant' })
@@ -578,7 +583,7 @@ function jumpToLatest() {
 }
 
 function scheduleTimelineFollow() {
-  if (!followingTimeline.value || !props.visible || !parentTimelineVisible.value || document.hidden || timelineScrollFrame) return
+  if (!followingTimeline.value || !paneVisible.value || !parentTimelineVisible.value || document.hidden || timelineScrollFrame) return
   timelineScrollFrame = requestAnimationFrame(() => {
     timelineScrollFrame = null
     scrollToBottom()
@@ -601,11 +606,11 @@ watch(activeTaskId, (taskId) => {
   toolExpansion.clear()
   terminalOpen.value = false
   drawerMode.value = null
-  if (props.visible) selectTask(taskId)
+  if (paneVisible.value) selectTask(taskId)
 }, { immediate: true })
-watch(() => props.visible, async (visible) => {
+watch(paneVisible, async (visible) => {
   if (!visible) { closeEvents(); return }
-  if (!timelineEpoch.value) { selectTask(activeTaskId.value); return }
+  if (!timelineEpoch.value || displayedTaskId.value !== activeTaskId.value) { selectTask(activeTaskId.value); return }
   await nextTick()
   if (timelineElement.value) timelineElement.value.scrollTop = lastTimelineScrollTop
   openEvents(activeTaskId.value, timelineEpoch.value, rows.value.at(-1)?.seq || 0)

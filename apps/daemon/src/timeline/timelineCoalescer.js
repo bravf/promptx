@@ -1,6 +1,7 @@
 export class TimelineCoalescer {
-  constructor(onFlush, windowMs = 60) {
+  constructor(onFlush, windowMs = 60, onError = console.error) {
     this.onFlush = onFlush
+    this.onError = onError
     this.windowMs = windowMs
     this.buffers = new Map()
   }
@@ -10,7 +11,7 @@ export class TimelineCoalescer {
     const key = item.type === 'tool_call'
       ? `tool:${payload.turnId || ''}:${item.callId}`
       : ['assistant_message', 'reasoning'].includes(item.type)
-        ? `text:${payload.turnId || ''}:${item.type}:${item.messageId || ''}`
+        ? `text:${payload.turnId || ''}:${item.type}:${item.messageId || ''}:${item.phase || ''}`
         : ''
     if (!key) {
       this.flush(agentId)
@@ -19,10 +20,12 @@ export class TimelineCoalescer {
     }
     let buffer = this.buffers.get(agentId)
     if (!buffer) {
-      buffer = { entries: [], indexes: new Map(), timer: null }
+      buffer = { entries: [], lastKey: null, timer: null }
       this.buffers.set(agentId, buffer)
     }
-    const index = buffer.indexes.get(key)
+    // 只合并相邻事件，避免把工具后的文本移动到工具之前。
+    const index = buffer.lastKey === key ? buffer.entries.length - 1 : undefined
+    buffer.lastKey = key
     if (index !== undefined && item.type === 'tool_call') {
       const previous = buffer.entries[index]
       const detail = { ...previous.item.detail, ...item.detail }
@@ -33,7 +36,6 @@ export class TimelineCoalescer {
       const previous = buffer.entries[index]
       previous.item = { ...previous.item, text: `${previous.item.text}${item.text}` }
     } else {
-      buffer.indexes.set(key, buffer.entries.length)
       buffer.entries.push({ ...payload, item: { ...item } })
     }
     if (item.type === 'tool_call' && ['completed', 'failed', 'canceled'].includes(item.status)) {
@@ -41,7 +43,10 @@ export class TimelineCoalescer {
       return
     }
     if (!buffer.timer) {
-      buffer.timer = setTimeout(() => this.flush(agentId), this.windowMs)
+      buffer.timer = setTimeout(() => {
+        buffer.timer = null
+        try { this.flush(agentId) } catch (error) { this.onError(error, agentId) }
+      }, this.windowMs)
       buffer.timer.unref?.()
     }
   }
@@ -50,8 +55,12 @@ export class TimelineCoalescer {
     const buffer = this.buffers.get(agentId)
     if (!buffer) return
     if (buffer.timer) clearTimeout(buffer.timer)
+    buffer.timer = null
+    while (buffer.entries.length) {
+      this.onFlush(buffer.entries[0])
+      buffer.entries.shift()
+    }
     this.buffers.delete(agentId)
-    buffer.entries.forEach(this.onFlush)
   }
 
   flushAll() {

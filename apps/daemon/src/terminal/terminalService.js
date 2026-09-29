@@ -1,3 +1,4 @@
+import { childEnvironment } from '../runtime/processControl.js'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import fs from 'node:fs'
@@ -56,7 +57,7 @@ export class TerminalService {
     environment = this.context(taskId)
     if (this.closed) throw Object.assign(new Error('服务正在关闭'), { statusCode: 503 })
     const shell = process.platform === 'win32' ? (process.env.COMSPEC || 'cmd.exe') : (process.env.SHELL || '/bin/sh')
-    const pty = spawn(shell, [], { name: 'xterm-256color', cwd: environment.cwd, ...size, env: { ...process.env, TERM: 'xterm-256color' } })
+    const pty = spawn(shell, [], { name: 'xterm-256color', cwd: environment.cwd, ...size, env: childEnvironment({ TERM: 'xterm-256color' }) })
     const number = (this.counters.get(taskId) || 0) + 1
     this.counters.set(taskId, number)
     const session = { id: randomUUID(), taskId, requestId, name: name || `终端 ${number}`, createdAt: new Date().toISOString(), cwd: environment.cwd, environmentId: environment.id, pty, chunks: [], end: 0, start: 0, length: 0, exitCode: null, running: true, inputs: new Set() }

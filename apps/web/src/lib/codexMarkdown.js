@@ -232,7 +232,7 @@ async function resolveFencePlaceholders(html = '', fenceEntries = [], options = 
   )
 
   return fenceEntries.reduce((output, entry, index) => (
-    output.replace(entry.placeholder, renderedEntries[index] || entry.placeholder)
+    output.replace(entry.placeholder, () => renderedEntries[index] || entry.placeholder)
   ), html)
 }
 

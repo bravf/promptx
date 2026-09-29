@@ -78,6 +78,7 @@ export const v2Api = {
     body: JSON.stringify({ initialPath }),
   }),
   assetObjectUrl: (assetId, options = {}) => transportObjectUrl(`${getApiBase()}/api/v2/assets/${encodeURIComponent(assetId)}/content`, options),
+  getRelayPairing: () => request('/api/v2/relay/pairing', { method: 'POST' }),
   getRelayConfig: () => request('/api/v2/relay/config', { cache: 'no-store' }),
   updateRelayConfig: (input) => request('/api/v2/relay/config', { method: 'PUT', body: JSON.stringify(input) }),
   reconnectRelay: () => request('/api/v2/relay/reconnect', { method: 'POST' }),

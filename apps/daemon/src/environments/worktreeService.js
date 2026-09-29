@@ -1,19 +1,39 @@
 import fs from 'node:fs'
+import { childEnvironment, terminateChild } from '../runtime/processControl.js'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { canonicalPath, canonicalPathKey } from '../paths/canonicalPath.js'
 
-export function runGit(cwd, args) {
+export function runGit(cwd, args, { timeoutMs = 30_000, maxOutputBytes = 16 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', ['-C', cwd, ...args], { windowsHide: true })
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', (chunk) => { stdout += chunk })
-    child.stderr.on('data', (chunk) => { stderr += chunk })
-    child.on('error', reject)
-    child.on('close', (code) => code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr.trim() || `git exited with ${code}`)))
+    const child = spawn('git', ['-C', cwd, ...args], {
+      detached: process.platform !== 'win32', windowsHide: true, env: childEnvironment({ GIT_TERMINAL_PROMPT: '0' }), stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    child.promptxProcessGroup = process.platform !== 'win32'
+    let stdout = '', stderr = '', outputBytes = 0
+    let stopped = false
+    const fail = (error) => {
+      if (stopped) return
+      stopped = true
+      clearTimeout(timer); terminateChild(child); reject(error)
+    }
+    const timer = setTimeout(() => fail(new Error('Git 操作超时。')), timeoutMs)
+    const collect = (chunk, isError) => {
+      if (stopped) return
+      outputBytes += chunk.length
+      if (outputBytes > maxOutputBytes) return fail(new Error('Git 输出超过限制。'))
+      if (isError) stderr += chunk
+      else stdout += chunk
+    }
+    child.stdout.on('data', chunk => collect(chunk, false))
+    child.stderr.on('data', chunk => collect(chunk, true))
+    child.on('error', fail)
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr.trim() || `git exited with ${code}`))
+    })
   })
 }
 
