@@ -90,7 +90,7 @@ onBeforeUnmount(() => {
         <p class="w-full break-all text-center text-sm">{{ label }}</p>
         <audio ref="video" crossorigin="anonymous" :src="src" :aria-label="label" controls preload="metadata" class="w-full" @loadedmetadata="loading = false" @error="loading = false; error ||= '音频无法播放，浏览器可能不支持此编码'" />
       </div>
-      <video v-else-if="kind === 'video' && src" v-show="!error" ref="video" crossorigin="anonymous" :src="src" :aria-label="label" controls playsinline preload="metadata" class="max-w-full object-contain" :class="{ 'opacity-0': loading }" style="max-height: calc(100dvh - 112px)" @loadeddata="loading = false" @error="loading = false; error ||= '视频无法播放，请重试'" />
+      <video v-else-if="kind === 'video' && src" v-show="!error" ref="video" crossorigin="anonymous" :src="src" :aria-label="label" controls playsinline preload="metadata" class="max-w-full object-contain" :class="{ 'opacity-0': loading }" style="max-height: calc(100dvh - 112px)" @loadedmetadata="loading = false" @loadeddata="loading = false" @error="loading = false; error ||= '视频无法播放，请重试'" />
     </div>
   </Teleport>
 </template>

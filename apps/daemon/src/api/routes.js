@@ -15,6 +15,7 @@ import {
 } from '../../../../packages/protocol/src/index.js'
 import { DATABASE_VERSION } from '../db/database.js'
 import fs from 'node:fs'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { searchDirectories } from '../workspaces/directorySearch.js'
 import {
@@ -100,6 +101,10 @@ function publicTask(repository, task) {
     environment: repository.getEnvironment(task.environmentId),
     agent: repository.getTaskAgent(task.id),
   }
+}
+
+function stateRevision(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
 function resolveDirectoryPath(value) {
@@ -222,6 +227,9 @@ export function registerRoutes(app, context) {
   })
 
   app.get('/api/v2/projects', async () => ({ projects: repository.listProjects() }))
+  app.get('/api/v2/workbench', async () => ({
+    projects: repository.listProjects().map(project => ({ ...project, tasks: repository.listTasks(project.id).map(task => publicTask(repository, task)) })),
+  }))
   app.post('/api/v2/projects', async (request, reply) => {
     const input = CreateProjectInputSchema.parse(request.body)
     const resolved = await resolveProjectInput(input)
@@ -308,7 +316,9 @@ export function registerRoutes(app, context) {
   })
   app.get('/api/v2/tasks/:taskId/control', async (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)
-    return agent ? { control: await agentManager.getControlState(agent.id) } : reply.code(404).send({ error: 'agent_not_found' })
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    const control = await agentManager.getControlState(agent.id)
+    return { control, revision: stateRevision(control) }
   })
   app.patch('/api/v2/tasks/:taskId/settings', async (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)
@@ -320,7 +330,8 @@ export function registerRoutes(app, context) {
     if (!repository.getTask(request.params.taskId)) return reply.code(404).send({ error: 'task_not_found' })
     const requested = Number(request.query.limit || 300)
     const limit = Math.min(1000, Math.max(1, Number.isFinite(requested) ? Math.floor(requested) : 300))
-    return { turns: repository.listTurns(request.params.taskId, limit) }
+    const turns = repository.listTurns(request.params.taskId, limit)
+    return { turns, revision: stateRevision(turns) }
   })
   app.post('/api/v2/tasks/:taskId/turns', async (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)
@@ -521,7 +532,24 @@ export function registerRoutes(app, context) {
     const { raw, unsubscribes } = initializeSse(request, reply, corsPolicy)
     try {
       for (const subscription of subscriptions) {
-        const write = event => sseWrite(raw, { type: 'task-event', subscriptionId: subscription.id, event: presentEvent(event) })
+        let turnsRevision = subscription.turnsRevision
+        let controlRevision = subscription.controlRevision
+        const write = event => {
+          if (event.type === 'turn') turnsRevision = ''
+          if (event.type === 'timeline-synced' && event.sync?.turns) {
+            const revision = stateRevision(event.sync.turns)
+            const { turns, ...sync } = event.sync
+            event = { ...event, sync: { ...sync, turnsRevision: revision, ...(revision !== turnsRevision ? { turns } : {}) } }
+            turnsRevision = revision
+          }
+          if (event.type === 'control') {
+            const revision = stateRevision(event.control)
+            if (revision === controlRevision) return
+            controlRevision = revision
+            event = { ...event, revision }
+          }
+          sseWrite(raw, { type: 'task-event', subscriptionId: subscription.id, event: presentEvent(event) })
+        }
         const agent = repository.getTaskAgent(subscription.taskId)
         if (!agent) { write({ type: 'unavailable' }); continue }
         unsubscribes.push(eventHub.subscribe(agent.id, write))

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref } from 'vu
 import { Archive, Folder, FolderOpen, LoaderCircle, Pencil, Pin, PinOff, Plus, Settings, TerminalSquare, X } from 'lucide-vue-next'
 import { sessionActivity } from '../lib/backgroundTaskPresentation.js'
 import { v2Api, globalEventsUrl } from '../lib/v2Api.js'
+import { warmVideoWorker } from '../lib/videoSource.js'
 import { readActiveTaskId, writeActiveTaskId } from '../lib/activeTaskStorage.js'
 import { createEventSource } from '../lib/eventSource.js'
 import { createMobileDialogHistoryState, getMobileDialogHistoryState } from '../lib/mobileDialogHistory.js'
@@ -291,11 +292,10 @@ function clearViewedTaskAttention(task) {
 async function loadInitial() {
   loading.value = true
   try {
-    const [projectResult, providerResult] = await Promise.all([v2Api.listProjects(), v2Api.listProviders()])
-    const projectTasks = await Promise.all((projectResult.projects || []).map(async (project) => ({ project, ...(await v2Api.listProjectTasks(project.id)) })))
-    projects.value = projectTasks.map(({ project }) => project)
-    providers.value = providerResult.providers
-    tasksByProject.value = Object.fromEntries(projectTasks.map(({ project, tasks }) => [project.id, tasks.map((task) => taskView(task, project.id)).filter(Boolean)]))
+    void v2Api.listProviders().then(result => { providers.value = result.providers }).catch(cause => { error.value = cause.message })
+    const result = await v2Api.getWorkbench()
+    projects.value = result.projects.map(({ tasks, ...project }) => project)
+    tasksByProject.value = Object.fromEntries(result.projects.map(({ id, tasks }) => [id, tasks.map(task => taskView(task, id)).filter(Boolean)]))
     restoreProjectExpansion()
     const stored = readSplitTimelineState()
     const historyTaskId = isMobile.value ? getMobileTimelineTaskId(window.history.state) : ''
@@ -311,10 +311,9 @@ async function loadInitial() {
 }
 
 async function refreshProjects() {
-  const result = await v2Api.listProjects()
-  const projectTasks = await Promise.all((result.projects || []).map(async (project) => ({ project, ...(await v2Api.listProjectTasks(project.id)) })))
-  projects.value = projectTasks.map(({ project }) => project)
-  tasksByProject.value = Object.fromEntries(projectTasks.map(({ project, tasks }) => [project.id, tasks.map((task) => taskView(task, project.id)).filter(Boolean)]))
+  const result = await v2Api.getWorkbench()
+  projects.value = result.projects.map(({ tasks, ...project }) => project)
+  tasksByProject.value = Object.fromEntries(result.projects.map(({ id, tasks }) => [id, tasks.map(task => taskView(task, id)).filter(Boolean)]))
   restoreProjectExpansion()
   reconcileLayout(allTasks.value[0]?.id || '')
 }
@@ -510,6 +509,7 @@ function updateMobileState(event) {
 }
 
 onMounted(async () => {
+  warmVideoWorker()
   listDateTimer = setInterval(() => { listDate.value = new Date() }, 60_000)
   window.addEventListener('popstate', handleMobileHistoryPop)
   mobileMediaQuery = window.matchMedia('(max-width: 720px)'); updateMobileState(mobileMediaQuery); mobileMediaQuery.addEventListener('change', updateMobileState)

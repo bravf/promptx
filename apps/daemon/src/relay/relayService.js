@@ -15,6 +15,7 @@ import {
   parseJsonFrame,
   RELAY_CHUNK_BYTES,
   splitBytes,
+  encodeBodyFrame, decodeBodyFrame, RELAY_BODY_FRAME_ENCODING, RELAY_RESPONSE_WINDOW_BYTES,
 } from '../../../../packages/relay/src/index.js'
 import { resolveDaemonPaths } from '../db/database.js'
 import {
@@ -112,6 +113,8 @@ function safeRequestUrl(localBaseUrl, requestPath) {
 }
 
 function isCompressibleResponse(response) {
+  const contentLength = response.headers.get('content-length')
+  if (contentLength !== null && Number(contentLength) < 1024) return false
   const contentType = String(response.headers.get('content-type') || '').toLowerCase()
   if (contentType.includes('text/event-stream')) return false
   return contentType.startsWith('text/')
@@ -383,6 +386,7 @@ export class RelayService {
       bufferedBytes: 0,
       requests: new Map(),
       acceptedBodyEncodings: new Set(),
+      bodyFrameEncoding: '',
       handshakeTimer: null,
     }
     this.channels.set(connectionId, channel)
@@ -413,25 +417,30 @@ export class RelayService {
       if (channel.cipher || frame?.type !== 'e2ee.hello' || frame.v !== 3) return this.closeChannel(channel, 1008, 'invalid_e2ee_hello')
       try {
         const challenge = randomToken()
-        const transcript = sessionTranscript(this.identity.serverId, frame, challenge)
+        const capabilities = Array.isArray(frame.acceptFrameEncodings) && frame.acceptFrameEncodings.includes(RELAY_BODY_FRAME_ENCODING)
+          ? { bodyFrameEncoding: RELAY_BODY_FRAME_ENCODING, responseWindowBytes: RELAY_RESPONSE_WINDOW_BYTES }
+          : null
+        const transcript = sessionTranscript(this.identity.serverId, frame, challenge, capabilities)
         const shared = deriveSharedKey(importSecretKey(this.identity.secretKeyB64), importPublicKey(frame.clientPublicKeyB64))
         const keys = deriveSessionKeys(shared, this.identity.pairingKeyB64, transcript)
         channel.cipher = new SessionCipher(keys.serverToClient, keys.clientToServer)
         channel.acceptedBodyEncodings = new Set((frame.acceptBodyEncodings || []).filter(value => value === 'gzip'))
-        channel.socket.send(JSON.stringify({ type: 'e2ee.challenge', v: 3, challenge }))
+        channel.bodyFrameEncoding = capabilities?.bodyFrameEncoding || ''
+        channel.socket.send(JSON.stringify({ type: 'e2ee.challenge', v: 3, challenge, ...capabilities }))
       } catch { this.closeChannel(channel, 1008, 'invalid_client_key') }
       return
     }
     try {
       const plaintext = channel.cipher.decrypt(data)
-      if (typeof plaintext !== 'string') throw new Error('不支持的 Relay 业务帧。')
-      const frame = parseJsonFrame(plaintext)
+      if (typeof plaintext !== 'string' && (!channel.authenticated || !channel.bodyFrameEncoding)) throw new Error('不支持的 Relay 业务帧。')
+      const frame = typeof plaintext === 'string' ? parseJsonFrame(plaintext) : decodeBodyFrame(plaintext)
       if (!frame) throw new Error('Relay 业务帧格式无效。')
+      if (typeof plaintext !== 'string' && frame.type !== 'request.body') throw new Error('Relay 正文帧方向无效。')
       if (!channel.authenticated) {
         if (frame.type !== 'e2ee.auth') throw new Error('配对认证失败。')
         channel.authenticated = true
         clearTimeout(channel.handshakeTimer)
-        this.sendEncrypted(channel, { type: 'e2ee.ready', v: 3 })
+        this.sendEncrypted(channel, { type: 'e2ee.ready', v: 3, ...(channel.bodyFrameEncoding ? { bodyFrameEncoding: channel.bodyFrameEncoding } : {}) })
         return
       }
       this.handleRequestFrame(channel, frame)
@@ -457,6 +466,8 @@ export class RelayService {
         bodyBytes: 0,
         controller: null,
         state: 'receiving',
+        credit: RELAY_RESPONSE_WINDOW_BYTES,
+        creditWaiter: null,
         timer: setTimeout(() => this.expireRequest(channel, requestId), 30000),
       })
       return
@@ -465,7 +476,7 @@ export class RelayService {
     if (!request) return
     if (frame.type === 'request.body') {
       if (request.state !== 'receiving') return
-      const chunk = Buffer.from(String(frame.chunk || ''), 'base64')
+      const chunk = frame.bytes ? Buffer.from(frame.bytes) : Buffer.from(String(frame.chunk || ''), 'base64')
       request.bodyBytes += chunk.byteLength
       channel.bufferedBytes += chunk.byteLength
       if (request.bodyBytes > MAX_REQUEST_BODY_BYTES || channel.bufferedBytes > MAX_REQUEST_BODY_BYTES) {
@@ -479,6 +490,10 @@ export class RelayService {
         return
       }
       request.body.push(chunk)
+    } else if (frame.type === 'request.credit') {
+      if (!channel.bodyFrameEncoding || !Number.isSafeInteger(frame.bytes) || frame.bytes <= 0 || request.credit + frame.bytes > RELAY_RESPONSE_WINDOW_BYTES) throw new Error('Relay 接收窗口无效。')
+      request.credit += frame.bytes
+      request.creditWaiter?.()
     } else if (frame.type === 'request.end') {
       if (request.state !== 'receiving') return
       request.state = 'forwarding'
@@ -493,7 +508,9 @@ export class RelayService {
 
   sendEncrypted(channel, frame) {
     if (!channel.authenticated || channel.socket.readyState !== WebSocket.OPEN) return
-    const encrypted = channel.cipher.encrypt(JSON.stringify(frame))
+    const encrypted = frame.bytes instanceof Uint8Array && channel.bodyFrameEncoding
+      ? channel.cipher.encryptBinary(encodeBodyFrame(frame.type, frame.requestId, frame.bytes))
+      : channel.cipher.encrypt(JSON.stringify(frame))
     channel.socket.send(Buffer.from(encrypted))
   }
 
@@ -530,11 +547,15 @@ export class RelayService {
           : response.body
         for await (const chunk of responseBody) {
           for (const part of splitBytes(chunk)) {
+            if (channel.bodyFrameEncoding) {
+              await this.waitForResponseCredit(request, part.byteLength)
+              request.credit -= part.byteLength
+            }
             await waitForSocketCapacity(channel.socket, controller.signal)
             this.sendEncrypted(channel, {
               type: 'response.body',
               requestId: request.requestId,
-              chunk: Buffer.from(part).toString('base64'),
+              ...(channel.bodyFrameEncoding ? { bytes: part } : { chunk: Buffer.from(part).toString('base64') }),
             })
           }
         }
@@ -552,6 +573,24 @@ export class RelayService {
     } finally {
       this.finishRequest(channel, request)
     }
+  }
+
+  async waitForResponseCredit(request, bytes) {
+    const signal = request.controller.signal
+    while (request.credit < bytes) {
+      if (signal.aborted) throw new DOMException('请求已取消', 'AbortError')
+      await new Promise((resolve, reject) => {
+        const finish = error => {
+          signal.removeEventListener('abort', abort)
+          request.creditWaiter = null
+          error ? reject(error) : resolve()
+        }
+        const abort = () => finish(new DOMException('请求已取消', 'AbortError'))
+        request.creditWaiter = () => finish()
+        signal.addEventListener('abort', abort, { once: true })
+      })
+    }
+    if (signal.aborted) throw new DOMException('请求已取消', 'AbortError')
   }
 
   finishRequest(channel, request) {

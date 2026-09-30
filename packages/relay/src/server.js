@@ -286,7 +286,15 @@ async function startRelayServer(options = {}) {
   }))
 
   if (fs.existsSync(path.join(webDistDir, 'index.html'))) {
-    await app.register(fastifyStatic, { root: webDistDir, wildcard: false })
+    await app.register(fastifyStatic, {
+      root: webDistDir,
+      wildcard: false,
+      setHeaders(response, filePath) {
+        const relative = path.relative(webDistDir, filePath)
+        const immutable = relative.startsWith(`assets${path.sep}`) && /-[\w-]{8,}\.[\w]+$/.test(relative)
+        response.header('Cache-Control', immutable ? 'public, max-age=31536000, immutable' : 'no-cache')
+      },
+    })
     app.get('/*', async (request, reply) => {
       if (request.url.startsWith('/relay/') || request.url.startsWith('/api/')) {
         return reply.code(404).send({ error: 'not_found', message: '请使用 PromptX 设置中生成的完整远程访问链接。' })

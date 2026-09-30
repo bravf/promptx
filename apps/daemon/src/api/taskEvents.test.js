@@ -3,13 +3,22 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { EventEmitter } from 'node:events'
 import { createApp } from '../app.js'
 
 test('共享事件流按订阅隔离、补齐分页历史，并支持独立恢复游标', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-task-events-'))
+  let currentModelId = 'test-model'
   const app = await createApp({
     databasePath: ':memory:', assetsDir: path.join(root, 'uploads'), logger: false, webRoot: false, relay: false,
     relayOptions: { configPath: path.join(root, 'relay.json'), identityPath: path.join(root, 'identity.json') },
+    providerRegistry: { get: () => ({ createRuntime() {
+      const runtime = new EventEmitter()
+      runtime.getControlState = async () => ({ models: [], currentModelId, reasoningEfforts: [], currentReasoningEffort: '' })
+      runtime.readHistorySnapshot = async () => ({ status: 'unsupported' })
+      runtime.close = () => {}
+      return runtime
+    } }) },
   })
   t.after(async () => { await app.close(); fs.rmSync(root, { recursive: true, force: true }) })
   const repository = app.sqliteRepository
@@ -81,6 +90,33 @@ test('共享事件流按订阅隔离、补齐分页历史，并支持独立恢�
   const reset = await readSnapshots([{ id: 'a', taskId: a.id, cursor: 'obsolete-epoch:9999' }])
   assert.equal(reset[0].event.type, 'reset')
   assert.equal(reset[0].event.timeline.epoch, aEpoch)
+  const headers = { host: `127.0.0.1:${app.server.address().port}` }
+  const turnsResponse = await app.inject({ headers, url: `/api/v2/tasks/${a.id}/turns?limit=1000` })
+  const { revision } = turnsResponse.json()
+  const unchanged = await readSnapshots([{ id: 'a', taskId: a.id, cursor: `${aEpoch}:451`, turnsRevision: revision }])
+  const unchangedSync = unchanged.find(message => message.event.type === 'timeline-synced').event.sync
+  assert.equal(unchangedSync.turnsRevision, revision)
+  assert.equal(unchangedSync.turns, undefined)
+  append(a, 'changed-after-rest')
+  const changed = await readSnapshots([{ id: 'a', taskId: a.id, cursor: `${aEpoch}:451`, turnsRevision: revision }])
+  assert.equal(changed.filter(message => message.event.type === 'timeline').length, 1)
+  const changedSync = changed.find(message => message.event.type === 'timeline-synced').event.sync
+  assert.notEqual(changedSync.turnsRevision, revision)
+  assert.equal(changedSync.turns.length, 452)
+  const staleEpoch = await readSnapshots([{ id: 'a', taskId: a.id, cursor: 'obsolete:9999', turnsRevision: changedSync.turnsRevision }])
+  assert.equal(staleEpoch[0].event.type, 'reset')
+  const workbench = (await app.inject({ headers, url: '/api/v2/workbench' })).json()
+  assert.equal(workbench.projects[0].id, project.id)
+  assert.deepEqual(new Set(workbench.projects[0].tasks.map(task => task.id)), new Set([a.id, b.id]))
+  assert.equal(workbench.projects[0].tasks[0].agent.providerId, 'codex')
+  const oldControl = (await app.inject({ headers, url: `/api/v2/tasks/${a.id}/control` })).json()
+  const noControlChange = await readSnapshots([{ id: 'a', taskId: a.id, controlRevision: oldControl.revision }])
+  assert.equal(noControlChange.some(message => message.event.type === 'control'), false)
+  currentModelId = 'changed-model'
+  const newControl = (await app.inject({ headers, url: `/api/v2/tasks/${a.id}/control` })).json()
+  assert.notEqual(newControl.revision, oldControl.revision)
+  const controlChange = await readSnapshots([{ id: 'a', taskId: a.id, controlRevision: oldControl.revision }])
+  assert.equal(controlChange.find(message => message.event.type === 'control').event.control.currentModelId, currentModelId)
   const duplicate = await app.inject({ headers: { host: `127.0.0.1:${app.server.address().port}` }, method: 'POST', url: '/api/v2/task-events', payload: { subscriptions: [{ id: 'a', taskId: a.id }, { id: 'a', taskId: b.id }] } })
   assert.equal(duplicate.statusCode, 400)
 })

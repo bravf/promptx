@@ -7,5 +7,7 @@ export const TaskEventSubscriptionsSchema = z.object({
     taskId: z.string().min(1).max(80),
     cursor: z.string().max(160).default(''),
     snapshot: z.boolean().default(true),
+    turnsRevision: z.string().max(80).default(''),
+    controlRevision: z.string().max(80).default(''),
   })).min(1).max(1000),
 }).refine(input => new Set(input.subscriptions.map(item => item.id)).size === input.subscriptions.length, '订阅标识不能重复')

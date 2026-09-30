@@ -8,6 +8,7 @@ import {
   importPublicKey,
   parseJsonFrame,
   splitBytes,
+  encodeBodyFrame, decodeBodyFrame, RELAY_BODY_FRAME_ENCODING, RELAY_RESPONSE_WINDOW_BYTES,
 } from '@promptx/relay'
 
 function createRequestId() {
@@ -48,6 +49,8 @@ export class EncryptedRelayConnection {
       ? options.DecompressionStreamClass
       : globalThis.DecompressionStream
     this.requestIdleTimeoutMs = Number(options.requestIdleTimeoutMs) || REQUEST_IDLE_TIMEOUT_MS
+    this.acceptFrameEncodings = options.binaryFrames === false ? [] : [RELAY_BODY_FRAME_ENCODING]
+    this.bodyFrameEncoding = ''
     this.socket = null
     this.sharedKey = null
     this.cipher = null
@@ -82,11 +85,13 @@ export class EncryptedRelayConnection {
     this.reconnectTimer = null
     this.sharedKey = null
     this.cipher = null
+    this.bodyFrameEncoding = ''
     this.updateStatus({ state: this.reconnectAttempt ? 'reconnecting' : 'connecting', error: '' })
     const connection = new Promise((resolve, reject) => {
       let handshakeSettled = false
       const keyPair = generateKeyPair()
-      const hello = { type: 'e2ee.hello', v: 3, clientPublicKeyB64: keyPair.publicKeyB64, clientNonce: randomToken(), acceptBodyEncodings: this.DecompressionStreamClass ? ['gzip'] : [] }
+      const hello = { type: 'e2ee.hello', v: 3, clientPublicKeyB64: keyPair.publicKeyB64, clientNonce: randomToken(), acceptBodyEncodings: this.DecompressionStreamClass ? ['gzip'] : [], acceptFrameEncodings: this.acceptFrameEncodings }
+      let capabilities = null
       const sharedKey = deriveSharedKey(keyPair.secretKey, importPublicKey(this.offer.daemonPublicKeyB64))
       const url = buildRelayWebSocketUrl(this.offer.relay.url, {
         role: 'client',
@@ -116,13 +121,19 @@ export class EncryptedRelayConnection {
             if (!this.cipher) {
               const frame = typeof event.data === 'string' ? parseJsonFrame(event.data) : null
               if (frame?.type !== 'e2ee.challenge' || frame.v !== 3) throw new Error('远程协议已升级，请重新配对。')
-              const keys = deriveSessionKeys(sharedKey, this.offer.pairingKeyB64, sessionTranscript(this.offer.serverId, hello, frame.challenge))
+              if (frame.bodyFrameEncoding) {
+                if (!this.acceptFrameEncodings.includes(frame.bodyFrameEncoding) || frame.bodyFrameEncoding !== RELAY_BODY_FRAME_ENCODING || frame.responseWindowBytes !== RELAY_RESPONSE_WINDOW_BYTES) throw new Error('Relay 传输能力无效。')
+                capabilities = { bodyFrameEncoding: frame.bodyFrameEncoding, responseWindowBytes: frame.responseWindowBytes }
+              }
+              const keys = deriveSessionKeys(sharedKey, this.offer.pairingKeyB64, sessionTranscript(this.offer.serverId, hello, frame.challenge, capabilities))
               this.cipher = new SessionCipher(keys.clientToServer, keys.serverToClient)
               socket.send(this.cipher.encrypt(JSON.stringify({ type: 'e2ee.auth' })))
               return
             }
             const ready = JSON.parse(this.cipher.decrypt(event.data))
             if (ready.type !== 'e2ee.ready' || ready.v !== 3) throw new Error('配对认证失败。')
+            if ((ready.bodyFrameEncoding || '') !== (capabilities?.bodyFrameEncoding || '')) throw new Error('Relay 传输协商不一致。')
+            this.bodyFrameEncoding = capabilities?.bodyFrameEncoding || ''
             handshakeSettled = true
             this.sharedKey = sharedKey
             clearTimeout(handshakeTimer)
@@ -174,9 +185,10 @@ export class EncryptedRelayConnection {
     try {
       if (typeof payload === 'string') throw new Error('Relay 返回了未加密业务数据。')
       const plaintext = this.cipher.decrypt(payload)
-      if (typeof plaintext !== 'string') throw new Error('Relay 响应类型无效。')
-      const frame = parseJsonFrame(plaintext)
+      if (typeof plaintext !== 'string' && !this.bodyFrameEncoding) throw new Error('Relay 响应类型无效。')
+      const frame = typeof plaintext === 'string' ? parseJsonFrame(plaintext) : decodeBodyFrame(plaintext)
       if (!frame) throw new Error('Relay 响应格式无效。')
+      if (typeof plaintext !== 'string' && frame.type !== 'response.body') throw new Error('Relay 正文帧方向无效。')
       this.handleResponseFrame(frame)
     } catch (error) {
       this.updateStatus({ error: error.message })
@@ -219,7 +231,7 @@ export class EncryptedRelayConnection {
       return
     }
     if (frame.type === 'response.body') {
-      const chunk = new Uint8Array(decodeBase64(frame.chunk))
+      const chunk = frame.bytes || new Uint8Array(decodeBase64(frame.chunk))
       if (chunk.byteLength > record.controller.desiredSize) {
         record.controller.error(new Error('远程响应消费过慢，已停止传输。'))
         this.sendFrame({ type: 'request.cancel', requestId: record.requestId })
@@ -227,6 +239,9 @@ export class EncryptedRelayConnection {
         return
       }
       record.controller.enqueue(chunk)
+      record.receivedBytes += chunk.byteLength
+      this.touchRecord(record)
+      queueMicrotask(() => this.grantReceiveCredit(record))
       return
     }
     if (frame.type === 'response.end') {
@@ -248,9 +263,21 @@ export class EncryptedRelayConnection {
     this.pending.delete(record.requestId)
   }
 
+  grantReceiveCredit(record) {
+    if (!record?.flowControlled || !this.pending.has(record.requestId)) return
+    const buffered = RELAY_RESPONSE_WINDOW_BYTES - record.controller.desiredSize
+    const consumed = record.receivedBytes - record.acknowledgedBytes - buffered
+    this.touchRecord(record)
+    if (consumed < 64 * 1024) return
+    record.acknowledgedBytes += consumed
+    try { this.sendFrame({ type: 'request.credit', requestId: record.requestId, bytes: consumed }) }
+    catch (error) { record.controller.error(error); this.finishRecord(record); return }
+    this.touchRecord(record)
+  }
+
   touchRecord(record) {
-    if (record.streaming) return
     clearTimeout(record.idleTimer)
+    if (record.streaming || (record.flowControlled && record.controller.desiredSize < RELAY_RESPONSE_WINDOW_BYTES)) return
     record.idleTimer = setTimeout(() => {
       if (!this.pending.has(record.requestId)) return
       try { this.sendFrame({ type: 'request.cancel', requestId: record.requestId }) } catch {}
@@ -273,7 +300,9 @@ export class EncryptedRelayConnection {
 
   sendFrame(frame) {
     if (!this.sharedKey || this.socket?.readyState !== this.WebSocketClass.OPEN) throw new Error('PromptX Relay 尚未连接。')
-    this.socket.send(this.cipher.encrypt(JSON.stringify(frame)))
+    this.socket.send(frame.bytes instanceof Uint8Array && this.bodyFrameEncoding
+      ? this.cipher.encryptBinary(encodeBodyFrame(frame.type, frame.requestId, frame.bytes))
+      : this.cipher.encrypt(JSON.stringify(frame)))
   }
 
   async request(path, options = {}) {
@@ -286,18 +315,19 @@ export class EncryptedRelayConnection {
     const body = await serializeBody(options.body, headers)
     if (body.byteLength > 64 * 1024 * 1024) throw new Error('请求超过 64 MB 限制。')
     if (options.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
-    let controller
+    let controller, record
     const stream = new ReadableStream({
       start(value) { controller = value },
+      pull: () => this.grantReceiveCredit(record),
       cancel: () => {
         const record = this.pending.get(requestId)
         if (!record) return
         try { this.sendFrame({ type: 'request.cancel', requestId }) } catch {}
         this.finishRecord(record)
       },
-    }, { highWaterMark: 4 * 1024 * 1024, size: chunk => chunk.byteLength })
+    }, { highWaterMark: this.bodyFrameEncoding ? RELAY_RESPONSE_WINDOW_BYTES : 4 * 1024 * 1024, size: chunk => chunk.byteLength })
     const responsePromise = new Promise((resolve, reject) => {
-      const record = {
+      record = {
         requestId,
         method,
         resolve,
@@ -309,6 +339,9 @@ export class EncryptedRelayConnection {
         abort: null,
         idleTimer: null,
         streaming: false,
+        flowControlled: Boolean(this.bodyFrameEncoding),
+        receivedBytes: 0,
+        acknowledgedBytes: 0,
       }
       record.abort = () => {
         try { this.sendFrame({ type: 'request.cancel', requestId }) } catch {}
@@ -333,7 +366,7 @@ export class EncryptedRelayConnection {
           if (Date.now() - started > this.requestIdleTimeoutMs) throw new Error('远程发送超时。')
           await new Promise(resolve => setTimeout(resolve, 10))
         }
-        this.sendFrame({ type: 'request.body', requestId, chunk: encodeBase64(chunk) })
+        this.sendFrame({ type: 'request.body', requestId, ...(this.bodyFrameEncoding ? { bytes: chunk } : { chunk: encodeBase64(chunk) }) })
       }
       if (this.pending.has(requestId)) this.sendFrame({ type: 'request.end', requestId })
     } catch (error) {

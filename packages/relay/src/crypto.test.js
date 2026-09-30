@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   decodeConnectionOffer,
+  decodeBase64, encodeBase64,
   decryptPayload,
   deriveSharedKey,
   encodeConnectionOffer,
@@ -10,6 +11,25 @@ import {
   NonceReplayWindow,
   randomToken, SessionCipher, deriveSessionKeys, sessionTranscript,
 } from './index.js'
+
+test('Base64 原生与回退解码保持二进制、空内容和非法输入语义', t => {
+  const bytes = Uint8Array.from({ length: 1024 }, (_, i) => i % 256)
+  const encoded = encodeBase64(bytes)
+  const original = Uint8Array.fromBase64
+  t.after(() => {
+    if (original === undefined) delete Uint8Array.fromBase64
+    else Uint8Array.fromBase64 = original
+  })
+  for (const native of [undefined, value => {
+    const binary = atob(value)
+    return Uint8Array.from(binary, char => char.charCodeAt(0))
+  }]) {
+    Uint8Array.fromBase64 = native
+    assert.deepEqual(new Uint8Array(decodeBase64(` ${encoded}\n`)), bytes)
+    assert.equal(decodeBase64('').byteLength, 0)
+    assert.throws(() => decodeBase64('***'))
+  }
+})
 
 test('双方可以派生相同密钥并加密文本与二进制', () => {
   const daemon = generateKeyPair()
@@ -85,4 +105,32 @@ test('会话密钥绑定配对秘密、挑战、客户端及方向，拒绝重�
 test('旧配对链接明确要求重新配对', () => {
   const old = Buffer.from(JSON.stringify({ v: 2 })).toString('base64url')
   assert.throws(() => decodeConnectionOffer(old), /重新配对/)
+})
+
+test('二进制与控制帧共享严格顺序，拒绝跨格式重放与篡改', () => {
+  const key = new Uint8Array(32).fill(123)
+  const sender = new SessionCipher(key, key), receiver = new SessionCipher(key, key)
+  const a = sender.encrypt('control')
+  const b = sender.encryptBinary(new Uint8Array([0, 128, 255]))
+  const c = sender.encrypt('end')
+  assert.equal(receiver.decrypt(a), 'control')
+  assert.throws(() => receiver.decrypt(c), /顺序/)
+  const modified = new Uint8Array(b).slice(); modified[modified.length - 1] ^= 1
+  assert.throws(() => receiver.decrypt(modified), /认证失败/)
+  assert.deepEqual(receiver.decrypt(b), new Uint8Array([0, 128, 255]))
+  assert.throws(() => receiver.decrypt(b), /重放/)
+  assert.equal(receiver.decrypt(c), 'end')
+})
+
+test('传输能力绑定到认证密钥，旧握手保持原派生方式', () => {
+  const key = new Uint8Array(32).fill(1), pairing = randomToken(), challenge = randomToken()
+  const hello = { clientPublicKeyB64: randomToken(), clientNonce: randomToken(), acceptBodyEncodings: [], acceptFrameEncodings: ['binary-v1'] }
+  const caps = { bodyFrameEncoding: 'binary-v1', responseWindowBytes: 524288 }
+  const base = sessionTranscript('test', hello, challenge)
+  const bound = sessionTranscript('test', hello, challenge, caps)
+  assert.notEqual(bound, base)
+  assert.equal(base, sessionTranscript('test', { ...hello, acceptFrameEncodings: [] }, challenge))
+  const a = deriveSessionKeys(key, pairing, bound)
+  const b = deriveSessionKeys(key, pairing, sessionTranscript('test', hello, challenge, { ...caps, responseWindowBytes: 1 }))
+  assert.notDeepEqual(a.clientToServer, b.clientToServer)
 })

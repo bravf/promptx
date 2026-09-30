@@ -3,6 +3,7 @@ import { transportObjectUrl } from './transport.js'
 import { createVideoSource } from './videoSource.js'
 
 export const v2Api = {
+  getWorkbench: () => request('/api/v2/workbench', { cache: 'no-store' }),
   listProjects: () => request('/api/v2/projects', { cache: 'no-store' }),
   listArchivedProjects: (query = '') => request(`/api/v2/projects/archived?${new URLSearchParams({ q: query })}`, { cache: 'no-store' }),
   createProject: (input) => request('/api/v2/projects', { method: 'POST', body: JSON.stringify(input) }),

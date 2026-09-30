@@ -68,6 +68,9 @@ async function waitForJson(socket, type) {
 async function startTestRelay(options = {}) {
   const webDistDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-relay-web-'))
   fs.writeFileSync(path.join(webDistDir, 'index.html'), '<!doctype html><title>PromptX Relay</title>', 'utf8')
+  fs.mkdirSync(path.join(webDistDir, 'assets'))
+  fs.writeFileSync(path.join(webDistDir, 'assets', 'index-abcdefgh.js'), 'export const ready = true')
+  fs.writeFileSync(path.join(webDistDir, 'media-preview-sw.js'), '// worker')
   return startRelayServer({
     logger: false,
     webDistDir,
@@ -98,8 +101,16 @@ test('Relay 提供同一份 Web 应用和健康状态', async () => {
       connectedDaemons: 0,
       connectedClients: 0,
     })
-    const html = await fetch(`http://127.0.0.1:${relay.port}/`).then((response) => response.text())
+    const response = await fetch(`http://127.0.0.1:${relay.port}/`)
+    assert.equal(response.headers.get('cache-control'), 'no-cache')
+    const html = await response.text()
     assert.match(html, /PromptX Relay/)
+    for (const [file, cache] of [['assets/index-abcdefgh.js', 'public, max-age=31536000, immutable'], ['media-preview-sw.js', 'no-cache']]) {
+      const asset = await fetch(`http://127.0.0.1:${relay.port}/${file}`)
+      assert.equal(asset.status, 200)
+      assert.equal(asset.headers.get('cache-control'), cache)
+      await asset.text()
+    }
   } finally {
     await relay.close()
   }

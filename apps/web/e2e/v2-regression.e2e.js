@@ -1490,6 +1490,27 @@ test('多个会话分栏共享事件连接，五栏可发送取消且不阻塞 A
   assert.deepEqual(failures, [])
 })
 
+test('Provider 探测延迟不阻塞会话列表，工作台只发一次聚合请求', async t => {
+  const fixture = await createFixture(t)
+  const page = await fixture.browser.newPage({ viewport: { width: 1440, height: 900 } })
+  let releaseProviders
+  const providersReady = new Promise(resolve => { releaseProviders = resolve })
+  t.after(() => releaseProviders())
+  await page.route('**/api/v2/providers', async route => {
+    await providersReady
+    await route.continue()
+  })
+  const requests = []
+  page.on('request', request => { requests.push(new URL(request.url()).pathname) })
+  await page.goto(fixture.baseUrl)
+  await page.getByRole('link', { name: '主回归会话', exact: true }).waitFor()
+  assert.equal(requests.filter(path => path === '/api/v2/workbench').length, 1)
+  assert.equal(requests.some(path => /^\/api\/v2\/projects(?:\/[^/]+\/tasks)?$/.test(path)), false)
+  releaseProviders()
+  await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+  await page.getByText('回归基线已经准备完成。').waitFor()
+})
+
 test('首次加载失败保留原标签布局，恢复接口后可重新恢复', async t => {
   const fixture = await createFixture(t)
   const page = await fixture.browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -1498,11 +1519,11 @@ test('首次加载失败保留原标签布局，恢复接口后可重新恢复',
   await page.getByRole('button', { name: '向右拆分', exact: true }).click()
   await page.getByRole('link', { name: '草稿切换会话', exact: true }).click()
   const saved = await page.evaluate(() => localStorage.getItem('promptx:v2:workbench-tabs'))
-  await page.route('**/api/v2/projects', route => route.fulfill({ status: 503, json: { message: '测试临时不可用' } }))
+  await page.route('**/api/v2/workbench', route => route.fulfill({ status: 503, json: { message: '测试临时不可用' } }))
   await page.reload()
   await page.getByText('测试临时不可用', { exact: true }).waitFor()
   assert.equal(await page.evaluate(() => localStorage.getItem('promptx:v2:workbench-tabs')), saved)
-  await page.unroute('**/api/v2/projects')
+  await page.unroute('**/api/v2/workbench')
   await page.reload()
   await page.getByRole('tabpanel', { name: '草稿切换会话', exact: true }).waitFor()
   assert.equal(await page.getByRole('tabpanel', { name: '主回归会话', exact: true }).isVisible(), true)
@@ -1650,6 +1671,35 @@ test('本地开发页面与 Daemon 不同端口时视频和音频携带允许的
   assert.deepEqual(failures, [])
 })
 
+test('手机禁止自动播放时，元数据就绪后仍显示播放控件，可手动播放', async t => {
+  const fixture = await createFixture(t)
+  fs.copyFileSync(new URL('./fixtures/preview.mp4', import.meta.url), path.join(fixture.workspace, 'manual-play.mp4'))
+  const turn = fixture.app.sqliteRepository.createTurn(fixture.task.id, 'manual-play')
+  fixture.app.sqliteRepository.updateTurn(turn.id, { status: 'completed' })
+  fixture.app.sqliteRepository.appendTimeline(fixture.task.id, turn.id, { type: 'assistant_message', messageId: 'manual-play', phase: 'final_answer', text: '[手动播放测试](manual-play.mp4)' })
+  const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  await page.addInitScript(() => {
+    const play = HTMLMediaElement.prototype.play
+    window.restoreMediaPlay = () => { HTMLMediaElement.prototype.play = play }
+    HTMLMediaElement.prototype.play = () => Promise.reject(new DOMException('自动播放已禁止', 'NotAllowedError'))
+    // 模拟手机仅预加载元数据，不向组件发布首帧就绪事件。
+    window.addEventListener('loadeddata', event => event.stopImmediatePropagation(), true)
+  })
+  await page.goto(fixture.baseUrl)
+  await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+  await page.getByRole('link', { name: '手动播放测试', exact: true }).click()
+  const viewer = page.getByRole('dialog', { name: '视频预览' })
+  await viewer.waitFor()
+  await page.waitForFunction(() => { const video = document.querySelector('[aria-label="视频预览"] video'); return video?.readyState >= 1 && !video.classList.contains('opacity-0') })
+  assert.equal(await viewer.locator('.media-preview-placeholder').count(), 0)
+  assert.equal(await viewer.locator('video').evaluate(element => element.controls && element.paused), true)
+  await page.evaluate(() => window.restoreMediaPlay())
+  await viewer.locator('video').evaluate(element => element.play())
+  await page.waitForFunction(() => document.querySelector('[aria-label="视频预览"] video')?.currentTime > 0)
+  await viewer.getByRole('button', { name: '关闭预览' }).click()
+  await viewer.waitFor({ state: 'detached' })
+})
+
 test('大视频在本地与加密 Relay 分段播放、跳转进度和关闭，远程不整段下载', async t => {
   const fixture = await createFixture(t)
   const videoPath = path.join(fixture.workspace, 'large-video.mp4')
@@ -1672,19 +1722,42 @@ test('大视频在本地与加密 Relay 分段播放、跳转进度和关闭，�
   service.updateConfig({ enabled: true, relayUrl: `ws://127.0.0.1:${relay.port}/relay/ws`, appUrl: `http://127.0.0.1:${relay.port}` })
   const ranges = []
   const forward = service.forward.bind(service)
-  service.forward = (channel, request) => {
+  let releaseTail, tailWaiting = false, slowCanceled = false, slowProbe = false
+  let tailGate = new Promise(resolve => { releaseTail = resolve })
+  t.after(() => releaseTail())
+  service.forward = async (channel, request) => {
+    if (slowProbe && request.path.includes('/file/content?path=large-video.mp4') && request.headers.range === 'bytes=0-262143') {
+      request.controller = new AbortController()
+      request.controller.signal.addEventListener('abort', () => { slowCanceled = true; releaseTail() }, { once: true })
+      const requestId = request.requestId
+      service.sendEncrypted(channel, { type: 'response.start', requestId, status: 206, headers: { 'content-type': 'application/octet-stream', 'content-range': 'bytes 0-262143/262144' } })
+      request.credit -= 64 * 1024
+      service.sendEncrypted(channel, { type: 'response.body', requestId, bytes: new Uint8Array(64 * 1024).fill(73) })
+      tailWaiting = true
+      await tailGate
+      if (!request.controller.signal.aborted) {
+        request.credit -= 192 * 1024
+        service.sendEncrypted(channel, { type: 'response.body', requestId, bytes: new Uint8Array(192 * 1024).fill(74) })
+        service.sendEncrypted(channel, { type: 'response.end', requestId })
+      }
+      service.finishRequest(channel, request)
+      return
+    }
     if (request.path.includes('/file/content?path=large-video.mp4')) ranges.push(request.headers.range)
     return forward(channel, request)
   }
   for (const remote of [false, true]) {
     const page = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true })
     const failures = collectPageFailures(page)
+    let socketCount = 0
+    page.on('websocket', () => { socketCount += 1 })
     if (remote) {
       // 等待独立测试 Relay 完成注册，不使用用户的配对或会话。
       for (let attempts = 0; !service.getStatus().connected && attempts < 100; attempts++) await new Promise(resolve => setTimeout(resolve, 20))
       assert.equal(service.getStatus().connected, true)
     }
     await page.goto(remote ? service.getOffer().url : fixture.baseUrl)
+    if (remote) await page.waitForFunction(() => navigator.serviceWorker.controller?.state === 'activated')
     await page.getByRole('link', { name: '主回归会话', exact: true }).click()
     await page.getByRole('link', { name: '播放大视频', exact: true }).click()
     const viewer = page.getByRole('dialog', { name: '视频预览' })
@@ -1707,6 +1780,33 @@ test('大视频在本地与加密 Relay 分段播放、跳转进度和关闭，�
         return { status: response.status, size: Number(response.headers.get('content-length')) }
       })
       assert.deepEqual(metadata, { status: 200, size })
+      assert.equal(socketCount, 2, '会话与媒体分别复用一条加密连接')
+      const sourceUrl = await video.getAttribute('src')
+      slowProbe = true
+      const streamingProbe = await page.evaluate(async sourceUrl => {
+        const response = await fetch(sourceUrl, { headers: { Range: 'bytes=0-262143' } })
+        window.streamProbeReader = response.body.getReader()
+        const { value } = await window.streamProbeReader.read()
+        return { status: response.status, bytes: value.length, firstByte: value[0] }
+      }, sourceUrl)
+      assert.deepEqual(streamingProbe, { status: 206, bytes: 64 * 1024, firstByte: 73 })
+      assert.equal(tailWaiting, true, '尾段尚未释放就能读到首段')
+      releaseTail()
+      assert.equal(await page.evaluate(async () => {
+        let bytes = 0
+        while (true) { const { value, done } = await window.streamProbeReader.read(); if (done) return bytes; bytes += value.length }
+      }), 192 * 1024)
+      tailGate = new Promise(resolve => { releaseTail = resolve })
+      tailWaiting = false
+      await page.evaluate(async sourceUrl => {
+        const response = await fetch(sourceUrl, { headers: { Range: 'bytes=0-262143' } })
+        const reader = response.body.getReader()
+        await reader.read()
+        await reader.cancel()
+      }, sourceUrl)
+      for (let attempt = 0; !slowCanceled && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 20))
+      assert.equal(slowCanceled, true, '取消浏览器读取会取消 Daemon 流式请求')
+      slowProbe = false
       assert.ok(ranges.length > 0 && ranges.every(range => {
         const match = /^bytes=(\d+)-(\d+)$/.exec(range || '')
         return match && Number(match[2]) - Number(match[1]) < 1024 * 1024
@@ -1714,6 +1814,17 @@ test('大视频在本地与加密 Relay 分段播放、跳转进度和关闭，�
     }
     await viewer.getByRole('button', { name: '关闭预览' }).click()
     await viewer.waitFor({ state: 'detached' })
+    if (remote) {
+      await page.addInitScript(() => {
+        ServiceWorkerRegistration.prototype.update = () => new Promise(() => {})
+        ServiceWorkerContainer.prototype.register = () => Promise.reject(new Error('已有 Worker 不应重复注册'))
+      })
+      await page.reload()
+      await page.locator('.timeline:visible').waitFor()
+      await page.getByRole('link', { name: '播放大视频', exact: true }).click()
+      await page.waitForFunction(() => document.querySelector('[aria-label="视频预览"] video')?.readyState >= 2, null, { timeout: 20000 })
+      await page.getByRole('dialog', { name: '视频预览' }).getByRole('button', { name: '关闭预览' }).click()
+    }
     assert.deepEqual(failures, [])
     await page.close()
     ranges.length = 0
@@ -1762,7 +1873,7 @@ test('文件与 Diff 支持拖动分割线，选择大视频后点击按钮播�
   fs.appendFileSync(file, padding)
   fs.truncateSync(file, fs.statSync(file).size + 110 * 1024 * 1024 - 8)
   for (const mobile of [false, true]) {
-    const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 844 } })
+    const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 844 }, reducedMotion: 'reduce' })
     const failures = collectPageFailures(page)
     await page.goto(fixture.baseUrl)
     if (mobile) await page.getByRole('link', { name: '主回归会话', exact: true }).click()

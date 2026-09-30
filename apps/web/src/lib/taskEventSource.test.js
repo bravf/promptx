@@ -19,7 +19,7 @@ test('会话共享连接，订阅变化与断线重连使用各自最新游标�
     return connection
   } })
   const received = []
-  const a = subscribe('a', 'epoch-a:2')
+  const a = subscribe('a', 'epoch-a:2', { turnsRevision: 'turns-a', controlRevision: 'control-a' })
   const b = subscribe('b', 'epoch-b:10')
   a.addEventListener('timeline', event => received.push(['a', JSON.parse(event.data).row.seq]))
   b.addEventListener('timeline', event => received.push(['b', JSON.parse(event.data).row.seq]))
@@ -27,6 +27,14 @@ test('会话共享连接，订阅变化与断线重连使用各自最新游标�
   assert.equal(connections.length, 1)
   const first = connections[0]
   const [aId, bId] = first.body().subscriptions.map(item => item.id)
+  assert.equal(first.body().subscriptions[0].turnsRevision, 'turns-a')
+  assert.equal(first.body().subscriptions[0].controlRevision, 'control-a')
+  first.emit(aId, { type: 'timeline-synced', sync: { turnsRevision: 'turns-next', turns: [] } })
+  first.emit(aId, { type: 'control', revision: 'control-next', control: {} })
+  assert.equal(first.body().subscriptions[0].turnsRevision, 'turns-next')
+  assert.equal(first.body().subscriptions[0].controlRevision, 'control-next')
+  first.emit(aId, { type: 'turn', turn: { id: 'new' } })
+  assert.equal(first.body().subscriptions[0].turnsRevision, '')
   first.emit(aId, { type: 'timeline', epoch: 'epoch-a', row: { seq: 3 } })
   first.emit(bId, { type: 'timeline', epoch: 'epoch-b', row: { seq: 11 } })
   assert.deepEqual(received, [['a', 3], ['b', 11]])

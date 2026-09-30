@@ -18,8 +18,11 @@ function bytesToBase64(bytes) {
 
 function base64ToBytes(value) {
   const normalized = String(value || '').trim()
+  if (typeof Uint8Array.fromBase64 === 'function') return Uint8Array.fromBase64(normalized)
   const binary = globalThis.atob(normalized)
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return bytes
 }
 
 function toArrayBuffer(bytes) {
@@ -153,10 +156,12 @@ export function validateToken(value) { return importKey(value, 32, '配对密钥
 export function relayAuthTranscript(serverId, connectionId, challenge) {
   return JSON.stringify(['promptx-relay-auth', 3, serverId, connectionId || '', challenge])
 }
-export function sessionTranscript(serverId, hello, challenge) {
+export function sessionTranscript(serverId, hello, challenge, capabilities = null) {
   validateToken(hello.clientNonce)
   validateToken(challenge)
-  return JSON.stringify(['promptx-session', 3, serverId, hello.clientPublicKeyB64, hello.clientNonce, challenge, hello.acceptBodyEncodings || []])
+  const transcript = ['promptx-session', 3, serverId, hello.clientPublicKeyB64, hello.clientNonce, challenge, hello.acceptBodyEncodings || []]
+  if (capabilities) transcript.push(hello.acceptFrameEncodings || [], capabilities)
+  return JSON.stringify(transcript)
 }
 export function deriveSessionKeys(sharedKey, pairingKeyB64, transcript) {
   const shared = normalizeBytes(sharedKey)
@@ -175,8 +180,22 @@ export class SessionCipher {
     if (!Number.isSafeInteger(this.sent + 1)) throw new Error('会话序号耗尽。')
     return encryptPayload(this.sendKey, JSON.stringify({ seq: ++this.sent, payload }))
   }
+  encryptBinary(payload) {
+    if (!Number.isSafeInteger(this.sent + 1)) throw new Error('会话序号耗尽。')
+    const bytes = normalizeBytes(payload)
+    const frame = new Uint8Array(8 + bytes.byteLength)
+    new DataView(frame.buffer).setFloat64(0, ++this.sent)
+    frame.set(bytes, 8)
+    return encryptPayload(this.sendKey, frame)
+  }
   decrypt(bytes) {
-    const frame = JSON.parse(decryptPayload(this.receiveKey, bytes))
+    const payload = decryptPayload(this.receiveKey, bytes)
+    let frame
+    if (typeof payload === 'string') frame = JSON.parse(payload)
+    else {
+      if (payload.byteLength < 8) throw new Error('会话二进制帧无效。')
+      frame = { seq: new DataView(payload).getFloat64(0), payload: new Uint8Array(payload, 8) }
+    }
     if (!Number.isSafeInteger(frame.seq) || frame.seq !== this.received + 1) throw new Error('会话帧重放或顺序无效。')
     this.received = frame.seq
     return frame.payload

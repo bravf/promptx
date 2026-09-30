@@ -1,11 +1,11 @@
 import { EncryptedRelayConnection } from './relayConnection.js'
 import { getConnectionOffer, hasConnectionOffer } from './relayOffer.js'
+import { createRelayTransportPool } from './relayTransportPool.js'
 
-let relayConnection = null
+const pool = createRelayTransportPool({ getOffer: getConnectionOffer, createConnection: offer => new EncryptedRelayConnection(offer) })
 
 function getRelayConnection() {
-  if (!relayConnection && hasConnectionOffer()) relayConnection = new EncryptedRelayConnection(getConnectionOffer())
-  return relayConnection
+  return pool.getControl()
 }
 
 export function isRemoteTransport() {
@@ -36,7 +36,7 @@ export function transportFetch(url, options = {}) {
   const connection = getRelayConnection()
   if (connection) {
     const parsed = new URL(url, typeof window === 'undefined' ? 'http://localhost' : window.location.origin)
-    return connection.request(`${parsed.pathname}${parsed.search}`, options)
+    return pool.request(`${parsed.pathname}${parsed.search}`, options)
   }
   return fetch(url, options)
 }

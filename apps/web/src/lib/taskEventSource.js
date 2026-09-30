@@ -17,7 +17,7 @@ export function createTaskEventPool({ connect = createEventSource, url = () => `
         requestOptions: () => ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ subscriptions: [...subscriptions.values()].map(({ id, taskId, cursor, snapshot }) => ({ id, taskId, cursor, snapshot })) }),
+          body: JSON.stringify({ subscriptions: [...subscriptions.values()].map(({ id, taskId, cursor, snapshot, turnsRevision, controlRevision }) => ({ id, taskId, cursor, snapshot, turnsRevision, controlRevision })) }),
         }),
       })
       stream = next
@@ -27,6 +27,9 @@ export function createTaskEventPool({ connect = createEventSource, url = () => `
         const subscription = subscriptions.get(subscriptionId)
         if (!subscription) return
         if (event.type === 'timeline') subscription.cursor = `${event.epoch}:${event.row.seq}`
+        if (event.type === 'turn') subscription.turnsRevision = ''
+        if (event.sync?.turnsRevision) subscription.turnsRevision = event.sync.turnsRevision
+        if (event.type === 'control') subscription.controlRevision = event.revision || ''
         const timeline = event.type === 'reset' ? event.timeline : event.sync?.timeline
         if (timeline) subscription.cursor = `${timeline.epoch}:${timeline.rows.at(-1)?.seq || 0}`
         const notification = { type: event.type, data: JSON.stringify(event), lastEventId: subscription.cursor }
@@ -35,10 +38,10 @@ export function createTaskEventPool({ connect = createEventSource, url = () => `
     })
   }
 
-  return function subscribe(taskId, cursor = '', { snapshot = true } = {}) {
+  return function subscribe(taskId, cursor = '', { snapshot = true, turnsRevision = '', controlRevision = '' } = {}) {
     const id = String(++sequence)
     const listeners = new Map()
-    subscriptions.set(id, { id, taskId, cursor, snapshot, listeners })
+    subscriptions.set(id, { id, taskId, cursor, snapshot, turnsRevision, controlRevision, listeners })
     reconnect()
     return {
       addEventListener(type, listener) {

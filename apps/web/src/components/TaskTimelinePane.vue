@@ -42,6 +42,8 @@ provide('toolExpansion', toolExpansion)
 const { isDark } = useTheme()
 const rows = ref([])
 const turns = ref([])
+const turnsRevision = ref('')
+const controlRevision = ref('')
 const draftContent = ref([])
 const displayedTaskId = ref('')
 const timelineLoading = ref(false)
@@ -104,6 +106,7 @@ function cacheTimeline(taskId = displayedTaskId.value || activeTaskId.value) {
   const snapshot = {
     rows: [...rows.value],
     turns: [...turns.value],
+    turnsRevision: turnsRevision.value,
     epoch: timelineEpoch.value,
     maxSeq: rows.value.at(-1)?.seq || 0,
     hasOlderHistory: hasOlderHistory.value,
@@ -120,6 +123,7 @@ function restoreTimelineCache(taskId) {
   timelineCache.set(taskId, snapshot)
   rows.value = [...snapshot.rows]
   turns.value = [...snapshot.turns]
+  turnsRevision.value = snapshot.turnsRevision || ''
   timelineEpoch.value = snapshot.epoch
   hasOlderHistory.value = snapshot.hasOlderHistory
   displayedTaskId.value = taskId
@@ -131,9 +135,11 @@ function resetTimeline() {
   positioningTimeline = true
   displayedTaskId.value = ''
   agentControl.value = null
+  controlRevision.value = ''
   settingsLoading.value = false
   rows.value = []
   turns.value = []
+  turnsRevision.value = ''
   draftContent.value = []
   timelineEpoch.value = ''
   hasOlderHistory.value = false
@@ -158,6 +164,7 @@ function saveTaskDraft(content) {
 
 function upsertTurn(turn) {
   if (!turn?.id) return
+  turnsRevision.value = ''
   const index = turns.value.findIndex((item) => item.id === turn.id)
   if (index >= 0) turns.value[index] = turn
   else turns.value.unshift(turn)
@@ -185,6 +192,7 @@ async function reconcileTerminalTaskTurns(task = props.task) {
     const result = await v2Api.listTaskTurns(task.id, 1000)
     if (requestVersion === timelineRequestVersion && activeTaskId.value === task.id) {
       turns.value = result.turns
+      turnsRevision.value = result.revision || ''
       cacheTimeline(task.id)
     }
   } catch (cause) {
@@ -227,6 +235,7 @@ async function selectTask(taskId) {
     displayedTaskId.value = ''
     rows.value = []
     turns.value = []
+    turnsRevision.value = ''
     timelineEpoch.value = ''
     hasOlderHistory.value = false
   }
@@ -236,6 +245,7 @@ async function selectTask(taskId) {
   error.value = ''
   sendBlockedReason.value = ''
   agentControl.value = null
+  controlRevision.value = ''
   settingsLoading.value = false
   loadingOlderHistory.value = false
   followingTimeline.value = true
@@ -251,6 +261,7 @@ async function selectTask(taskId) {
     if (requestVersion !== timelineRequestVersion || activeTaskId.value !== taskId) return
     rows.value = result.timeline.rows
     turns.value = turnResult.turns
+    turnsRevision.value = turnResult.revision || ''
     timelineEpoch.value = result.timeline.epoch
     hasOlderHistory.value = result.timeline.hasOlder
     displayedTaskId.value = taskId
@@ -285,7 +296,10 @@ async function loadTaskControl(taskId, requestVersion = timelineRequestVersion) 
   controlLoading.value = true
   try {
     const result = await v2Api.getTaskControl(taskId)
-    if (requestVersion === timelineRequestVersion && activeTaskId.value === taskId) agentControl.value = result.control
+    if (requestVersion === timelineRequestVersion && activeTaskId.value === taskId) {
+      agentControl.value = result.control
+      controlRevision.value = result.revision || ''
+    }
   } catch (cause) {
     if (requestVersion === timelineRequestVersion && activeTaskId.value === taskId) error.value = cause.message
   } finally {
@@ -443,7 +457,10 @@ async function syncVisibleTimeline() {
 
 function applyTimelineSyncResult(sync, taskId) {
   if (!sync || activeTaskId.value !== taskId) return
-  if (sync.turns) turns.value = sync.turns
+  if (sync.turns) {
+    turns.value = sync.turns
+    turnsRevision.value = sync.turnsRevision || ''
+  }
   const timeline = sync.timeline
   if (timeline) {
     if (!timelineEpoch.value || timeline.reset || timeline.epoch !== timelineEpoch.value) {
@@ -464,7 +481,10 @@ function applyTimelineSyncResult(sync, taskId) {
 function openEvents(taskId, epoch, seq) {
   closeEvents()
   if (!paneVisible.value) return
-  eventSource = createTaskEventSource(taskId, epoch ? `${epoch}:${seq || 0}` : '')
+  eventSource = createTaskEventSource(taskId, epoch ? `${epoch}:${seq || 0}` : '', {
+    turnsRevision: turnsRevision.value,
+    controlRevision: controlRevision.value,
+  })
   eventSource.addEventListener('timeline', (event) => {
     if (!paneVisible.value || activeTaskId.value !== taskId) return
     const { row } = JSON.parse(event.data)
@@ -495,7 +515,10 @@ function openEvents(taskId, epoch, seq) {
     if (sync?.turn) upsertTurn(sync.turn)
   })
   eventSource.addEventListener('control', (event) => {
-    if (activeTaskId.value === taskId) agentControl.value = JSON.parse(event.data).control
+    if (activeTaskId.value !== taskId) return
+    const result = JSON.parse(event.data)
+    agentControl.value = result.control
+    controlRevision.value = result.revision || ''
   })
   eventSource.addEventListener('reset', (event) => {
     if (activeTaskId.value !== taskId) return
