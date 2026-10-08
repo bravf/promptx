@@ -361,7 +361,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .composer { border: 1px solid var(--theme-inputBorder); background: var(--theme-appPanelStrong); box-shadow: 0 1px 4px color-mix(in srgb, var(--theme-textPrimary) 10%, transparent); }
-.composer-dragging { background: var(--theme-primaryBg); box-shadow: 0 0 0 2px var(--theme-primaryBorder); }
+.composer-dragging { border-color: var(--theme-primaryBorder); box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primaryBorder) 35%, transparent); }
 .attachment-pill { background: var(--theme-appPanelInset); }
 .attachment-preview, .attachment-file { background: var(--theme-appPanelMuted); color: var(--theme-textMuted); }
 .attachment-action { display: flex; align-items: center; justify-content: center; color: var(--theme-textMuted); }
