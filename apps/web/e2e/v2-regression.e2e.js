@@ -14,6 +14,9 @@ import { RelayService } from '../../daemon/src/relay/relayService.js'
 import { startRelayServer } from '../../../packages/relay/src/server.js'
 import { createLayout, openTab, splitGroup } from '../src/lib/workbenchTabs.js'
 import { THEME_PRESETS } from '../src/lib/themes.js'
+import { PendingInteractions } from '../../daemon/src/agent/providers/pendingInteractions.js'
+import { codexAsyncInteraction } from '../../../packages/protocol/src/codexAsyncQuestions.js'
+import { grokExtensionRequest } from '../../daemon/src/agent/providers/grok.js'
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist')
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
@@ -46,6 +49,7 @@ function providerRegistry(runtimeRecords) {
       capabilities: { models: true, reasoningEffort: true, contextUsage: true },
       createRuntime(options = {}) {
         const runtime = new EventEmitter()
+        runtime.interactions = new PendingInteractions(runtime)
         runtime.threadId = options.nativeHandle?.threadId
         runtime.sessionId = options.nativeHandle?.sessionId
         let currentModelId = 'regression-model'
@@ -101,10 +105,11 @@ function providerRegistry(runtimeRecords) {
           return { nativeTurnId: `native-${runtimeRecords.turns.length}` }
         }
         runtime.cancel = async () => {
+          runtime.interactions.expire('任务已取消。')
           runtimeRecords.canceled += 1
           runtime.emit('turnCanceled')
         }
-        runtime.close = () => {}
+        runtime.close = () => runtime.interactions.expire('会话连接已关闭。')
         return runtime
       },
     }
@@ -273,6 +278,112 @@ async function assertNoHorizontalOverflow(page) {
   assert.equal(dimensions.scrollWidth, dimensions.clientWidth)
 }
 
+test('交互问答在桌面和手机 Relay 直接展开，刷新恢复、回答继续原 Turn，多选及 ACP 选择可用', { timeout: 60000 }, async t => {
+  const fixture = await createFixture(t)
+  const relay = await startRelayServer({ logger: false, webDistDir: webRoot, config: { host: '127.0.0.1', port: 0 } })
+  const service = new RelayService({ localBaseUrl: fixture.baseUrl, logger: false, configPath: path.join(fixture.root, 'interaction-relay.json'), identityPath: path.join(fixture.root, 'interaction-identity.json') })
+  t.after(async () => { service.stop(); await relay.close() })
+  service.updateConfig({ enabled: true, relayUrl: `ws://127.0.0.1:${relay.port}/relay/ws`, appUrl: `http://127.0.0.1:${relay.port}` })
+  let runtime
+  fixture.runtimeRecords.onTurn = (_text, value) => { runtime = value }
+  const desktop = await fixture.browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const mobile = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const failures = collectPageFailures(desktop)
+  const mobileFailures = collectPageFailures(mobile)
+  await desktop.goto(fixture.baseUrl)
+  await desktop.getByRole('link', { name: '主回归会话', exact: true }).click()
+  await desktop.getByPlaceholder('向 Agent 发送消息').fill('保持运行，交互测试')
+  await desktop.getByRole('button', { name: '发送', exact: true }).click()
+  await desktop.getByRole('button', { name: '停止', exact: true }).waitFor()
+  const turnCount = fixture.app.sqliteRepository.listTurns(fixture.task.id).length
+  const pending = runtime.interactions.ask({ kind: 'question', title: '需要你回答', questions: [
+    { id: 'format', header: '输出格式', question: '选择输出格式', options: [{ id: 'md', label: 'Markdown', description: '便于阅读' }, { id: 'json', label: 'JSON' }], allowOther: true },
+    { id: 'checks', header: '验证项目', question: '选择需要的验证', options: [{ id: 'build', label: '构建检查' }, { id: 'test', label: '运行测试' }], multiSelect: true },
+  ] }, { respond: (_response, answers) => answers })
+  await desktop.locator('.interaction-card').waitFor()
+  await desktop.getByRole('tab', { name: '主回归会话', exact: true }).getByText('待回答', { exact: true }).waitFor()
+  await desktop.reload()
+  await desktop.locator('.interaction-card').waitFor()
+  for (let attempts = 0; !service.getStatus().connected && attempts < 100; attempts++) await new Promise(resolve => setTimeout(resolve, 20))
+  assert.equal(service.getStatus().connected, true)
+  await mobile.goto(service.getOffer().url)
+  await mobile.getByRole('link', { name: '主回归会话', exact: true }).click()
+  const card = mobile.locator('.interaction-card')
+  await card.waitFor()
+  await mobile.reload()
+  await card.waitFor()
+  assert.equal(await card.getByRole('button', { name: '提交回答' }).isDisabled(), true)
+  await card.getByRole('radio', { name: 'Markdown 便于阅读' }).check()
+  await card.getByRole('checkbox', { name: '构建检查' }).check()
+  await card.getByRole('checkbox', { name: '运行测试' }).check()
+  await assertNoHorizontalOverflow(mobile)
+  await saveScreenshot(mobile, 'interaction-mobile.png')
+  await saveScreenshot(desktop, 'interaction-desktop.png')
+  await card.getByRole('button', { name: '提交回答' }).click()
+  assert.deepEqual(await pending, { format: ['Markdown'], checks: ['构建检查', '运行测试'] })
+  await desktop.locator('.interaction-summary').filter({ hasText: '已回答' }).waitFor()
+  await desktop.waitForFunction(() => !document.querySelector('.interaction-card'))
+  assert.equal(fixture.app.sqliteRepository.listTurns(fixture.task.id).length, turnCount)
+
+  const choice = runtime.interactions.ask({ kind: 'choice', title: '选择执行方案', actions: [{ id: 'fast', label: '快速方案' }, { id: 'thorough', label: '完整方案' }] }, { respond: response => response.actionId })
+  await desktop.getByRole('button', { name: '完整方案', exact: true }).click()
+  assert.equal(await choice, 'thorough')
+  const freeform = runtime.interactions.ask({ kind: 'question', title: '补充要求', questions: [{ id: 'extra', header: '补充', question: '其他要求？', options: [], allowOther: true }] }, { respond: (_response, answers) => answers })
+  await mobile.getByRole('textbox', { name: '补充', exact: true }).fill('使用中文')
+  await mobile.getByRole('button', { name: '提交回答', exact: true }).click()
+  assert.deepEqual(await freeform, { extra: ['使用中文'] })
+  const canceled = runtime.interactions.ask({ kind: 'choice', title: '取消测试', actions: [{ id: 'yes', label: '继续' }] }, { respond: response => response.decision })
+  await mobile.locator('.interaction-card').waitFor()
+  await mobile.getByRole('button', { name: '停止', exact: true }).click()
+  assert.equal(await canceled, 'dismiss')
+  await mobile.locator('.interaction-summary').filter({ hasText: '已失效' }).waitFor()
+  assert.equal(await mobile.locator('.interaction-card').count(), 0)
+
+  await desktop.getByPlaceholder('向 Agent 发送消息').fill('保持运行，异步问题测试')
+  await desktop.getByRole('button', { name: '发送', exact: true }).click()
+  await desktop.getByRole('button', { name: '停止', exact: true }).waitFor()
+  const asyncRequest = codexAsyncInteraction({ id: 'browser-async-call', delivery: 'async', questions: [{ title: '异步报告格式？', options: ['Markdown', 'JSON'] }] })
+  runtime.emit('asyncInteraction', asyncRequest)
+  runtime.emit('turnCompleted', {})
+  const asyncCard = mobile.locator('.interaction-card').filter({ hasText: '异步报告格式？' })
+  await asyncCard.waitFor()
+  await mobile.reload()
+  await asyncCard.waitFor()
+  assert.equal(await mobile.getByRole('button', { name: '停止', exact: true }).count(), 0)
+  const beforeReply = fixture.runtimeRecords.turns.length
+  await asyncCard.getByRole('radio', { name: 'JSON', exact: true }).check()
+  await asyncCard.getByRole('button', { name: '提交回答' }).click()
+  await mobile.locator('.interaction-summary').filter({ hasText: '异步报告格式？' }).filter({ hasText: '已回答' }).waitFor()
+  assert.equal(fixture.runtimeRecords.turns.length, beforeReply + 1)
+  const reply = fixture.runtimeRecords.turns.at(-1)[0].text
+  assert.match(reply, /send_user_message_question_reply/)
+  assert.match(reply, /browser-async-call/)
+  assert.match(reply, /JSON/)
+  await desktop.getByText('回答 Agent 的问题：', { exact: false }).waitFor()
+  await desktop.locator('.interaction-summary').filter({ hasText: '异步报告格式？' }).filter({ hasText: '已回答' }).waitFor()
+  await desktop.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'hidden' })
+  await desktop.getByPlaceholder('向 Agent 发送消息').fill('保持运行，Grok 原生问答')
+  await desktop.getByRole('button', { name: '发送', exact: true }).click()
+  await desktop.getByRole('button', { name: '停止', exact: true }).waitFor()
+  const grokQuestion = grokExtensionRequest(runtime, '_x.ai/ask_user_question', { questions: [
+    { question: 'Grok 报告格式？', options: [{ label: 'Markdown', description: '便于阅读' }, { label: 'JSON', description: '便于解析' }], multiSelect: false },
+    { question: 'Grok 检查范围？', options: [{ label: '前端', description: '' }, { label: 'Relay', description: '' }], multiSelect: true },
+  ] })
+  const grokCard = mobile.locator('.interaction-card').filter({ hasText: 'Grok 报告格式？' })
+  await grokCard.waitFor()
+  await mobile.reload()
+  await grokCard.waitFor()
+  await grokCard.getByRole('radio', { name: 'JSON 便于解析' }).check()
+  await grokCard.getByRole('checkbox', { name: '前端', exact: true }).check()
+  await grokCard.getByRole('checkbox', { name: 'Relay', exact: true }).check()
+  await grokCard.getByRole('button', { name: '提交回答' }).click()
+  assert.deepEqual(await grokQuestion, { outcome: 'accepted', answers: { 'Grok 报告格式？': ['JSON'], 'Grok 检查范围？': ['前端', 'Relay'] }, annotations: {} })
+  await desktop.locator('.interaction-summary').filter({ hasText: 'Grok 报告格式？' }).filter({ hasText: '已回答' }).waitFor()
+  await mobile.getByRole('button', { name: '停止', exact: true }).click()
+  assert.deepEqual(failures, [])
+  assert.deepEqual(mobileFailures, [])
+})
+
 async function saveScreenshot(page, name) {
   const outputDir = process.env.PROMPTX_REGRESSION_SCREENSHOT_DIR
   if (!outputDir) return
@@ -407,6 +518,7 @@ test('工作区侧栏支持拖动、键盘和重置，刷新记住宽度且窄�
   await assertNoHorizontalOverflow(page)
   await page.setViewportSize({ width: 1440, height: 900 })
   await divider.waitFor()
+  await page.waitForFunction(() => document.querySelector('.workspace-sidebar').getBoundingClientRect().width === 520)
   assert.equal(Math.round((await sidebar.boundingBox()).width), 520)
   await divider.press('Home')
   assert.equal(Math.round((await sidebar.boundingBox()).width), 180)

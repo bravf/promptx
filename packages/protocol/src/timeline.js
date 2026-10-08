@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { InteractionRequestSchema } from './interaction.js'
 
 export { projectTimelineRows } from './timelineProjection.js'
 
@@ -21,6 +22,13 @@ const FileContentBlockSchema = z.object({
 const ToolDetailSchema = z.object({ type: z.string().min(1) }).passthrough()
 
 export const TimelineItemSchema = z.discriminatedUnion('type', [
+  InteractionRequestSchema.extend({
+    type: z.literal('interaction_request'),
+    status: z.enum(['pending', 'answered', 'dismissed', 'expired']),
+    answers: z.record(z.string(), z.array(z.string())).optional(),
+    selectedAction: z.string().optional(),
+    message: z.string().optional(),
+  }),
   z.object({
     type: z.literal('user_message'),
     clientMessageId: z.string(),

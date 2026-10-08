@@ -9,6 +9,7 @@ import TimelineToolCall from './TimelineToolCall.vue'
 import TimelineMarkdown from './TimelineMarkdown.vue'
 import TimelineMessageMeta from './TimelineMessageMeta.vue'
 import TimelineUserMessage from './TimelineUserMessage.vue'
+import TimelineInteraction from './TimelineInteraction.vue'
 
 const props = defineProps({
   turn: { type: Object, required: true },
@@ -18,6 +19,7 @@ const props = defineProps({
   isDark: { type: Boolean, default: false },
   workspaceCwd: { type: String, default: '' },
   taskId: { type: String, default: '' },
+  waiting: { type: Boolean, default: false },
 })
 const emit = defineEmits(['rendered', 'open-workspace-path'])
 
@@ -51,6 +53,7 @@ const activity = computed(() => getTurnActivityState(props.turn, { running: prop
 const heading = computed(() => {
   const elapsed = formatElapsedTime(duration.value || 0)
   if (!props.running) return `耗时 ${elapsed}`
+  if (props.waiting) return `等待你回答 · ${elapsed}`
   if (activity.value.status === 'retrying') return `模型服务连接异常，正在重试 · ${elapsed}`
   if (activity.value.status === 'delayed') return `响应时间较长 · ${elapsed}`
   return `思考中 · ${elapsed}`
@@ -126,6 +129,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
       </div>
       <div v-else-if="entry.item.type === 'error'" class="error-row ml-7 rounded-sm border px-3 py-2 text-xs">{{ entry.item.message }}</div>
       <div v-else-if="entry.item.type === 'system_notice'" class="theme-muted-text ml-7 text-xs">{{ entry.item.text }}</div>
+      <TimelineInteraction v-else-if="entry.item.type === 'interaction_request' && entry.item.status !== 'pending'" :request="entry.item" :task-id="taskId" :is-dark="isDark" />
     </article>
 
   </section>

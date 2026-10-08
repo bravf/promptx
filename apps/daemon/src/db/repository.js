@@ -568,6 +568,10 @@ export function createRepository(db) {
     },
     failActiveTurnsOnStartup() {
       const now = nowIso()
+      db.prepare(`UPDATE agent_timeline_rows SET item_json = json_set(item_json, '$.status', 'expired', '$.message', '服务已重启，这个问题已失效。')
+        WHERE item_type = 'interaction_request' AND json_extract(item_json, '$.status') = 'pending'
+        AND COALESCE(json_extract(item_json, '$.delivery'), 'blocking') != 'async'`).run()
+      db.prepare(`UPDATE agent_sessions SET requires_attention = 1, attention_reason = 'error', attention_at = ? WHERE attention_reason = 'permission'`).run(now)
       db.prepare(`UPDATE agent_sessions SET requires_attention = 1, attention_reason = 'error', attention_at = ? WHERE id IN (SELECT agent_id FROM provider_tasks WHERE json_extract(data_json, '$.status') IN ('running', 'pending'))`).run(now)
       db.prepare(`UPDATE provider_tasks SET data_json = json_set(data_json, '$.status', 'interrupted', '$.summary', '服务已重启，后台任务状态需要核实') WHERE json_extract(data_json, '$.status') IN ('running', 'pending')`).run()
       db.prepare(`UPDATE agent_sessions SET lifecycle = 'ready', updated_at = ?, requires_attention = 1,
@@ -577,6 +581,9 @@ export function createRepository(db) {
         WHERE status IN ('queued', 'running')`).run(now)
     },
     appendTimeline(taskId, turnId, item, options) { return insertTimeline(taskId, turnId, item, options) },
+    listInteractionRows(taskId) {
+      return db.prepare("SELECT * FROM agent_timeline_rows WHERE task_id = ? AND item_type = 'interaction_request' ORDER BY seq").all(taskId).map(mapTimelineRow)
+    },
     getTimelineSyncState(taskId) {
       const row = db.prepare('SELECT * FROM agent_timeline_sync_state WHERE task_id = ?').get(taskId)
       return row ? { providerId: row.provider_id, sourceId: row.source_id, manifest: parseJson(row.manifest_json), syncedAt: row.synced_at } : null

@@ -1,5 +1,8 @@
 import { codexToolStatus } from '../../../../../packages/protocol/src/toolDetails.js'
 import { BackgroundTasks, taskStatus } from './backgroundTasks.js'
+import { PendingInteractions } from './pendingInteractions.js'
+import { normalizeInteractionQuestions } from '../../../../../packages/protocol/src/interaction.js'
+import { codexAsyncInteraction } from '../../../../../packages/protocol/src/codexAsyncQuestions.js'
 import { EventEmitter } from 'node:events'
 import { JsonRpcProcess } from '../jsonRpcProcess.js'
 import { filePromptText } from '../promptAttachments.js'
@@ -119,6 +122,8 @@ export class CodexRuntime extends EventEmitter {
     this.threadLoaded = false
     this.turnId = ''
     this.backgroundTasks = new BackgroundTasks(this)
+    this.interactions = new PendingInteractions(this)
+    this.interactionRpcIds = new Map()
     this.pendingChildren = new Map()
     this.historyOnly = false
     this.messagePhases = new Map()
@@ -138,7 +143,7 @@ export class CodexRuntime extends EventEmitter {
   }
 
   async connectInternal() {
-    const rpc = this.rpcFactory(CODEX_BIN, ['app-server', '--stdio'], { cwd: this.cwd })
+    const rpc = this.rpcFactory(CODEX_BIN, ['--enable', 'default_mode_request_user_input', 'app-server', '--stdio'], { cwd: this.cwd })
     this.rpc = rpc
     rpc.on('notification', (message) => {
       if (this.rpc === rpc) this.onNotification(message)
@@ -151,6 +156,7 @@ export class CodexRuntime extends EventEmitter {
     })
     rpc.on('exit', () => {
       if (this.rpc !== rpc) return
+      this.interactions.expire('Codex 进程已退出，这个问题已失效。')
       this.backgroundTasks.interrupt('Codex 进程退出，后台任务已中断')
       this.rpc = null
       this.connected = false
@@ -294,14 +300,44 @@ export class CodexRuntime extends EventEmitter {
   }
 
   onRequest(message) {
+    if (['item/tool/requestUserInput', 'tool/requestUserInput'].includes(message.method)) {
+      const rpc = this.rpc
+      try {
+        const promise = this.interactions.ask({
+          kind: 'question', title: '需要你回答',
+          questions: normalizeInteractionQuestions(message.params?.questions),
+        }, { respond: (response, answers) => ({ answers: response.decision === 'answer'
+          ? Object.fromEntries(Object.entries(answers).map(([id, values]) => [id, { answers: values }])) : {} }) })
+        this.interactionRpcIds.set(message.id, this.interactions.requests.at(-1)?.id)
+        void promise.then(result => {
+          if (!this.interactionRpcIds.delete(message.id)) return
+          if (this.rpc === rpc && !rpc.closed) rpc.respond(message.id, result)
+        }).catch(error => {
+          if (!this.interactionRpcIds.delete(message.id)) return
+          if (this.rpc === rpc && !rpc.closed) rpc.respondError(message.id, -32602, error.message)
+        })
+      } catch (error) { rpc.respondError(message.id, -32602, error.message) }
+      return
+    }
+    if (message.method === 'item/permissions/requestApproval') {
+      this.rpc.respond(message.id, { permissions: message.params?.permissions || {}, scope: 'turn' })
+      return
+    }
     if (message.method.includes('requestApproval')) {
       this.rpc.respond(message.id, { decision: 'accept' })
       return
     }
-    this.rpc.respond(message.id, {})
+    this.rpc.respondError(message.id, -32601, `PromptX 暂不支持这个交互请求：${message.method}`)
+    this.emit('timeline', { type: 'system_notice', code: 'unsupported_interaction', text: `Agent 请求了暂不支持的交互：${message.method}` })
   }
 
   onNotification({ method, params = {} }) {
+    if (method === 'serverRequest/resolved') {
+      const id = this.interactionRpcIds.get(params.requestId)
+      this.interactionRpcIds.delete(params.requestId)
+      if (id) this.interactions.expire('Agent 已结束这个询问。', requestId => requestId === id)
+      return
+    }
     const threadId = params.threadId || params.thread?.id
     if (threadId && this.threadId && threadId !== this.threadId) {
       if (!this.backgroundTasks.tasks.has(threadId)) {
@@ -390,8 +426,10 @@ export class CodexRuntime extends EventEmitter {
         if (method === 'item/started') {
           this.messagePhases.set(params.item.id, phase)
         } else {
+          const interaction = codexAsyncInteraction(params.item)
+          if (interaction) this.emit('asyncInteraction', interaction)
           if (!this.messageTextSeen.has(params.item.id) && params.item.text) {
-            this.emit('timeline', { type: 'assistant_message', messageId: params.item.id, phase, text: params.item.text })
+            if (!interaction) this.emit('timeline', { type: 'assistant_message', messageId: params.item.id, phase, text: params.item.text })
           }
           this.messagePhases.delete(params.item.id)
           this.messageTextSeen.delete(params.item.id)
@@ -418,6 +456,7 @@ export class CodexRuntime extends EventEmitter {
   }
 
   async cancel() {
+    this.interactions.expire('任务已取消。')
     if (this.rpc && this.threadId && this.turnId) {
       await this.rpc.request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId })
     }
@@ -434,10 +473,12 @@ export class CodexRuntime extends EventEmitter {
   }
 
   close() {
+    this.interactions.expire('会话连接已关闭。')
     this.backgroundTasks.interrupt()
     this.pendingChildren.clear()
     const rpc = this.rpc
     this.rpc = null
+    this.interactionRpcIds.clear()
     this.connected = false
     this.threadLoaded = false
     this.turnId = ''

@@ -1,9 +1,10 @@
 import { childEnvironment, terminateChild } from '../../runtime/processControl.js'
 import { spawn } from 'node:child_process'
 import { BackgroundTasks } from './backgroundTasks.js'
+import { PendingInteractions } from './pendingInteractions.js'
 import { EventEmitter } from 'node:events'
 import { Readable, Writable } from 'node:stream'
-import { ClientSideConnection, PROTOCOL_VERSION, ndJsonStream } from '@agentclientprotocol/sdk'
+import { ClientSideConnection, PROTOCOL_VERSION, RequestError, ndJsonStream } from '@agentclientprotocol/sdk'
 import { filePromptText, imageBase64 } from '../promptAttachments.js'
 import { createControlState, effortLabel, flattenAcpOptions, normalizeContextUsage } from '../controlState.js'
 import { acpContentText, mergeAcpToolCall } from './acpEvents.js'
@@ -52,6 +53,16 @@ export function normalizeAcpControls({ models: modelState, configOptions = [] } 
   })
 }
 
+export function isAcpChooserRequest(options = []) {
+  const kinds = new Set()
+  return options.some(option => {
+    if (!String(option.kind).startsWith('allow')) return false
+    if (kinds.has(option.kind)) return true
+    kinds.add(option.kind)
+    return false
+  })
+}
+
 function selectPermission(options = []) {
   const option = options.find((item) => item.kind === 'allow_always')
     || options.find((item) => item.kind === 'allow_once')
@@ -74,11 +85,13 @@ export class AcpRuntime extends EventEmitter {
     capabilities = {},
     allowUndeclaredImages = false,
     extensionNotification = null,
+    extensionRequest = null,
     runtimeExtension = null,
     emptyResponseText = 'ACP Agent 已结束本轮，但没有返回可显示的内容。',
   } = {}) {
     super()
     this.cwd = cwd
+    this.interactions = new PendingInteractions(this)
     this.sessionId = nativeHandle.sessionId || ''
     this.command = command
     this.args = args
@@ -87,6 +100,7 @@ export class AcpRuntime extends EventEmitter {
     this.capabilities = { ...ACP_CAPABILITIES, ...capabilities }
     this.allowUndeclaredImages = allowUndeclaredImages
     this.extensionNotification = extensionNotification
+    this.extensionRequest = extensionRequest
     this.runtimeExtension = runtimeExtension
     this.backgroundTasks = new BackgroundTasks(this)
     this.agentCapabilities = null
@@ -139,6 +153,7 @@ export class AcpRuntime extends EventEmitter {
     child.stderr.on('data', (chunk) => this.emit('stderr', chunk.toString()))
     child.on('exit', () => {
       if (this.child !== child) return
+      this.interactions.expire('Agent 进程已退出。')
       this.backgroundTasks.interrupt('ACP 进程退出，后台任务已中断')
       this.connection = null
       this.child = null
@@ -324,12 +339,28 @@ export class AcpRuntime extends EventEmitter {
 
   createClientDelegate(holder) {
     return {
-      requestPermission: async (params) => selectPermission(params.options),
+      requestPermission: async (params) => {
+        if (this.connection !== holder.connection || params.sessionId !== this.sessionId) return { outcome: { outcome: 'cancelled' } }
+        if (!isAcpChooserRequest(params.options) && params.toolCall?.kind !== 'switch_mode') return selectPermission(params.options)
+        return this.interactions.ask({
+          kind: params.toolCall?.kind === 'switch_mode' ? 'plan' : 'choice',
+          title: String(params.toolCall?.title || '请选择下一步'),
+          description: (params.toolCall?.content || []).map(part => part.type === 'content' && part.content?.type === 'text' ? part.content.text : '').filter(Boolean).join('\n'),
+          actions: params.options.map(option => ({ id: option.optionId, label: option.name })),
+        }, { respond: response => ({ outcome: response.decision === 'answer'
+          ? { outcome: 'selected', optionId: response.actionId } : { outcome: 'cancelled' } }) })
+      },
       sessionUpdate: async (params) => {
         if (this.connection === holder.connection && this.acceptUpdates) this.onSessionNotification(params)
       },
       extNotification: async (method, params) => {
         if (this.connection === holder.connection && this.acceptUpdates) this.onExtNotification(method, params)
+      },
+      extMethod: async (method, params) => {
+        if (this.connection !== holder.connection || params.sessionId !== this.sessionId) throw RequestError.invalidParams('会话已失效。')
+        const result = this.extensionRequest?.(this, method, params)
+        if (result === undefined) throw RequestError.methodNotFound(method)
+        return result
       },
     }
   }
@@ -394,10 +425,12 @@ export class AcpRuntime extends EventEmitter {
 
   async cancel() {
     if (!this.capabilities.cancel) throw new Error('该 ACP Agent 不支持取消。')
+    this.interactions.expire('任务已取消。')
     if (this.connection && this.sessionId) await this.connection.cancel({ sessionId: this.sessionId })
   }
 
   close() {
+    this.interactions.expire('会话连接已关闭。')
     this.backgroundTasks.interrupt()
     this.toolCalls.clear()
     const child = this.child
@@ -421,6 +454,7 @@ export function createAcpProvider({
   listHistorySessions = null,
   emptyResponseText,
   extensionNotification = null,
+  extensionRequest = null,
   runtimeExtension = null,
 } = {}) {
   if (!id || !label) throw new Error('ACP Provider 需要 id 和 label。')
@@ -438,6 +472,7 @@ export function createAcpProvider({
         capabilities: { ...ACP_CAPABILITIES, ...capabilities },
         allowUndeclaredImages,
         extensionNotification,
+        extensionRequest,
         runtimeExtension,
       }
       const resolvedEnv = typeof env === 'function' ? env() : env

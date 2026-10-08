@@ -1,9 +1,24 @@
 import { randomUUID } from 'node:crypto'
 import { taskStatus } from './backgroundTasks.js'
 import { createAcpProvider } from './acp.js'
+import { normalizeInteractionQuestions } from '../../../../../packages/protocol/src/interaction.js'
 import { listGrokHistorySessions, readGrokHistorySnapshot } from '../history/providers/grokHistory.js'
 
 export const GROK_ACP_ARGS = Object.freeze(['agent', '--always-approve', '--no-leader', 'stdio'])
+
+// Grok 的问答通过独立 ACP 扩展回调，普通权限自动批准不会回答此请求。
+export function grokExtensionRequest(runtime, method, params) {
+  if (method !== '_x.ai/ask_user_question') return undefined
+  const questions = normalizeInteractionQuestions((params.questions || []).map((question, index) => ({
+    ...question, id: String(index), multiSelect: question.multiSelect === true,
+  })), { allowOther: true })
+  return runtime.interactions.ask({ kind: 'question', title: '需要你回答', questions }, {
+    signal: runtime.connection?.signal,
+    respond: (response, answers) => response.decision === 'answer'
+      ? { outcome: 'accepted', answers: Object.fromEntries(questions.map(question => [question.question, answers[question.id]])), annotations: {} }
+      : { outcome: 'declined' },
+  })
+}
 
 export function grokExtensionNotification(method, params) {
   if (method !== '_x.ai/session/update') return null
@@ -60,6 +75,7 @@ export const grokProvider = createAcpProvider({
   // Grok CLI 声明 image: false；参考 Paseo 直接发送标准图片块，由接口决定是否接受。
   allowUndeclaredImages: true,
   extensionNotification: grokExtensionNotification,
+  extensionRequest: grokExtensionRequest,
   runtimeExtension: grokRuntimeExtension,
   readHistorySnapshot: readGrokHistorySnapshot,
   listHistorySessions: listGrokHistorySessions,

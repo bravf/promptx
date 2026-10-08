@@ -20,7 +20,7 @@ test('停止全部：一个子任务失败仍停止其他子任务及主任务�
   } }
   let canceled = false
   runtime.cancel = async () => { canceled = true }
-  const manager = new AgentManager({ repository: {} })
+  const manager = new AgentManager({ repository: { getAgent: () => null } })
   manager.runtimes.set('a', runtime)
   manager.activeTurns.set('a', { id: 'turn' })
   await assert.rejects(manager.cancel('a', { all: true }), /停止失败/)

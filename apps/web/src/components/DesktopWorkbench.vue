@@ -213,7 +213,8 @@ defineExpose({ openSession, openSettings })
             <AgentProviderIcon v-if="tab.type === 'session'" :provider-id="taskFor(tab.taskId)?.providerId" />
             <component :is="icons[tab.type]" v-else class="h-3.5 w-3.5 shrink-0" />
             <span class="min-w-0 flex-1 truncate">{{ title(tab) }}</span>
-            <LoaderCircle v-if="tab.type === 'session' && sessionActivity(taskFor(tab.taskId)).running" class="h-3.5 w-3.5 shrink-0 animate-spin" aria-label="运行中" />
+            <span v-if="tab.type === 'session' && sessionActivity(taskFor(tab.taskId)).waiting" class="shrink-0 text-[10px] text-[var(--theme-warningText)]">待回答</span>
+            <LoaderCircle v-else-if="tab.type === 'session' && sessionActivity(taskFor(tab.taskId)).running" class="h-3.5 w-3.5 shrink-0 animate-spin" aria-label="运行中" />
             <span v-if="tab.type === 'session' && taskFor(tab.taskId)?.requiresAttention" class="workbench-attention" aria-label="需要关注" />
             <PxActionMenu class="tab-menu h-6 w-6 shrink-0" :label="`${title(tab)} 的标签操作`" :items="tabMenu(rect.group, tab)" @click.stop @select="menuAction($event, rect.group, tab)" />
             <button type="button" class="tab-close flex h-6 w-6 shrink-0 items-center justify-center rounded-full" :aria-label="`关闭标签 ${title(tab)}`" :title="`关闭标签 ${title(tab)}`" @click.stop="close(tab.id)"><X class="h-3 w-3" /></button>

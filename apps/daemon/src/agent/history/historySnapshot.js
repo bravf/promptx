@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 
 export const TERMINAL_HISTORY_STATUSES = new Set(['completed', 'failed', 'canceled'])
-export const HISTORY_RECONCILER_VERSION = 12
+export const HISTORY_RECONCILER_VERSION = 13
 
 export function historyItemKey(entry) {
   if (!entry?.item) return ''

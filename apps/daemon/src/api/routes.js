@@ -12,6 +12,7 @@ import {
   UpdateAgentSettingsInputSchema,
   UpdateProjectInputSchema,
   TaskEventSubscriptionsSchema,
+  InteractionResponseSchema,
 } from '../../../../packages/protocol/src/index.js'
 import { DATABASE_VERSION } from '../db/database.js'
 import fs from 'node:fs'
@@ -340,6 +341,16 @@ export function registerRoutes(app, context) {
     reply.code(202)
     return { turn }
   })
+  app.get('/api/v2/tasks/:taskId/interactions', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store')
+    const agent = repository.getTaskAgent(request.params.taskId)
+    return agent ? { requests: agentManager.getPendingInteractions(agent.id) } : reply.code(404).send({ error: 'agent_not_found' })
+  })
+  app.post('/api/v2/tasks/:taskId/interactions/:requestId/respond', async (request, reply) => {
+    const agent = repository.getTaskAgent(request.params.taskId)
+    if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
+    return agentManager.respondToInteraction(agent.id, request.params.requestId, InteractionResponseSchema.parse(request.body))
+  })
   app.post('/api/v2/tasks/:taskId/cancel', async (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)
     return agent ? { canceled: await agentManager.cancel(agent.id, { all: request.body?.all === true }) } : reply.code(404).send({ error: 'agent_not_found' })
@@ -347,7 +358,7 @@ export function registerRoutes(app, context) {
   app.post('/api/v2/tasks/:taskId/attention/clear', async (request, reply) => {
     const agent = repository.getTaskAgent(request.params.taskId)
     if (!agent) return reply.code(404).send({ error: 'agent_not_found' })
-    const updated = repository.clearAgentAttention(agent.id)
+    const updated = agentManager.getPendingInteractions(agent.id).length ? agent : repository.clearAgentAttention(agent.id)
     eventHub.publish(agent.id, { type: 'agent', agent: updated })
     return { agent: updated }
   })
@@ -566,6 +577,7 @@ export function registerRoutes(app, context) {
           write({ type: 'timeline-synced', sync: { status: 'current', turns: repository.listTurns(subscription.taskId, 1000) } })
           const control = agentManager.controlStates.get(agent.id)
           if (control) write({ type: 'control', control })
+          write({ type: 'interactions', requests: agentManager.getPendingInteractions(agent.id) })
           void agentManager.syncTimeline(agent.id).catch(error => request.log.warn(error, 'Timeline 重连同步失败'))
         }
         write({ type: 'ready' })
@@ -578,6 +590,7 @@ export function registerRoutes(app, context) {
     const { raw, unsubscribes } = initializeSse(request, reply, corsPolicy)
     unsubscribes.push(eventHub.subscribe(agent.id, (event) => sseWrite(raw, presentEvent(event))))
     try {
+      sseWrite(raw, { type: 'interactions', requests: agentManager.getPendingInteractions(agent.id) })
       const cursor = parseCursor(request.headers['last-event-id'] || request.query.cursor)
       const snapshot = timelineStore.fetch(request.params.taskId, { direction: cursor ? 'after' : 'tail', cursor, mode: 'presented' })
       if (snapshot.reset) sseWrite(raw, { type: 'reset', timeline: snapshot })

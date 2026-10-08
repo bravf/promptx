@@ -28,8 +28,11 @@ function normalizeComparableText(value) {
 export function projectTimelineRows(rows = []) {
   const entries = []
   const toolIndexes = new Map()
+  const interactionIndexes = new Map()
+  const asyncMessageIds = new Set(rows.filter(row => row.item.type === 'interaction_request' && row.item.delivery === 'async').map(row => row.item.sourceMessageId))
 
   for (const row of rows) {
+    if (row.item.type === 'assistant_message' && asyncMessageIds.has(row.item.messageId)) continue
     const entry = {
       item: row.item,
       ...(row.turnId ? { turnId: row.turnId } : {}),
@@ -38,6 +41,19 @@ export function projectTimelineRows(rows = []) {
       seqEnd: row.seq,
       sourceSeqRanges: [{ startSeq: row.seq, endSeq: row.seq }],
       collapsed: [],
+    }
+
+    if (row.item.type === 'interaction_request') {
+      const index = interactionIndexes.get(row.item.id)
+      if (index !== undefined) {
+        const previous = entries[index]
+        previous.item = row.item
+        previous.timestamp = row.timestamp
+        previous.seqEnd = row.seq
+        appendRange(previous.sourceSeqRanges, row.seq)
+        continue
+      }
+      interactionIndexes.set(row.item.id, entries.length)
     }
 
     if (row.item.type === 'tool_call') {

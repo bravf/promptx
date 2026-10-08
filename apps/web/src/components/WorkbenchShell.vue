@@ -279,11 +279,13 @@ function focusDesktopTask(taskId, projectId, visibleTaskIds) {
 }
 
 function agentStatusClass(task) {
+  if (task.attentionReason === 'permission') return 'agent-dot-waiting'
   if (viewedTaskIds.value.includes(task.id) || !task.requiresAttention) return ''
   return task.attentionReason === 'error' ? 'agent-dot-failed' : (task.attentionReason === 'finished' ? 'agent-dot-finished' : '')
 }
 
 function clearViewedTaskAttention(task) {
+  if (task?.attentionReason === 'permission') return
   if (!task || !viewedTaskIds.value.includes(task.id) || !task.requiresAttention || attentionClearPending.has(task.id)) return
   attentionClearPending.add(task.id)
   v2Api.clearTaskAttention(task.id).then(({ agent }) => upsertTaskAgent(agent)).catch((cause) => { error.value = cause.message }).finally(() => attentionClearPending.delete(task.id))
@@ -560,7 +562,8 @@ onBeforeUnmount(() => {
                     <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="task.title" :active="task.id === focusedTaskId" />
                     <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
                     <Pin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
-                    <LoaderCircle v-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
+                    <span v-if="sessionActivity(task).waiting" class="shrink-0 text-[10px] text-[var(--theme-warningText)]">待回答</span>
+                    <LoaderCircle v-else-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
                   </div>
                   <PxActionMenu class="agent-action" :label="`${task.title} 的更多操作`" :items="taskMenuItems(task)" @select="handleTaskMenu($event, task)" />
                 </div>
@@ -582,7 +585,8 @@ onBeforeUnmount(() => {
                   <SessionTitleMarquee class="min-w-0 flex-1 text-xs font-medium" :title="task.title" :active="task.id === focusedTaskId" />
                   <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
                   <Pin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
-                  <LoaderCircle v-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" aria-label="运行中" />
+                  <span v-if="sessionActivity(task).waiting" class="shrink-0 text-[10px] text-[var(--theme-warningText)]">待回答</span>
+                  <LoaderCircle v-else-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" aria-label="运行中" />
                 </div>
                 <div class="theme-muted-text mt-1 flex min-w-0 items-center gap-2 text-[11px]" :title="projectForTask(task)?.repositoryRoot"><Folder class="h-[1em] w-[1em] shrink-0" /><span class="truncate">{{ projectForTask(task)?.displayName || '未知工作区' }}</span></div>
               </div>
@@ -716,6 +720,7 @@ onBeforeUnmount(() => {
 .task-rename-input:focus { border-color: var(--theme-borderStrong); box-shadow: 0 0 0 1px var(--theme-focusRing); }
 .agent-dot-finished { background: var(--theme-success); }
 .agent-dot-failed { background: var(--theme-danger); }
+.agent-dot-waiting { background: var(--theme-warningText); }
 .agent-row.row-active { background: var(--theme-appPanelActive); }
 @media (hover: hover) and (pointer: fine) {
   .agent-row:not(.row-active):hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }

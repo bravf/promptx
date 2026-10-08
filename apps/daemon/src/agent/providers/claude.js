@@ -2,6 +2,8 @@ import { childEnvironment } from '../../runtime/processControl.js'
 import { randomUUID } from 'node:crypto'
 import { isClaudeNoResponsePlaceholder } from './claudeMessages.js'
 import { BackgroundTasks, taskStatus } from './backgroundTasks.js'
+import { PendingInteractions } from './pendingInteractions.js'
+import { normalizeInteractionQuestions } from '../../../../../packages/protocol/src/interaction.js'
 import { EventEmitter } from 'node:events'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { filePromptText, imageBase64 } from '../promptAttachments.js'
@@ -110,6 +112,7 @@ export class ClaudeRuntime extends EventEmitter {
     this.connectPromise = null
     this.activeRunId = null
     this.backgroundTasks = new BackgroundTasks(this)
+    this.interactions = new PendingInteractions(this)
     this.toolCalls = new Map()
     this.toolParents = new Map()
     this.controlState = createControlState({ requestedModelId: modelId, requestedReasoningEffort: this.reasoningEffort })
@@ -145,6 +148,7 @@ export class ClaudeRuntime extends EventEmitter {
         abortController: controller,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
+        canUseTool: (name, input, options) => this.handleToolInteraction(name, input, options),
       },
     })
     this.runningQuery = runningQuery
@@ -197,6 +201,25 @@ export class ClaudeRuntime extends EventEmitter {
     }
     await this.connect()
     return this.controlState
+  }
+
+  handleToolInteraction(name, input, { signal } = {}) {
+    if (!['AskUserQuestion', 'ExitPlanMode'].includes(name)) return Promise.resolve({ behavior: 'allow', updatedInput: input })
+    const question = name === 'AskUserQuestion'
+    return this.interactions.ask(question ? {
+      kind: 'question', title: '需要你回答',
+      questions: normalizeInteractionQuestions(input.questions, { allowOther: true }),
+    } : {
+      kind: 'plan', title: '确认执行计划', description: String(input.plan || 'Agent 希望结束规划并开始执行。'),
+      actions: [{ id: 'implement', label: '按计划执行' }],
+    }, {
+      signal,
+      respond: (response, answers) => response.decision === 'answer' ? {
+        behavior: 'allow', updatedInput: question ? { ...input, answers: Object.fromEntries(
+          input.questions.map((item, index) => [item.question, answers[String(item.id || index)].join(', ')]),
+        ) } : input,
+      } : { behavior: 'deny', message: '用户取消了这个询问。' },
+    })
   }
 
   async readHistorySnapshot(options = {}) {
@@ -260,6 +283,7 @@ export class ClaudeRuntime extends EventEmitter {
       if (!this.closing && this.runningQuery === stream) throw new Error('Claude 消息流意外结束。')
     } catch (error) {
       if (this.closing || controller.signal.aborted || this.runningQuery !== stream) return
+      this.interactions.expire('Claude 消息流已结束。')
       this.emit('turnFailed', error)
       this.backgroundTasks.interrupt('Claude 进程退出，后台任务已中断')
       this.connected = false
@@ -344,6 +368,7 @@ export class ClaudeRuntime extends EventEmitter {
   async cancel() {
     if (!this.runningQuery?.interrupt) return
     this.cancelRequested = true
+    this.interactions.expire('任务已取消。')
     try {
       await this.runningQuery.interrupt()
     } catch (error) {
@@ -353,6 +378,7 @@ export class ClaudeRuntime extends EventEmitter {
   }
 
   close() {
+    this.interactions.expire('会话连接已关闭。')
     this.backgroundTasks.interrupt()
     this.activeRunId = null
     this.closing = true

@@ -14,6 +14,7 @@ export class TimelineSyncCoordinator {
     eventHub,
     getRuntime,
     getActiveTurnId,
+    onSynced = () => {},
     confirmRetryDelays = DEFAULT_CONFIRM_RETRY_DELAYS,
     syncFreshnessMs = DEFAULT_SYNC_FRESHNESS_MS,
   }) {
@@ -23,6 +24,7 @@ export class TimelineSyncCoordinator {
     this.eventHub = eventHub
     this.getRuntime = getRuntime
     this.getActiveTurnId = getActiveTurnId
+    this.onSynced = onSynced
     this.confirmRetryDelays = confirmRetryDelays
     this.syncFreshnessMs = syncFreshnessMs
     this.operations = new Map()
@@ -130,6 +132,7 @@ export class TimelineSyncCoordinator {
       ...(includeTimeline ? { timeline: this.timelineStore.fetch(taskId, { direction: 'tail', limit: 300 }) } : {}),
     }
     this.eventHub.publish(agentId, { type: 'timeline-synced', sync })
+    this.onSynced(agentId)
     return sync
   }
 

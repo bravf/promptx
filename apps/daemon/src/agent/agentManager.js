@@ -5,6 +5,8 @@ import { DEFAULT_AGENT_TITLE, deriveAgentTitle } from './sessionTitle.js'
 import { TimelineSyncCoordinator } from './history/timelineSyncCoordinator.js'
 import { resolveBackgroundTaskOwnership } from './backgroundTaskOwnership.js'
 import { AgentContextUsageSchema } from '../../../../packages/protocol/src/agent.js'
+import { InteractionResponseSchema, validateInteractionResponse } from '../../../../packages/protocol/src/interaction.js'
+import { codexAsyncAnswerText } from '../../../../packages/protocol/src/codexAsyncQuestions.js'
 
 function nowIso() {
   return new Date().toISOString()
@@ -23,6 +25,8 @@ export class AgentManager {
     this.controlStates = new Map()
     this.toolOwners = new Map()
     this.toolOwnerSessions = new Set()
+    this.interactionOwners = new Map()
+    this.interactionResponses = new Set()
     this.coalescer = new TimelineCoalescer((payload) => this.commitTimeline(payload))
     this.timelineSync = new TimelineSyncCoordinator({
       assetsDir,
@@ -31,6 +35,7 @@ export class AgentManager {
       eventHub,
       getRuntime: (agent) => this.getRuntime(agent),
       getActiveTurnId: (agentId) => this.activeTurns.get(agentId)?.id || '',
+      onSynced: agentId => this.publishInteractions(agentId),
     })
   }
 
@@ -100,15 +105,32 @@ export class AgentManager {
     runtime.on('capabilities', (capabilities) => {
       if (this.repository.getAgent(agent.id)) this.repository.updateAgent(agent.id, { capabilities })
     })
+    runtime.on('interaction', (item) => {
+      if (this.runtimes.get(agent.id) !== runtime) return
+      const key = `${agent.id}:${item.id}`
+      if (item.status === 'pending') this.interactionOwners.set(key, this.activeTurns.get(agent.id)?.id || null)
+      const turnId = this.interactionOwners.get(key) || null
+      this.coalescer.flush(agent.id)
+      this.commitTimeline({ agentId: agent.id, turnId, item })
+      if (item.status !== 'pending') this.interactionOwners.delete(key)
+      this.publishInteractions(agent.id)
+    })
+    runtime.on('asyncInteraction', item => {
+      if (this.runtimes.get(agent.id) !== runtime) return
+      if (this.repository.listInteractionRows(agent.taskId).some(row => row.item.id === item.id)) return
+      this.coalescer.flush(agent.id)
+      this.commitTimeline({ agentId: agent.id, turnId: this.activeTurns.get(agent.id)?.id, item })
+      this.publishInteractions(agent.id)
+    })
     runtime.on('backgroundTask', (task) => {
       if (this.runtimes.get(agent.id) !== runtime) return
       const previous = this.repository.getAgent(agent.id)?.backgroundTasks?.find(item => item.id === task.id)
       this.repository.upsertProviderTask(agent.id, { ...task, originTurnId: previous?.originTurnId || (agent.providerId !== 'claude' || task.parentCallId === null ? this.activeTurns.get(agent.id)?.id : null) || null })
       this.reconcileBackgroundTaskOwnership(agent)
       const updated = this.repository.getAgent(agent.id)
-      if (updated.backgroundTasks.some(item => ['running', 'pending'].includes(item.status) && !item.ambient)) {
+      if (updated.backgroundTasks.some(item => ['running', 'pending'].includes(item.status) && !item.ambient) && !runtime.interactions?.requests.length) {
         this.repository.updateAgent(agent.id, { requiresAttention: false, attentionReason: null, attentionAt: null })
-      } else if (!this.activeTurns.has(agent.id) && !task.ambient && previous?.status !== task.status) {
+      } else if (!runtime.interactions?.requests.length && !this.activeTurns.has(agent.id) && !task.ambient && previous?.status !== task.status) {
         const related = updated.backgroundTasks.filter(item => !item.ambient && item.originTurnId === previous?.originTurnId)
         const failed = related.some(item => ['failed', 'interrupted'].includes(item.status))
         if (failed || task.status === 'completed') this.repository.updateAgent(agent.id, {
@@ -178,7 +200,67 @@ export class AgentManager {
     }
   }
 
-  async startTurn(agentId, input) {
+  getPendingInteractions(agentId) {
+    const agent = this.repository.getAgent(agentId)
+    const saved = new Map((this.repository.listInteractionRows?.(agent?.taskId) || []).map(row => [row.item.id, row.item]))
+    return [...(this.runtimes.get(agentId)?.interactions?.requests || []),
+      ...[...saved.values()].filter(item => item.delivery === 'async' && item.status === 'pending'),
+    ]
+  }
+
+  publishInteractions(agentId) {
+    const agent = this.repository.getAgent(agentId)
+    if (!agent) return
+    const pending = this.getPendingInteractions(agentId)
+    // 普通历史同步无需增加两条 Relay 事件；只有问答状态需要更新。
+    if (!pending.length && agent.attentionReason !== 'permission') return
+    if (pending.length) this.repository.updateAgent(agentId, { requiresAttention: true, attentionReason: 'permission', attentionAt: agent.attentionAt || nowIso() })
+    else if (agent.attentionReason === 'permission') this.repository.clearAgentAttention(agentId)
+    this.eventHub.publish(agentId, { type: 'interactions', requests: pending })
+    this.eventHub.publish(agentId, { type: 'agent', agent: this.repository.getAgent(agentId) })
+  }
+
+  async respondToInteraction(agentId, requestId, input) {
+    const response = InteractionResponseSchema.parse(input)
+    const request = this.getPendingInteractions(agentId).find(item => item.id === requestId)
+    if (request?.delivery === 'async') {
+      const key = `${agentId}:${requestId}`
+      if (this.interactionResponses.has(key)) throw Object.assign(new Error('这个问题正在提交。'), { statusCode: 409 })
+      let answers
+      try { answers = validateInteractionResponse(request, response) } catch (error) { error.statusCode = 400; throw error }
+      this.interactionResponses.add(key)
+      try {
+        const agent = this.repository.getAgent(agentId)
+        const owner = this.repository.listInteractionRows(agent.taskId).find(row => row.item.id === requestId)?.turnId
+        if (response.decision === 'answer') {
+          const text = codexAsyncAnswerText(request, answers)
+          const clientMessageId = `interaction:${requestId}`
+          const runtime = this.runtimes.get(agentId)
+          const active = this.activeTurns.get(agentId)
+          if (active && runtime?.threadId && active.nativeTurnId) {
+            await this.runtimeOperation(agentId, runtime, () => runtime.rpc.request('turn/steer', {
+              threadId: runtime.threadId, expectedTurnId: active.nativeTurnId,
+              clientUserMessageId: clientMessageId, input: [{ type: 'text', text, text_elements: [] }],
+            }), '提交异步问题回答')
+          } else {
+            const summary = request.questions.map(question => `${question.question}\n${answers[question.id].join('、')}`).join('\n\n')
+            await this.startTurn(agentId, { clientMessageId, input: { content: [{ type: 'text', text }] } }, [{ type: 'text', text: `回答 Agent 的问题：\n${summary}` }])
+          }
+        }
+        this.commitTimeline({ agentId, turnId: owner, item: { ...request,
+          status: response.decision === 'answer' ? 'answered' : 'dismissed', answers,
+        } })
+        this.publishInteractions(agentId)
+        return { requests: this.getPendingInteractions(agentId) }
+      } finally { this.interactionResponses.delete(key) }
+    }
+    const runtime = this.runtimes.get(agentId)
+    if (!runtime?.interactions) throw Object.assign(new Error('这个问题已失效。'), { statusCode: 409, code: 'interaction_unavailable' })
+    runtime.interactions.answer(requestId, response)
+    return { requests: this.getPendingInteractions(agentId) }
+  }
+
+  async startTurn(agentId, input, displayContent = null) {
     let agent = this.repository.getAgent(agentId)
     if (!agent) throw new Error('Agent 不存在。')
     if (agent.archivedAt) throw new Error('已归档的 Agent 不能发送消息。')
@@ -234,7 +316,7 @@ export class AgentManager {
       }
       agent = currentAgent
 
-      const timelineContent = providerContent.map(({ absolutePath, ...block }) => block)
+      const timelineContent = displayContent || providerContent.map(({ absolutePath, ...block }) => block)
       const isFirstTurn = !this.repository.hasTurns(agent.taskId)
       const patch = {}
       if (isFirstTurn && agent.title === DEFAULT_AGENT_TITLE) {
@@ -358,10 +440,13 @@ export class AgentManager {
       startedAt: turn.startedAt || nowIso(),
     })
     this.activeTurns.set(agentId, updated)
-    this.repository.updateAgent(agentId, { lifecycle: 'running', lastActiveAt: nowIso(), requiresAttention: false, attentionReason: null, attentionAt: null })
+    this.repository.updateAgent(agentId, { lifecycle: 'running', lastActiveAt: nowIso(),
+      ...(this.getPendingInteractions(agentId).length ? {} : { requiresAttention: false, attentionReason: null, attentionAt: null }),
+    })
     this.repository.updateTask(updated.taskId, { lastActiveAt: nowIso() })
     this.eventHub.publish(agentId, { type: 'turn', turn: updated })
     this.eventHub.publish(agentId, { type: 'agent', agent: this.repository.getAgent(agentId) })
+    if (this.getPendingInteractions(agentId).length) this.publishInteractions(agentId)
   }
 
   finish(agentId, status, { usage = {}, error = null, nativeTurnId = '', runId = '', runtime: sourceRuntime = null } = {}) {
@@ -370,6 +455,7 @@ export class AgentManager {
     if (runId && turn.clientMessageId !== runId) return
     if (sourceRuntime && this.runtimes.get(agentId) !== sourceRuntime) return
     if (nativeTurnId && turn.nativeTurnId && turn.nativeTurnId !== nativeTurnId) return
+    this.runtimes.get(agentId)?.interactions?.expire('任务已结束，这个问题已失效。', id => this.interactionOwners.get(`${agentId}:${id}`) === turn.id)
     this.coalescer.flush(agentId)
     const message = error?.message || ''
     const updated = this.repository.updateTurn(turn.id, {
@@ -402,6 +488,7 @@ export class AgentManager {
     this.repository.updateTask(agent.taskId, { lastActiveAt: nowIso() })
     this.eventHub.publish(agentId, { type: 'turn', turn: updated })
     this.eventHub.publish(agentId, { type: 'agent', agent })
+    if (this.getPendingInteractions(agentId).length) this.publishInteractions(agentId)
     const runtime = this.runtimes.get(agentId)
     if (runtime && !runtime.backgroundTasks?.running.length
         && typeof runtime.releaseThreadWriter === 'function') {
@@ -420,6 +507,12 @@ export class AgentManager {
   }
 
   async cancel(agentId, { all = false } = {}) {
+    const agent = this.repository.getAgent(agentId)
+    for (const request of this.getPendingInteractions(agentId).filter(item => item.delivery === 'async')) {
+      const owner = this.repository.listInteractionRows(agent.taskId).find(row => row.item.id === request.id)?.turnId
+      this.commitTimeline({ agentId, turnId: owner, item: { ...request, status: 'expired', message: '任务已取消。' } })
+    }
+    if (agent) this.publishInteractions(agentId)
     const runtime = this.runtimes.get(agentId)
     if (!runtime) return false
     const errors = []
@@ -486,6 +579,7 @@ export class AgentManager {
     this.coalescer.flushAll()
     this.toolOwners.clear()
     this.toolOwnerSessions.clear()
+    this.interactionOwners.clear()
     for (const runtime of this.runtimes.values()) runtime.close()
     this.runtimes.clear()
     this.preparingTurns.clear()

@@ -83,6 +83,7 @@ function itemIdentities(entry) {
     entry.item.clientMessageId,
     entry.item.messageId,
     entry.item.callId,
+    entry.item.type === 'interaction_request' ? entry.item.id : null,
   ].filter(Boolean).map((id) => `${type}:${id}`)
 }
 

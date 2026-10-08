@@ -85,6 +85,10 @@ export class JsonRpcProcess extends EventEmitter {
     this.send({ jsonrpc: '2.0', id, result })
   }
 
+  respondError(id, code, message) {
+    this.send({ jsonrpc: '2.0', id, error: { code, message } })
+  }
+
   failPending(error) {
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error) }
     this.pending.clear()

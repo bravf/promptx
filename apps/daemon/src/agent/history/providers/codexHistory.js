@@ -1,4 +1,5 @@
 import { codexToolStatus } from '../../../../../../packages/protocol/src/toolDetails.js'
+import { codexAsyncInteraction } from '../../../../../../packages/protocol/src/codexAsyncQuestions.js'
 import { parseJsonLinesWithOffsets, readStableHistoryFileRange, toIsoTimestamp } from '../historySnapshot.js'
 
 function threadRevision(thread) {
@@ -46,6 +47,8 @@ export function mapCodexHistoryItem(item, { completed = false } = {}) {
     }]
   }
   if (type === 'agentMessage') {
+    const interaction = codexAsyncInteraction(item)
+    if (interaction) return [{ providerMessageId: item.id, item: interaction }]
     const text = item.text || textParts(item.content)
     if (!text) return []
     return [{
