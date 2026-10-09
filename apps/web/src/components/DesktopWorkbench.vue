@@ -87,7 +87,11 @@ function openResource(taskId, request, sourceGroupId) {
   const state = layout.value
   if (!state || !taskFor(taskId)) return
   const source = sourceGroupId || state.focusedId
-  openTab(state, { type: request.type || (request.intent === 'diff' ? 'diff' : 'files'), taskId, ...(request.path ? { path: request.path, line: request.line || null } : {}) }, source)
+  const id = openTab(state, { type: request.type || (request.intent === 'diff' ? 'diff' : 'files'), taskId, ...(request.path ? { path: request.path, line: request.line || null } : {}) }, source)
+  if (request.terminalId) {
+    const tab = groups(state.root).flatMap(group => group.tabs).find(tab => tab.id === id)
+    updateSelection(id, { terminalId: request.terminalId, terminalSelection: (tab?.terminalSelection || 0) + 1 })
+  }
   announceFocus(); revealActiveTab()
 }
 function updateSelection(id, selection) {
@@ -236,7 +240,7 @@ defineExpose({ openSession, openSettings })
       <TaskTimelinePane v-if="panel.type === 'session'" class="h-full" :task="taskFor(panel.taskId)" :project="projectFor(panel.taskId)" :focused="panel.active && layout?.focusedId === panel.groupId" :visible="panel.active" tabbed :split-enabled="geometry.leaves.length > 1" @open-tab="openResource(panel.taskId, $event, panel.groupId)" @agent-event="emit('agent-event', $event)" @changed="emit('changed')" />
       <WorkspaceInspector v-else-if="['files', 'diff'].includes(panel.type)" class="h-full" :task-id="panel.taskId" :workspace-cwd="taskFor(panel.taskId)?.environment?.cwd || projectFor(panel.taskId)?.repositoryRoot" :is-dark="isDark" :mode="panel.type" :target-path="panel.path || ''" :target-line="panel.line" :visible="panel.active" tabbed @selection-change="updateSelection(panel.id, $event)" @close="close(panel.id)" />
       <TaskDetailsDrawer tabbed v-else-if="panel.type === 'task-details'" class="h-full" :task-id="panel.taskId" @close="close(panel.id)" @changed="emit('changed')" />
-      <TaskTerminal v-else-if="panel.type === 'terminal'" class="workbench-terminal" :task-id="panel.taskId" :visible="panel.active" embedded @close="close(panel.id)" />
+      <TaskTerminal v-else-if="panel.type === 'terminal'" class="workbench-terminal" :task-id="panel.taskId" :terminal-id="panel.terminalId || ''" :selection-key="panel.terminalSelection || 0" :visible="panel.active" embedded @close="close(panel.id)" />
       <V2SettingsDialog v-else-if="panel.type === 'settings'" open embedded @close="close(panel.id)" @changed="emit('changed')" />
     </section>
     <div v-for="rect in geometry.dividers" :key="rect.node.id" class="workbench-divider theme-resize-handle absolute z-20" :class="{ 'is-resizing': resizingId === rect.node.id }" :style="dividerStyle(rect)" role="separator" :aria-orientation="rect.node.axis === 'x' ? 'vertical' : 'horizontal'" aria-label="调整分区大小" :aria-valuenow="Math.round(rect.node.ratio * 100)" aria-valuemin="15" aria-valuemax="85" tabindex="0" @pointerdown="startResize($event, rect)" @keydown="resizeKey($event, rect.node)" />

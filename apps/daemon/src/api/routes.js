@@ -578,6 +578,7 @@ export function registerRoutes(app, context) {
           const control = agentManager.controlStates.get(agent.id)
           if (control) write({ type: 'control', control })
           write({ type: 'interactions', requests: agentManager.getPendingInteractions(agent.id) })
+          write({ type: 'services', services: agentManager.terminalService?.listServices(subscription.taskId) || [] })
           void agentManager.syncTimeline(agent.id).catch(error => request.log.warn(error, 'Timeline 重连同步失败'))
         }
         write({ type: 'ready' })
@@ -591,6 +592,7 @@ export function registerRoutes(app, context) {
     unsubscribes.push(eventHub.subscribe(agent.id, (event) => sseWrite(raw, presentEvent(event))))
     try {
       sseWrite(raw, { type: 'interactions', requests: agentManager.getPendingInteractions(agent.id) })
+      sseWrite(raw, { type: 'services', services: agentManager.terminalService?.listServices(request.params.taskId) || [] })
       const cursor = parseCursor(request.headers['last-event-id'] || request.query.cursor)
       const snapshot = timelineStore.fetch(request.params.taskId, { direction: cursor ? 'after' : 'tail', cursor, mode: 'presented' })
       if (snapshot.reset) sseWrite(raw, { type: 'reset', timeline: snapshot })

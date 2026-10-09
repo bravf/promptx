@@ -87,10 +87,12 @@ export class AcpRuntime extends EventEmitter {
     extensionNotification = null,
     extensionRequest = null,
     runtimeExtension = null,
+    serviceMcp,
     emptyResponseText = 'ACP Agent 已结束本轮，但没有返回可显示的内容。',
   } = {}) {
     super()
     this.cwd = cwd
+    this.serviceMcp = serviceMcp
     this.interactions = new PendingInteractions(this)
     this.sessionId = nativeHandle.sessionId || ''
     this.command = command
@@ -180,8 +182,8 @@ export class AcpRuntime extends EventEmitter {
         throw Object.assign(new Error('该 ACP Agent 不支持恢复会话。'), { code: 'acp_resume_unsupported' })
       }
       const result = this.sessionId
-        ? await connection.loadSession({ sessionId: this.sessionId, cwd: this.cwd, mcpServers: [] })
-        : await connection.newSession({ cwd: this.cwd, mcpServers: [] })
+        ? await connection.loadSession({ sessionId: this.sessionId, cwd: this.cwd, mcpServers: this.mcpServers() })
+        : await connection.newSession({ cwd: this.cwd, mcpServers: this.mcpServers() })
       if (this.child !== child) throw new Error('ACP 连接已关闭。')
       this.sessionId = result.sessionId || this.sessionId
       this.emit('handle', { sessionId: this.sessionId })
@@ -238,6 +240,12 @@ export class AcpRuntime extends EventEmitter {
     }
     this.modelId = findConfigOption(this.sessionControls.configOptions, 'model')?.currentValue || this.sessionControls.models?.currentModelId || requestedModelId
     this.reasoningEffort = findConfigOption(this.sessionControls.configOptions, 'thought_level')?.currentValue || ''
+  }
+
+  mcpServers() {
+    return this.serviceMcp ? [{ name: 'promptx_services', command: this.serviceMcp.command, args: this.serviceMcp.args,
+      env: Object.entries(this.serviceMcp.env).map(([name, value]) => ({ name, value })),
+    }] : []
   }
 
   supportsImages() {

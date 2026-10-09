@@ -13,11 +13,13 @@ function nowIso() {
 }
 
 export class AgentManager {
-  constructor({ repository, timelineStore, providerRegistry, eventHub, assetsDir }) {
+  constructor({ repository, timelineStore, providerRegistry, eventHub, assetsDir, serviceTools, terminalService }) {
     this.repository = repository
     this.timelineStore = timelineStore
     this.providerRegistry = providerRegistry
     this.eventHub = eventHub
+    this.serviceTools = serviceTools
+    this.terminalService = terminalService
     this.runtimes = new Map()
     this.activeTurns = new Map()
     this.preparingTurns = new Set()
@@ -83,12 +85,19 @@ export class AgentManager {
     if (!environment || ['missing', 'removed', 'unavailable'].includes(environment.status)) {
       throw new Error('当前会话的执行目录不可用。')
     }
-    runtime = this.providerRegistry.get(agent.providerId).createRuntime({
+    const serviceMcp = this.serviceTools?.connect(agent.taskId)
+    try { runtime = this.providerRegistry.get(agent.providerId).createRuntime({
       cwd: environment.cwd,
       nativeHandle: agent.nativeHandle,
       modelId: agent.modelId,
       config: agent.config,
-    })
+      serviceMcp,
+    }) } catch (error) { serviceMcp?.release(); throw error }
+    if (serviceMcp) {
+      const close = runtime.close.bind(runtime)
+      runtime.close = (...args) => { serviceMcp.release(); return close(...args) }
+      runtime.once('runtimeExit', serviceMcp.release)
+    }
     runtime.on('handle', (nativeHandle) => this.repository.updateAgent(agent.id, {
       nativeHandle,
       lifecycle: this.activeTurns.has(agent.id) ? 'running' : 'ready',

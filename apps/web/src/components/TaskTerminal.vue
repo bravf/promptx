@@ -5,7 +5,7 @@ import PxIconButton from './PxIconButton.vue'
 import TerminalScreen from './TerminalScreen.vue'
 import { request } from '../lib/request.js'
 
-const props = defineProps({ taskId: { type: String, required: true }, visible: { type: Boolean, default: true }, embedded: Boolean })
+const props = defineProps({ taskId: { type: String, required: true }, terminalId: { type: String, default: '' }, selectionKey: { type: Number, default: 0 }, visible: { type: Boolean, default: true }, embedded: Boolean })
 const emit = defineEmits(['close'])
 const root = ref(null)
 const terminals = ref([])
@@ -24,9 +24,15 @@ let disposed = false, timer, revision = 0, dragCleanup
 try { activeId.value = localStorage.getItem(storageKey) || '' } catch {}
 watch(activeId, value => { try { localStorage.setItem(storageKey, value) } catch {} })
 watch(() => props.visible, visibility)
+watch(() => [props.terminalId, props.selectionKey], async ([id, key]) => {
+  if (!id) return
+  await refresh()
+  if (!disposed && props.terminalId === id && props.selectionKey === key && terminals.value.some(item => item.id === id)) activeId.value = id
+})
 function select(id) { activeId.value = id; editingId.value = '' }
 function reconcile(items) {
   terminals.value = items
+  if (!activeId.value && props.terminalId && items.some(item => item.id === props.terminalId)) activeId.value = props.terminalId
   if (!items.some(item => item.id === activeId.value)) activeId.value = items[0]?.id || ''
 }
 async function refresh() {
@@ -112,6 +118,7 @@ function startDrag(event) {
 }
 onMounted(async () => {
   await refresh()
+  if (props.terminalId && terminals.value.some(item => item.id === props.terminalId)) activeId.value = props.terminalId
   if (!disposed && !error.value && !terminals.value.length) await create(true)
   loading.value = false
   if (!disposed) { document.addEventListener('visibilitychange', visibility); scheduleList() }

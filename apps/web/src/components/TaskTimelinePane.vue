@@ -14,6 +14,7 @@ import PxIconButton from './PxIconButton.vue'
 import TimelineTurn from './TimelineTurn.vue'
 import TimelineSubagents from './TimelineSubagents.vue'
 import TimelineInteraction from './TimelineInteraction.vue'
+import TaskServices from './TaskServices.vue'
 import { groupBackgroundTasks, sessionActivity } from '../lib/backgroundTaskPresentation.js'
 import WorkspaceInspector from './WorkspaceInspector.vue'
 import TaskDetailsDrawer from './TaskDetailsDrawer.vue'
@@ -69,6 +70,8 @@ provide('pauseTimelineFollow', pauseTimelineFollow)
 const inspectorDrawer = ref(null)
 const drawerMode = ref(null)
 const terminalOpen = ref(false)
+const serviceTerminals = ref([])
+const selectedTerminalId = ref('')
 const pendingInteractions = ref([])
 const interactionsReady = ref(false)
 let interactionVersion = 0
@@ -135,6 +138,7 @@ function restoreTimelineCache(taskId) {
 }
 
 function resetTimeline() {
+  serviceTerminals.value = []
   pendingInteractions.value = []
   interactionVersion += 1
   timelineRequestVersion += 1
@@ -493,6 +497,13 @@ function openEvents(taskId, epoch, seq) {
     turnsRevision: turnsRevision.value,
     controlRevision: controlRevision.value,
   })
+  eventSource.addEventListener('services', event => {
+    if (!paneVisible.value || activeTaskId.value !== taskId) return
+    const result = JSON.parse(event.data)
+    serviceTerminals.value = result.services
+    if (result.openTerminalId && props.tabbed && props.focused) openServiceTerminal(result.openTerminalId)
+    scheduleTimelineFollow()
+  })
   eventSource.addEventListener('interactions', (event) => {
     if (!paneVisible.value || activeTaskId.value !== taskId) return
     interactionVersion += 1
@@ -552,6 +563,19 @@ function closeEvents() {
   interactionsReady.value = false
   eventSource?.close()
   eventSource = null
+}
+
+function openServiceTerminal(terminalId) {
+  selectedTerminalId.value = terminalId
+  if (props.tabbed) emit('open-tab', { type: 'terminal', terminalId })
+  else { drawerMode.value = null; terminalOpen.value = true }
+}
+async function refreshServices() {
+  const taskId = activeTaskId.value
+  try {
+    const result = await v2Api.getTaskServices(taskId)
+    if (activeTaskId.value === taskId) serviceTerminals.value = result.services
+  } catch (cause) { if (activeTaskId.value === taskId) error.value = cause.message }
 }
 
 async function refreshInteractions() {
@@ -661,6 +685,8 @@ function handleGlobalKeydown(event) {
 }
 
 watch(activeTaskId, (taskId) => {
+  serviceTerminals.value = []
+  selectedTerminalId.value = ''
   toolExpansion.clear()
   terminalOpen.value = false
   drawerMode.value = null
@@ -722,7 +748,7 @@ onBeforeUnmount(() => {
       <div class="relative min-h-0 flex-1">
         <div ref="timelineElement" class="timeline h-full overflow-y-auto" tabindex="0" @scroll.passive="handleTimelineScroll" @wheel.passive="handleTimelineWheel" @touchstart.passive="handleTimelineTouchStart" @touchmove.passive="handleTimelineTouchMove" @keydown="handleTimelineKeydown">
           <div v-if="timelineSyncError && !timelineHasContent" class="flex h-full items-center justify-center p-8 text-center"><div class="max-w-sm"><p class="error-row rounded-sm border px-3 py-2 text-left text-xs">Timeline 同步失败：{{ timelineSyncError }}</p><PxButton variant="secondary" size="sm" class="mt-3" @click="selectTask(activeTaskId)">重试</PxButton></div></div>
-          <div v-else-if="!entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">开始一段新的协作</p><p class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
+          <div v-else-if="!entries.length && !serviceTerminals.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">开始一段新的协作</p><p class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else ref="timelineContent" class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
               <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="groupedTurnTiming(entry, turnTimings)" :running="processIsRunning(entry)" :waiting="pendingInteractions.length > 0 && entry.turnIds.includes(latestTurnId)" :active-turn-id="latestTurnId" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" @rendered="scheduleTimelineFollow" @open-workspace-path="openProjectPath">
@@ -734,6 +760,7 @@ onBeforeUnmount(() => {
             </template>
             <TimelineSubagents :tasks="backgroundGroups.get('') || []" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" :stopping="stoppingTasks" @stop-all="stopAllTasks" @rendered="scheduleTimelineFollow" @open-workspace-path="openProjectPath" />
             <TimelineInteraction v-for="request in pendingInteractions" :key="request.id" :request="request" :task-id="activeTaskId" :is-dark="isDark" pending :ready="interactionsReady" @refresh="refreshInteractions" />
+            <TaskServices :key="activeTaskId" :task-id="activeTaskId" :services="serviceTerminals" @open-terminal="openServiceTerminal" @changed="refreshServices" />
             <div v-if="!isRunning && activity.count" class="theme-muted-text mb-3 ml-7 flex items-center gap-2 text-xs" role="status"><LoaderCircle class="h-3.5 w-3.5 animate-spin" />等待 {{ activity.count }} 个子任务结束</div>
             <div v-if="!pendingInteractions.length" class="timeline-generating-slot ml-7 flex h-8 items-start">
               <div class="timeline-generating-indicator flex items-center gap-1" :class="isRunning || sending ? 'is-visible' : ''" role="status" :aria-hidden="!(isRunning || sending)" :aria-label="isRunning || sending ? '正在生成' : undefined">
@@ -755,7 +782,7 @@ onBeforeUnmount(() => {
         <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex max-w-3xl items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs"><span>{{ sendBlockedReason }}</span><PxButton variant="ghost" size="sm" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</PxButton></div>
         <AgentComposer :mobile="mobile" :key="activeTaskId" :task-id="task.id" :running="activity.foreground || activity.count > 0" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :control-loading="controlLoading" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="stopAllTasks" @draft-change="saveTaskDraft" />
       </footer>
-      <TaskTerminal v-if="terminalOpen && !drawerMode" :key="task.id" :task-id="task.id" @close="terminalOpen = false" />
+      <TaskTerminal v-if="terminalOpen && !drawerMode" :key="task.id" :task-id="task.id" :terminal-id="selectedTerminalId" @close="terminalOpen = false" />
     </template>
 
     <div v-else class="theme-empty-state flex min-h-0 flex-1 flex-col items-center justify-center p-8 text-center">

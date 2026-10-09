@@ -4,6 +4,7 @@ import { PendingInteractions } from './pendingInteractions.js'
 import { normalizeInteractionQuestions } from '../../../../../packages/protocol/src/interaction.js'
 import { codexAsyncInteraction } from '../../../../../packages/protocol/src/codexAsyncQuestions.js'
 import { EventEmitter } from 'node:events'
+import { SERVICE_INSTRUCTIONS } from '../../terminal/serviceTools.js'
 import { JsonRpcProcess } from '../jsonRpcProcess.js'
 import { filePromptText } from '../promptAttachments.js'
 import { createControlState, effortLabel, normalizeContextUsage } from '../controlState.js'
@@ -108,9 +109,10 @@ function createUnarchiveError(error) {
 }
 
 export class CodexRuntime extends EventEmitter {
-  constructor({ cwd, nativeHandle = {}, modelId = '', config = {}, rpcFactory = null }) {
+  constructor({ cwd, nativeHandle = {}, modelId = '', config = {}, rpcFactory = null, serviceMcp }) {
     super()
     this.cwd = cwd
+    this.serviceMcp = serviceMcp
     this.nativeHandle = nativeHandle
     this.modelId = modelId
     this.reasoningEffort = config.reasoningEffort || ''
@@ -229,6 +231,9 @@ export class CodexRuntime extends EventEmitter {
       approvalPolicy: 'never',
       sandbox: 'danger-full-access',
       ...(this.modelId ? { model: this.modelId } : {}),
+      ...(this.serviceMcp ? { developerInstructions: SERVICE_INSTRUCTIONS,
+        config: { mcp_servers: { promptx_services: { command: this.serviceMcp.command, args: this.serviceMcp.args, env: this.serviceMcp.env } } },
+      } : {}),
     }
     let result
     this.historyOnly = false

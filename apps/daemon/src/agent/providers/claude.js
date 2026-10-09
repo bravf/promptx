@@ -5,6 +5,7 @@ import { BackgroundTasks, taskStatus } from './backgroundTasks.js'
 import { PendingInteractions } from './pendingInteractions.js'
 import { normalizeInteractionQuestions } from '../../../../../packages/protocol/src/interaction.js'
 import { EventEmitter } from 'node:events'
+import { SERVICE_INSTRUCTIONS } from '../../terminal/serviceTools.js'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { filePromptText, imageBase64 } from '../promptAttachments.js'
 import { createControlState, effortLabel, normalizeContextUsage } from '../controlState.js'
@@ -96,9 +97,10 @@ function normalizeClaudeModels(items = []) {
 }
 
 export class ClaudeRuntime extends EventEmitter {
-  constructor({ cwd, nativeHandle = {}, modelId = '', config = {}, queryFactory = query }) {
+  constructor({ cwd, nativeHandle = {}, modelId = '', config = {}, queryFactory = query, serviceMcp }) {
     super()
     this.cwd = cwd
+    this.serviceMcp = serviceMcp
     this.queryFactory = queryFactory
     this.sessionId = nativeHandle.sessionId || ''
     this.modelId = modelId
@@ -149,6 +151,10 @@ export class ClaudeRuntime extends EventEmitter {
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         canUseTool: (name, input, options) => this.handleToolInteraction(name, input, options),
+        ...(this.serviceMcp ? {
+          mcpServers: { promptx_services: { type: 'stdio', command: this.serviceMcp.command, args: this.serviceMcp.args, env: this.serviceMcp.env } },
+          systemPrompt: { type: 'preset', preset: 'claude_code', append: SERVICE_INSTRUCTIONS },
+        } : {}),
       },
     })
     this.runningQuery = runningQuery

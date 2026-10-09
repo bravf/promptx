@@ -1,5 +1,6 @@
 import Fastify from 'fastify'
-import { registerTerminalRoutes } from './terminal/terminalService.js'
+import { registerTerminalRoutes, TerminalService } from './terminal/terminalService.js'
+import { ServiceToolHost } from './terminal/serviceToolHost.js'
 import cors from '@fastify/cors'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
@@ -62,7 +63,15 @@ export async function createApp(options = {}) {
   const timelineStore = new TimelineStore(repository)
   const eventHub = new EventHub()
   const providerRegistry = options.providerRegistry || new ProviderRegistry()
-  const agentManager = new AgentManager({ repository, timelineStore, providerRegistry, eventHub, assetsDir })
+  const terminalService = new TerminalService(repository, options.terminalSpawn, (taskId, openTerminalId) => {
+    const agent = repository.getTaskAgent(taskId)
+    if (!agent) return
+    const services = terminalService.serviceSnapshot(taskId)
+    eventHub.publish(agent.id, { type: 'services', services, ...(openTerminalId ? { openTerminalId } : {}) })
+  })
+  const serviceTools = new ServiceToolHost(terminalService)
+  await serviceTools.listen()
+  const agentManager = new AgentManager({ repository, timelineStore, providerRegistry, eventHub, assetsDir, serviceTools, terminalService })
   const taskLifecycle = new TaskLifecycleService({ repository, agentManager, assetsDir })
   const environmentService = new EnvironmentService({ repository, agentManager })
   const gitDelivery = new GitDeliveryService({ repository, agentManager, taskLifecycle })
@@ -73,7 +82,7 @@ export async function createApp(options = {}) {
     agentManager,
   })
   app.decorate('sqliteRepository', repository)
-  registerTerminalRoutes(app, repository)
+  registerTerminalRoutes(app, repository, terminalService)
 
   registerRoutes(app, {
     repository,
@@ -113,6 +122,8 @@ export async function createApp(options = {}) {
   app.addHook('onClose', async () => {
     relay.stop()
     await agentManager.shutdown()
+    await serviceTools.close()
+    terminalService.close()
     db.close()
   })
   return app

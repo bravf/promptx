@@ -41,6 +41,16 @@ test('输出历史有界，过期游标要求重置', async () => {
   service.close()
 })
 
+test('服务正在停止时不能复用为运行中的服务', async t => {
+  const { service, processes } = fixture()
+  t.after(() => service.close())
+  const input = { name: '正在停止的服务', command: 'echo test', waitMs: 0 }
+  const first = await service.startService('a', input)
+  service.stop(service.get('a', first.terminal.id))
+  await assert.rejects(service.startService('a', input), error => error.statusCode === 409 && /正在停止/.test(error.message))
+  assert.equal(processes.length, 1)
+})
+
 test('真实 PTY 支持命令执行、调整尺寸、Ctrl+C 与重新连接', { skip: process.platform === 'win32' }, async (t) => {
   const service = new TerminalService({ getTask: () => ({ environmentId: 'env', lifecycle: 'active' }), getEnvironment: () => ({ id: 'env', cwd: '/tmp', status: 'ready' }) })
   t.after(() => service.close())

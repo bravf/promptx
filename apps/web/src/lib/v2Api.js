@@ -26,6 +26,7 @@ export const v2Api = {
   startTaskTurn: (taskId, content, clientMessageId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/turns`, { method: 'POST', body: JSON.stringify({ clientMessageId, input: { content } }) }),
   cancelTask: (taskId, all = false) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST', body: JSON.stringify({ all }) }),
   getTaskInteractions: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/interactions`, { cache: 'no-store' }),
+  getTaskServices: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/services`, { cache: 'no-store' }),
   respondToInteraction: (taskId, requestId, input) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/interactions/${encodeURIComponent(requestId)}/respond`, { method: 'POST', body: JSON.stringify(input) }),
   clearTaskAttention: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/attention/clear`, { method: 'POST' }),
   getTaskTimeline: (taskId, options = {}) => {

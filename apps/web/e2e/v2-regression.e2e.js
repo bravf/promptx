@@ -17,6 +17,8 @@ import { THEME_PRESETS } from '../src/lib/themes.js'
 import { PendingInteractions } from '../../daemon/src/agent/providers/pendingInteractions.js'
 import { codexAsyncInteraction } from '../../../packages/protocol/src/codexAsyncQuestions.js'
 import { grokExtensionRequest } from '../../daemon/src/agent/providers/grok.js'
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist')
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
@@ -49,6 +51,7 @@ function providerRegistry(runtimeRecords) {
       capabilities: { models: true, reasoningEffort: true, contextUsage: true },
       createRuntime(options = {}) {
         const runtime = new EventEmitter()
+        runtime.serviceMcp = options.serviceMcp
         runtime.interactions = new PendingInteractions(runtime)
         runtime.threadId = options.nativeHandle?.threadId
         runtime.sessionId = options.nativeHandle?.sessionId
@@ -254,6 +257,84 @@ async function createFixture(t, { allowedOrigins, onRequest } = {}) {
   })
   return { root, baseUrl, app, browser, runtimeRecords, ...seeded }
 }
+
+test('MCP 常驻服务在 Agent 退出后继续运行，桌面自动打开终端，手机 Relay 查看、停止与重启', { timeout: 60000 }, async t => {
+  const fixture = await createFixture(t)
+  const port = await availablePort()
+  fs.writeFileSync(path.join(fixture.workspace, 'preview.mjs'), `import http from 'node:http';http.createServer((q,r)=>r.end('PREVIEW_OK')).listen(${port},'127.0.0.1',()=>console.log('http://127.0.0.1:${port}/'))`)
+  let runtime
+  fixture.runtimeRecords.onTurn = (_text, value) => { runtime = value; runtime.releaseThreadWriter = () => runtime.close() }
+  const desktop = await fixture.browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const failures = collectPageFailures(desktop)
+  await desktop.goto(fixture.baseUrl)
+  await desktop.getByRole('link', { name: '主回归会话', exact: true }).click()
+  const sourceGroup = await desktop.getByRole('tab', { name: '主回归会话', exact: true }).evaluate(el => el.closest('.workbench-group').dataset.groupId)
+  await desktop.getByPlaceholder('向 Agent 发送消息').fill('保持运行，启动开发预览')
+  await desktop.getByRole('button', { name: '发送', exact: true }).click()
+  await desktop.getByRole('button', { name: '停止', exact: true }).waitFor()
+  const client = new McpClient({ name: 'browser-service-test', version: '1.0' })
+  await client.connect(new StdioClientTransport({ command: runtime.serviceMcp.command, args: runtime.serviceMcp.args, env: runtime.serviceMcp.env }))
+  t.after(() => client.close())
+  const started = await client.callTool({ name: 'start_service', arguments: { name: '开发预览', command: `${process.execPath} preview.mjs`, waitMs: 3000 } })
+  assert.ok(!started.isError, JSON.stringify(started))
+  const terminal = JSON.parse(started.content[0].text).terminal
+  await desktop.getByRole('tab', { name: '终端 · 主回归会话', exact: true }).waitFor()
+  assert.equal(await desktop.getByRole('tab', { name: '终端 · 主回归会话', exact: true }).evaluate(el => el.closest('.workbench-group').dataset.groupId), sourceGroup)
+  await desktop.getByRole('tab', { name: '开发预览', exact: true }).waitFor()
+  await desktop.getByRole('button', { name: '新建终端', exact: true }).click()
+  await desktop.getByRole('tab', { name: '终端 2', exact: true, selected: true }).waitFor()
+  await desktop.getByRole('tab', { name: '主回归会话', exact: true }).click()
+  await desktop.getByRole('region', { name: '会话服务' }).getByRole('button', { name: '查看终端', exact: true }).click()
+  await desktop.getByRole('tab', { name: '开发预览', exact: true, selected: true }).waitFor()
+  runtime.emit('timeline', { type: 'assistant_message', phase: 'final_answer', text: '开发服务已就绪。' })
+  runtime.emit('turnCompleted', {})
+  await client.close()
+  assert.equal(await (await fetch(`http://127.0.0.1:${port}/`)).text(), 'PREVIEW_OK')
+  await desktop.getByRole('button', { name: '关闭标签 终端 · 主回归会话', exact: true }).click()
+  const desktopService = desktop.getByRole('region', { name: '会话服务' }).getByRole('article')
+  await desktopService.getByText('运行中 · 地址可访问', { exact: true }).waitFor()
+  await desktop.reload()
+  await desktopService.getByRole('link', { name: '打开页面', exact: true }).waitFor()
+  assert.equal((await (await fetch(`${fixture.baseUrl}/api/v2/tasks/${fixture.task.id}/services`)).json()).services[0].id, terminal.id)
+
+  const relay = await startRelayServer({ logger: false, webDistDir: webRoot, config: { host: '127.0.0.1', port: 0 } })
+  const service = new RelayService({ localBaseUrl: fixture.baseUrl, logger: false, configPath: path.join(fixture.root, 'service-relay.json'), identityPath: path.join(fixture.root, 'service-identity.json') })
+  t.after(async () => { service.stop(); await relay.close() })
+  service.updateConfig({ enabled: true, relayUrl: `ws://127.0.0.1:${relay.port}/relay/ws`, appUrl: `http://127.0.0.1:${relay.port}` })
+  for (let attempts = 0; !service.getStatus().connected && attempts < 100; attempts++) await new Promise(resolve => setTimeout(resolve, 20))
+  const mobile = await fixture.browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const mobileFailures = collectPageFailures(mobile)
+  await mobile.goto(service.getOffer().url)
+  await mobile.getByRole('link', { name: '主回归会话', exact: true }).click()
+  const mobileService = mobile.getByRole('region', { name: '会话服务' }).getByRole('article')
+  await mobileService.getByText('开发预览', { exact: true }).waitFor()
+  assert.equal(await mobile.locator('.task-terminal').count(), 0)
+  assert.equal(await mobileService.getByRole('link', { name: '打开页面' }).count(), 0)
+  await mobile.getByRole('button', { name: '返回项目列表', exact: true }).click()
+  await mobile.getByRole('link', { name: '草稿切换会话', exact: true }).click()
+  assert.equal(await mobile.getByRole('region', { name: '会话服务' }).count(), 0)
+  await mobile.getByRole('button', { name: '返回项目列表', exact: true }).click()
+  await mobile.getByRole('link', { name: '主回归会话', exact: true }).click()
+  await mobileService.getByText('开发预览', { exact: true }).waitFor()
+  await mobileService.getByRole('button', { name: '查看终端', exact: true }).click()
+  await mobile.getByRole('tab', { name: '开发预览', exact: true }).waitFor()
+  await mobile.getByRole('button', { name: '收起终端（保留进程）', exact: true }).click()
+  await mobile.reload()
+  await mobileService.getByRole('button', { name: '停止服务', exact: true }).click()
+  await mobileService.getByRole('button', { name: '重新启动服务', exact: true }).waitFor()
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/`))
+  await desktopService.getByText('已停止', { exact: true }).waitFor()
+  await mobileService.getByRole('button', { name: '重新启动服务', exact: true }).click()
+  await mobile.getByRole('tab', { name: '开发预览', exact: true }).waitFor()
+  await desktop.getByRole('button', { name: '关闭标签 终端 · 主回归会话', exact: true }).click()
+  await desktopService.getByText('运行中 · 地址可访问', { exact: true }).waitFor()
+  assert.equal(await (await fetch(`http://127.0.0.1:${port}/`)).text(), 'PREVIEW_OK')
+  await assertNoHorizontalOverflow(mobile)
+  await saveScreenshot(mobile, 'service-mobile.png')
+  await saveScreenshot(desktop, 'service-desktop.png')
+  assert.deepEqual(failures, [])
+  assert.deepEqual(mobileFailures, [])
+})
 
 function collectPageFailures(page) {
   const failures = []
