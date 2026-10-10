@@ -1876,6 +1876,49 @@ test('用户提示词渲染 Markdown，发送和复制保留原文，桌面与�
 })
 
 
+test('Timeline 音频链接在本地和手机 Relay 点击即播放，关闭停止且无需打开文件栏', async t => {
+  const fixture = await createFixture(t)
+  fs.copyFileSync(new URL('./fixtures/preview.m4a', import.meta.url), path.join(fixture.workspace, '发音.m4a'))
+  const wav = Buffer.alloc(44 + 48000)
+  wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8)
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34)
+  wav.write('data', 36); wav.writeUInt32LE(48000, 40)
+  fs.writeFileSync(path.join(fixture.workspace, 'sample.wav'), wav)
+  const turn = fixture.app.sqliteRepository.createTurn(fixture.task.id, 'audio-links')
+  fixture.app.sqliteRepository.updateTurn(turn.id, { status: 'completed' })
+  fixture.app.sqliteRepository.appendTimeline(fixture.task.id, turn.id, {
+    type: 'assistant_message', messageId: 'audio-links', phase: 'final_answer', text: '[🔊 听发音](%E5%8F%91%E9%9F%B3.m4a)\n\n[播放 WAV](sample.wav)',
+  })
+  const relay = await startRelayServer({ logger: false, webDistDir: webRoot, config: { host: '127.0.0.1', port: 0 } })
+  const service = new RelayService({ localBaseUrl: fixture.baseUrl, logger: false, configPath: path.join(fixture.root, 'audio-relay.json'), identityPath: path.join(fixture.root, 'audio-identity.json') })
+  t.after(async () => { service.stop(); await relay.close() })
+  service.updateConfig({ enabled: true, relayUrl: `ws://127.0.0.1:${relay.port}/relay/ws`, appUrl: `http://127.0.0.1:${relay.port}` })
+  for (const remote of [false, true]) {
+    const page = await fixture.browser.newPage({ viewport: { width: remote ? 390 : 1440, height: 844 }, isMobile: remote, hasTouch: remote })
+    const failures = collectPageFailures(page)
+    await page.goto(remote ? service.getOffer().url : fixture.baseUrl)
+    await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    for (const name of ['🔊 听发音', '播放 WAV']) {
+      const link = page.getByRole('link', { name, exact: true })
+      await link.click()
+      const viewer = page.getByRole('dialog', { name: '音频预览', exact: true })
+      await viewer.waitFor()
+      await page.waitForFunction(() => { const audio = document.querySelector('[aria-label="音频预览"] audio'); return audio?.currentTime > 0 && !audio.paused && !audio.error }, null, { timeout: 10000 })
+      assert.equal(await page.locator('.workspace-inspector:visible').count(), 0)
+      assert.equal(await page.getByRole('dialog', { name: '视频预览' }).count(), 0)
+      const media = await viewer.locator('audio').elementHandle()
+      await saveScreenshot(page, `audio-link-${remote ? 'relay-mobile' : 'local'}.png`)
+      await viewer.getByRole('button', { name: '关闭预览' }).click()
+      await viewer.waitFor({ state: 'detached' })
+      assert.equal(await media.evaluate(audio => audio.paused && !audio.getAttribute('src')), true)
+      assert.equal(fixture.browser.contexts().flatMap(context => context.pages()).length, 1)
+    }
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
+})
+
 test('本地开发页面与 Daemon 不同端口时视频和音频携带允许的 Origin 并正常播放', async t => {
   const port = await availablePort()
   const origin = `http://127.0.0.1:${port}`

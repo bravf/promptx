@@ -185,6 +185,17 @@ test('视频链接标记播放目标，普通文件与外链保持原行为', as
   }
 })
 
+test('音频链接识别编码路径、大小写和定位后缀，外链与工作区外路径不进入本机播放器', async () => {
+  for (const render of [renderCodexMarkdown, renderPlainCodexMarkdown]) {
+    const html = await render('[听发音](audio/%E5%8F%91%E9%9F%B3.WAV?download=1) [配音](/code/demo/audio/voice.m4a#L2) [音乐](audio/song.mp3) [外链](https://example.com/voice.mp3) [越界](/other/voice.wav)', { workspaceCwd: '/code/demo' })
+    assert.match(html, /data-workspace-audio-path="audio\/发音.WAV"/)
+    assert.match(html, /data-workspace-audio-path="audio\/voice.m4a"/)
+    assert.match(html, /data-workspace-audio-path="audio\/song.mp3"/)
+    assert.equal((html.match(/data-workspace-audio-path=/g) || []).length, 3)
+    assert.equal((html.match(/title="点击播放音频"/g) || []).length, 3)
+  }
+})
+
 test('代码块中的美元替换符保持原文', async () => {
   const source = "$$ $& $` $' $1"
   const html = await renderCodexMarkdown(`\`\`\`text\n${source}\n\`\`\``)

@@ -178,12 +178,13 @@ function handleContentClick(event) {
     return
   }
   const anchor = event.target?.closest?.('a[href]')
-  const videoPath = anchor?.dataset?.workspaceVideoPath
-  if (anchor && videoPath) {
+  const audioPath = anchor?.dataset?.workspaceAudioPath
+  const mediaPath = audioPath || anchor?.dataset?.workspaceVideoPath
+  if (anchor && mediaPath) {
     event.preventDefault()
     event.stopPropagation()
     anchor.focus()
-    openVideoPreview({ taskId: props.taskId, path: videoPath, label: anchor.textContent?.trim() || '视频预览' })
+    openVideoPreview({ taskId: props.taskId, path: mediaPath, kind: audioPath ? 'audio' : 'video', label: anchor.textContent?.trim() || (audioPath ? '音频预览' : '视频预览') })
     return
   }
   const target = anchor && workspaceLinkForHref(anchor.getAttribute('href'), props.workspaceCwd)

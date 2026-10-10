@@ -1,6 +1,6 @@
 import MarkdownIt from 'markdown-it'
 import { renderHighlightedCodeLines, resolvePreviewLanguage } from './sourceCodePreview.js'
-import { workspaceLinkForHref, timelineImageForHref, isWorkspaceVideoPath } from './timelineWorkspaceLinks.js'
+import { workspaceLinkForHref, timelineImageForHref, workspaceMediaKind } from './timelineWorkspaceLinks.js'
 
 const markdownUtils = new MarkdownIt()
 const FENCE_PLACEHOLDER_PREFIX = '__PROMPTX_FENCE__'
@@ -124,10 +124,11 @@ function createMarkdownRenderer(options = {}) {
   instance.renderer.rules.link_open = (tokens, idx, renderOptions, env, self) => {
     const token = tokens[idx]
     const href = token.attrGet('href') || ''
-    const videoTarget = isWorkspaceVideoPath(href) && workspaceLinkForHref(href, env?.workspaceCwd)
-    if (videoTarget) {
-      token.attrSet('data-workspace-video-path', videoTarget.path)
-      token.attrSet('title', '点击播放视频')
+    const mediaTarget = workspaceLinkForHref(href, env?.workspaceCwd)
+    const mediaKind = mediaTarget && workspaceMediaKind(mediaTarget.path)
+    if (mediaKind) {
+      token.attrSet(`data-workspace-${mediaKind}-path`, mediaTarget.path)
+      token.attrSet('title', mediaKind === 'audio' ? '点击播放音频' : '点击播放视频')
     }
     token.attrSet('target', '_blank')
     token.attrSet('rel', 'noreferrer noopener')
