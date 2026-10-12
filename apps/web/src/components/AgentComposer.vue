@@ -401,4 +401,8 @@ onBeforeUnmount(() => {
   .effort-control { flex: 0 0 auto; }
   .composer-actions { gap: 0.25rem; margin-left: auto; }
 }
+@media (max-width: 720px) {
+  /* iPhone 对小于 16px 的输入框自动放大页面。 */
+  .composer-input { font-size: 16px; }
+}
 </style>

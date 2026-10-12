@@ -1,5 +1,7 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { vTouchTap } from '../lib/touchTap.js'
 import { Archive, Folder, FolderOpen, LoaderCircle, Pencil, Pin, PinOff, Plus, Settings, TerminalSquare, X } from 'lucide-vue-next'
 import { sessionActivity } from '../lib/backgroundTaskPresentation.js'
 import { v2Api, globalEventsUrl } from '../lib/v2Api.js'
@@ -29,6 +31,7 @@ import V2SettingsDialog from './V2SettingsDialog.vue'
 import TimelineVideoPreview from './TimelineVideoPreview.vue'
 
 const projects = ref([])
+const router = useRouter()
 const providers = ref([])
 const tasksByProject = ref({})
 const expandedProjectIds = ref(new Set())
@@ -48,6 +51,7 @@ const secondaryTaskId = ref('')
 const splitEnabled = ref(false)
 const focusedPane = ref('primary')
 const mobileView = ref('sidebar')
+const mobileTransitions = ref(true)
 const isMobile = ref(false)
 // 视频独立于响应式会话树，横竖屏切换时保留播放器与全屏状态。
 const videoPreview = ref(null)
@@ -85,6 +89,8 @@ let taskRenameInput = null
 let listDateTimer = null
 let globalEventSource = null
 let mobileMediaQuery = null
+let removeHistoryListener = null
+let appBackPending = false
 let directorySearchTimer = null
 let directorySearchController = null
 let importSearchTimer = null
@@ -200,7 +206,7 @@ async function selectTask(taskId, { navigate = false } = {}) {
   const task = taskForId(taskId)
   if (!task) return
   setProjectExpanded(task.projectId)
-  if (navigate) enterMobileTimeline(taskId)
+  if (navigate) await enterMobileTimeline(taskId)
   if (!isMobile.value) {
     desktopWorkbench.value?.openSession(task)
     clearViewedTaskAttention(task)
@@ -219,7 +225,6 @@ async function selectTask(taskId, { navigate = false } = {}) {
   } else {
     primaryTaskId.value = taskId
   }
-  if (isMobile.value && hasMobileTimelineHistoryState(window.history.state)) window.history.replaceState(createMobileTimelineHistoryState(window.history.state, taskId), '')
   persistLayout()
   clearViewedTaskAttention(task)
 }
@@ -341,7 +346,11 @@ function openManagedDialog(dialogId) {
   if (!isMobile.value) return
   if (getMobileDialogHistoryState(window.history.state) === dialogId) { dialogUsesHistory = true; return }
   dialogUsesHistory = true
-  window.history.pushState(createMobileDialogHistoryState(window.history.state, dialogId), '')
+  return router.push({
+    query: { ...router.currentRoute.value.query, dialog: dialogId },
+    state: createMobileDialogHistoryState(hasMobileTimelineHistoryState(window.history.state)
+      ? createMobileTimelineHistoryState({}, getMobileTimelineTaskId(window.history.state)) : {}, dialogId),
+  })
 }
 
 function restoreDialogFromHistory(dialogId) { dialogUsesHistory = true; dialog.value = dialogId; if (dialogId === 'import') loadImportSessions() }
@@ -361,7 +370,7 @@ async function openConversationDialog(project = null) {
   projectPath.value = project?.repositoryRoot || ''; taskTitle.value = ''; executionKind.value = 'local'; taskBaseRef.value = 'HEAD'; taskSlug.value = ''; taskBranchName.value = ''; conversationError.value = ''
   taskProvider.value = providers.value.some((provider) => provider.id === 'codex') ? 'codex' : providers.value[0]?.id || ''
   directorySuggestions.value = []; directorySearchError.value = ''; directorySuggestionsOpen.value = false; selectedDirectoryIndex.value = -1
-  openManagedDialog('conversation'); await nextTick(); projectPathInput.value?.focus()
+  await openManagedDialog('conversation'); await nextTick(); projectPathInput.value?.focus()
 }
 
 async function openImportDialog() { openManagedDialog('import'); importProviderFilter.value = ''; importQuery.value = ''; importError.value = ''; await loadImportSessions() }
@@ -482,14 +491,24 @@ async function archiveProject(project) {
   } catch (cause) { error.value = cause.message }
 }
 
-function enterMobileTimeline(taskId) {
-  mobileView.value = 'timeline'
+async function enterMobileTimeline(taskId) {
   if (!isMobile.value) return
-  const state = createMobileTimelineHistoryState(window.history.state, taskId)
-  if (hasMobileTimelineHistoryState(window.history.state)) window.history.replaceState(state, '')
-  else window.history.pushState(state, '')
+  mobileTransitions.value = true
+  const location = {
+    query: { ...router.currentRoute.value.query, task: taskId },
+    state: createMobileTimelineHistoryState({}, taskId),
+  }
+  if (hasMobileTimelineHistoryState(window.history.state)) await router.replace(location)
+  else await router.push(location)
+  mobileView.value = 'timeline'
 }
-function showMobileSidebar() { if (isMobile.value && hasMobileTimelineHistoryState(window.history.state)) window.history.back(); else mobileView.value = 'sidebar' }
+function showMobileSidebar() {
+  mobileTransitions.value = true
+  if (isMobile.value && hasMobileTimelineHistoryState(window.history.state)) {
+    appBackPending = true
+    window.history.back()
+  } else mobileView.value = 'sidebar'
+}
 function handleMobileHistoryPop(event) {
   videoPreview.value = null
   const historyDialog = getMobileDialogHistoryState(event.state)
@@ -510,10 +529,17 @@ function updateMobileState(event) {
   if (event.matches && dialog.value && !dialogUsesHistory) openManagedDialog(dialog.value)
 }
 
+// 路由完成后恢复页面，避免 popstate 与 Router 的异步导航同时修改视图。
+watch(() => router.currentRoute.value.fullPath, () => handleMobileHistoryPop({ state: window.history.state }))
+
 onMounted(async () => {
+  removeHistoryListener = router.options.history.listen(() => {
+    // 浏览器原生返回已有交互动画，仅页面内返回使用应用转场。
+    mobileTransitions.value = appBackPending
+    appBackPending = false
+  })
   warmVideoWorker()
   listDateTimer = setInterval(() => { listDate.value = new Date() }, 60_000)
-  window.addEventListener('popstate', handleMobileHistoryPop)
   mobileMediaQuery = window.matchMedia('(max-width: 720px)'); updateMobileState(mobileMediaQuery); mobileMediaQuery.addEventListener('change', updateMobileState)
   await loadInitial()
   const historyDialog = getMobileDialogHistoryState(window.history.state)
@@ -521,13 +547,14 @@ onMounted(async () => {
   openGlobalEvents()
 })
 onBeforeUnmount(() => {
+  removeHistoryListener?.()
   clearInterval(listDateTimer)
-  window.removeEventListener('popstate', handleMobileHistoryPop); mobileMediaQuery?.removeEventListener('change', updateMobileState); closeGlobalEvents(); cancelDirectorySearch(); cancelImportSearch()
+  mobileMediaQuery?.removeEventListener('change', updateMobileState); closeGlobalEvents(); cancelDirectorySearch(); cancelImportSearch()
 })
 </script>
 
 <template>
-  <div ref="shellElement" class="v2-shell relative grid h-full min-h-0 overflow-hidden" :class="{ 'is-resizing-sidebar': sidebarDragging }" :style="{ '--sidebar-width': `${sidebarWidth}px` }">
+  <div ref="shellElement" class="v2-shell relative grid h-full min-h-0 overflow-hidden" :class="{ 'is-resizing-sidebar': sidebarDragging, 'mobile-native-navigation': !mobileTransitions }" :style="{ '--sidebar-width': `${sidebarWidth}px` }">
     <div v-if="loading" class="v2-loading-skeleton absolute inset-0 z-30 grid grid-cols-[240px_minmax(0,1fr)]" role="status" aria-label="正在加载工作区">
       <div class="border-r p-3"><div class="skeleton-line h-7 w-24" /><div class="skeleton-line mt-5 h-9 w-full" /><div class="skeleton-line mt-3 h-8 w-4/5" /><div class="skeleton-line mt-2 h-8 w-3/5" /></div>
       <div class="p-4"><div class="skeleton-line h-8 w-40" /><div class="mx-auto mt-16 max-w-3xl space-y-3"><div class="skeleton-line h-12 w-3/4" /><div class="skeleton-line h-20 w-5/6" /><div class="skeleton-line h-12 w-2/3" /></div></div>
@@ -541,7 +568,7 @@ onBeforeUnmount(() => {
         <PxButton variant="primary" size="sm" class="sidebar-primary-action h-9 w-full justify-start px-2 text-left text-xs" @click="openConversationDialog()"><Plus class="h-4 w-4 shrink-0" /><span>新会话</span></PxButton>
         <PxButton variant="ghost" size="sm" class="sidebar-secondary-action mt-1 h-8 w-full justify-start px-2 text-left text-xs" @click="openImportDialog"><FolderOpen class="h-3.5 w-3.5 shrink-0" /><span>导入会话</span></PxButton>
       </div>
-      <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+      <div data-session-scroll class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <div class="session-list-switch flex items-center gap-1 py-1" role="group" aria-label="会话列表视图">
           <button v-for="view in [{ id: 'workspace', label: '工作区' }, { id: 'recent', label: '最近' }]" :key="view.id" type="button" class="session-view-button rounded-sm px-2 py-1.5 text-xs" :class="{ 'is-active': sessionListView === view.id }" :aria-pressed="sessionListView === view.id" :disabled="Boolean(renamingTaskId)" @click="switchSessionListView(view.id)">{{ view.label }}</button>
         </div>
@@ -557,14 +584,14 @@ onBeforeUnmount(() => {
               <div class="agent-list">
                 <div v-for="task in tasksForProject(project.id)" :key="task.id" class="agent-row group flex h-8 min-w-0 items-center overflow-hidden rounded-sm pl-6" :class="task.id === focusedTaskId ? 'row-active' : ''">
                   <input v-if="renamingTaskId === task.id" :ref="(element) => { if (element) taskRenameInput = element }" v-model="taskRenameDraft" class="task-rename-input mx-1 h-8 min-w-0 max-w-full flex-[1_1_0%] rounded-sm border px-2 text-xs outline-none" maxlength="120" :disabled="taskRenameSaving" :aria-label="`重命名 ${task.title}`" @click.stop @blur="saveTaskRename(task)" @keydown.enter.prevent="$event.currentTarget.blur()" @keydown.esc.prevent="cancelTaskRename" />
-                  <div v-else role="link" :aria-label="task.title" tabindex="0" class="task-navigation flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 text-left" :aria-current="task.id === focusedTaskId ? 'page' : undefined" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })" @keydown.enter.prevent="selectTask(task.id, { navigate: true })">
+                  <button v-else v-touch-tap="() => selectTask(task.id, { navigate: true })" type="button" :aria-label="task.title" class="task-navigation flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 text-left" :aria-current="task.id === focusedTaskId ? 'page' : undefined" :title="`${task.title} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })">
                     <AgentProviderIcon :provider-id="task.providerId" :label="providerLabel(task.providerId)" />
                     <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="task.title" :active="task.id === focusedTaskId" />
                     <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
                     <Pin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
                     <span v-if="sessionActivity(task).waiting" class="shrink-0 text-[10px] text-[var(--theme-warningText)]">待回答</span>
                     <LoaderCircle v-else-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
-                  </div>
+                  </button>
                   <PxActionMenu class="agent-action" :label="`${task.title} 的更多操作`" :items="taskMenuItems(task)" @select="handleTaskMenu($event, task)" />
                 </div>
                 <button v-if="!tasksForProject(project.id).length" type="button" class="theme-muted-text flex h-8 w-full items-center justify-start gap-2 pl-8 pr-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</button>
@@ -579,7 +606,7 @@ onBeforeUnmount(() => {
             <h3 class="theme-muted-text px-2 pb-1 pt-3 text-[11px] font-medium">{{ group.label }}</h3>
             <div v-for="task in group.tasks" :key="task.id" class="agent-row recent-session-row group flex min-w-0 items-center rounded-sm" :class="{ 'row-active': task.id === focusedTaskId }">
               <input v-if="renamingTaskId === task.id" :ref="(element) => { if (element) taskRenameInput = element }" v-model="taskRenameDraft" class="task-rename-input mx-1 h-8 min-w-0 max-w-full flex-[1_1_0%] rounded-sm border px-2 text-xs outline-none" maxlength="120" :disabled="taskRenameSaving" :aria-label="`重命名 ${task.title}`" @click.stop @blur="saveTaskRename(task)" @keydown.enter.prevent="$event.currentTarget.blur()" @keydown.esc.prevent="cancelTaskRename" />
-              <div v-else role="link" :aria-label="task.title" tabindex="0" class="task-navigation min-w-0 flex-1 cursor-pointer px-2 py-2 text-left" :aria-current="task.id === focusedTaskId ? 'page' : undefined" :title="`${task.title} · ${projectForTask(task)?.displayName || ''} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })" @keydown.enter.prevent="selectTask(task.id, { navigate: true })">
+              <button v-else v-touch-tap="() => selectTask(task.id, { navigate: true })" type="button" :aria-label="task.title" class="task-navigation min-w-0 flex-1 cursor-pointer px-2 py-2 text-left" :aria-current="task.id === focusedTaskId ? 'page' : undefined" :title="`${task.title} · ${projectForTask(task)?.displayName || ''} · ${providerLabel(task.providerId)}`" @click="selectTask(task.id, { navigate: true })">
                 <div class="flex min-w-0 items-center gap-2">
                   <AgentProviderIcon :provider-id="task.providerId" :label="providerLabel(task.providerId)" />
                   <SessionTitleMarquee class="min-w-0 flex-1 text-xs font-medium" :title="task.title" :active="task.id === focusedTaskId" />
@@ -589,7 +616,7 @@ onBeforeUnmount(() => {
                   <LoaderCircle v-else-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" aria-label="运行中" />
                 </div>
                 <div class="theme-muted-text mt-1 flex min-w-0 items-center gap-2 text-[11px]" :title="projectForTask(task)?.repositoryRoot"><Folder class="h-[1em] w-[1em] shrink-0" /><span class="truncate">{{ projectForTask(task)?.displayName || '未知工作区' }}</span></div>
-              </div>
+              </button>
               <PxActionMenu class="agent-action shrink-0" :label="`${task.title} 的更多操作`" :items="taskMenuItems(task)" @select="handleTaskMenu($event, task)" />
             </div>
           </section>
@@ -711,7 +738,7 @@ onBeforeUnmount(() => {
 .agent-row.row-active .agent-provider-icon { color: inherit; }
 .workspace-toggle, .workspace-action, .agent-action { color: var(--theme-textMuted); }
 .workspace-action, .agent-action { border: 0; background: transparent; opacity: 0; }
-.workspace-heading:hover .workspace-action, .workspace-heading:focus-within .workspace-action, .agent-row:hover .agent-action, .agent-row:focus-within .agent-action { opacity: 1; }
+.workspace-heading:focus-within .workspace-action, .agent-row:focus-within .agent-action { opacity: 1; }
 .workspace-agents-enter-active, .workspace-agents-leave-active { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms ease; }
 .workspace-agents-enter-from, .workspace-agents-leave-to { grid-template-rows: 0fr; opacity: 0; }
 .workspace-agents-wrapper { min-height: 0; }
@@ -723,6 +750,7 @@ onBeforeUnmount(() => {
 .agent-dot-waiting { background: var(--theme-warningText); }
 .agent-row.row-active { background: var(--theme-appPanelActive); }
 @media (hover: hover) and (pointer: fine) {
+  .workspace-heading:hover .workspace-action, .agent-row:hover .agent-action { opacity: 1; }
   .agent-row:not(.row-active):hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 }
 .conversation-radio-option { border-radius: var(--theme-controlRadius); border-color: var(--theme-inputBorder); background: var(--theme-inputBg); color: var(--theme-textMuted); }
@@ -754,13 +782,17 @@ onBeforeUnmount(() => {
   .v2-loading-skeleton > div:first-child { display: none; }
   .v2-shell { display: block; border: 0; border-radius: 0; }
   .workspace-sidebar.panel { border-radius: 0; }
-  .workspace-sidebar, .timeline-workspace { position: absolute; inset: 0; width: 100%; background: var(--theme-appPanel); transition: transform 220ms cubic-bezier(0.25, 0.1, 0.25, 1), opacity 180ms ease; }
+  .workspace-sidebar, .timeline-workspace { position: absolute; inset: 0; width: 100%; background: var(--theme-appPanel); transition: transform 220ms cubic-bezier(0.25, 0.1, 0.25, 1), opacity 180ms ease, visibility 0s; }
   .workspace-sidebar { z-index: 1; border-right: 0; }
-  .timeline-workspace { z-index: 2; display: block; }
-  .workspace-sidebar.mobile-panel-hidden { transform: translateX(-18%); opacity: 0.78; pointer-events: none; }
-  .timeline-workspace.mobile-panel-hidden { transform: translateX(100%); pointer-events: none; }
-  .mobile-panel-active { transform: translateX(0); opacity: 1; pointer-events: auto; }
+  .timeline-workspace { z-index: 2; display: flex; flex-direction: column; }
+  .timeline-workspace > .task-timeline-pane { flex: 1; min-height: 0; }
+  .workspace-sidebar.mobile-panel-hidden { transform: translateX(-18%); opacity: 0.78; }
+  .timeline-workspace.mobile-panel-hidden { transform: translateX(100%); }
+  .mobile-panel-hidden { visibility: hidden; pointer-events: none; transition-delay: 0s, 0s, 220ms; }
+  .mobile-panel-active { transform: translateX(0); opacity: 1; visibility: visible; pointer-events: auto; }
+  .mobile-native-navigation .workspace-sidebar, .mobile-native-navigation .timeline-workspace { transition: none; }
   .workspace-action, .agent-action { opacity: 1; }
+  .task-navigation { touch-action: manipulation; }
   .import-layout { flex-direction: column; }
   .import-provider-list { width: 100%; flex-direction: row; overflow-x: auto; border-right: 0; padding: 0 0 0.5rem; }
 }

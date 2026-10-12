@@ -4,6 +4,25 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import PxIconButton from './components/PxIconButton.vue'
 
 const globalError = ref('')
+let viewportFrame = 0
+
+function syncViewport() {
+  cancelAnimationFrame(viewportFrame)
+  viewportFrame = requestAnimationFrame(() => {
+    const viewport = window.visualViewport
+    // 双指缩放时保持布局尺寸，让浏览器正常平移和缩放。
+    if (viewport && Math.abs(viewport.scale - 1) > 0.01) return
+    const mobile = window.matchMedia('(max-width: 720px)').matches
+    const root = document.documentElement
+    if (mobile && viewport) {
+      root.style.setProperty('--app-viewport-height', `${viewport.height}px`)
+      root.style.setProperty('--app-viewport-top', `${viewport.offsetTop}px`)
+    } else {
+      root.style.removeProperty('--app-viewport-height')
+      root.style.removeProperty('--app-viewport-top')
+    }
+  })
+}
 
 function handleGlobalError(event) {
   globalError.value = String(event.detail?.message || '页面发生未知错误。')
@@ -14,6 +33,11 @@ function clearGlobalError() {
 }
 
 onMounted(() => {
+  syncViewport()
+  window.addEventListener('resize', syncViewport)
+  window.addEventListener('pageshow', syncViewport)
+  window.visualViewport?.addEventListener('resize', syncViewport)
+  window.visualViewport?.addEventListener('scroll', syncViewport)
   window.addEventListener('promptx:global-error', handleGlobalError)
   if (window.__PROMPTX_GLOBAL_ERROR__) {
     globalError.value = window.__PROMPTX_GLOBAL_ERROR__
@@ -22,7 +46,16 @@ onMounted(() => {
   document.getElementById('app-loading-skeleton')?.remove()
 })
 
-onBeforeUnmount(() => window.removeEventListener('promptx:global-error', handleGlobalError))
+onBeforeUnmount(() => {
+  window.removeEventListener('promptx:global-error', handleGlobalError)
+  window.removeEventListener('resize', syncViewport)
+  window.removeEventListener('pageshow', syncViewport)
+  window.visualViewport?.removeEventListener('resize', syncViewport)
+  window.visualViewport?.removeEventListener('scroll', syncViewport)
+  cancelAnimationFrame(viewportFrame)
+  document.documentElement.style.removeProperty('--app-viewport-height')
+  document.documentElement.style.removeProperty('--app-viewport-top')
+})
 </script>
 
 <template>
@@ -42,6 +75,14 @@ onBeforeUnmount(() => window.removeEventListener('promptx:global-error', handleG
 
 <style scoped>
 @media (max-width: 720px) {
+  .app-shell {
+    position: fixed;
+    top: var(--app-viewport-top, 0px);
+    left: 0;
+    width: 100%;
+    height: var(--app-viewport-height, 100dvh);
+    overflow: hidden;
+  }
   .app-main { padding: 0; }
 }
 </style>
