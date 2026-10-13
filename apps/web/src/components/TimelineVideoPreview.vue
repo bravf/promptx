@@ -47,6 +47,7 @@ async function load() {
   controller = request
   try {
     const result = await v2Api.taskVideoSource(props.taskId, props.path, {
+      kind: props.kind,
       signal: request.signal,
       onError: cause => {
         if (request.signal.aborted) return

@@ -1898,7 +1898,7 @@ test('Timeline 音频链接在本地和手机 Relay 点击即播放，关闭停�
     const page = await fixture.browser.newPage({ viewport: { width: remote ? 390 : 1440, height: 844 }, isMobile: remote, hasTouch: remote })
     const failures = collectPageFailures(page)
     await page.goto(remote ? service.getOffer().url : fixture.baseUrl)
-    await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    await page.getByRole('button', { name: '主回归会话', exact: true }).click()
     for (const name of ['🔊 听发音', '播放 WAV']) {
       const link = page.getByRole('link', { name, exact: true })
       await link.click()

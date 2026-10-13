@@ -1,4 +1,4 @@
-import { isRemoteTransport, transportFetch } from './transport.js'
+import { isRemoteTransport, transportFetch, transportObjectUrl } from './transport.js'
 
 const CHUNK_BYTES = 1024 * 1024
 const sources = new Map()
@@ -150,4 +150,9 @@ export async function createVideoSource(url, { signal, onError } = {}) {
   }
   signal?.addEventListener('abort', release, { once: true })
   return { url: `${location.origin}/__promptx_video/${encodeURIComponent(clientId)}/${token}`, release }
+}
+
+export async function createAudioSource(url, { signal } = {}) {
+  const objectUrl = await transportObjectUrl(url, { signal })
+  return { url: objectUrl, release: () => URL.revokeObjectURL(objectUrl) }
 }
