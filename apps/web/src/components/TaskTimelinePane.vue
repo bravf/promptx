@@ -93,6 +93,7 @@ let timelineResizeObserver = null
 let lastTimelineHeight = 0
 let lastTimelineViewportHeight = 0
 let timelineTouchY = null
+let timelineScrollPointerId = null
 let lastTimelineScrollTop = 0
 let inspectorRefreshTimer = null
 let timelineWakeSyncAt = 0
@@ -380,6 +381,29 @@ function pauseTimelineFollow() {
   timelineScrollFrame = null
 }
 
+function resumeTimelineFollow() {
+  followingTimeline.value = true
+  hasNewTimelineItems.value = false
+}
+
+function handleTimelinePointerDown(event) {
+  // 原生滚动条和容器留白直接命中滚动容器；内容里的点击不改变跟随意图。
+  if (event.pointerType !== 'mouse' || event.button !== 0 || event.target !== event.currentTarget || !canScrollTimeline(event.currentTarget)) return
+  timelineScrollPointerId = event.pointerId
+  pauseTimelineFollow()
+}
+
+function handleTimelinePointerEnd(event) {
+  if (timelineScrollPointerId === null || event.pointerId !== timelineScrollPointerId) return
+  timelineScrollPointerId = null
+  const element = timelineElement.value
+  if (event.type === 'pointerup' && paneVisible.value && element && isTimelineAtBottom(element)) resumeTimelineFollow()
+}
+
+function cancelTimelinePointer() {
+  timelineScrollPointerId = null
+}
+
 function recordTimelinePosition(element) {
   timelineScrollable.value = canScrollTimeline(element)
   lastTimelineScrollTop = element.scrollTop
@@ -400,10 +424,9 @@ function handleTimelineScroll(event) {
   if (positioningTimeline) return
   // 滚动条拖动及键盘滚动的兜底；忽略内容重排引发的滚动位置修正。
   if (stableSize && element.scrollTop < previousScrollTop - 1) pauseTimelineFollow()
-  else if (stableSize && element.scrollTop > previousScrollTop + 1 && isTimelineAtBottom(element)) {
-    followingTimeline.value = true
-    hasNewTimelineItems.value = false
-    scheduleTimelineFollow()
+  else if (stableSize && timelineScrollPointerId === null && element.scrollTop > previousScrollTop && isTimelineAtBottom(element)) {
+    // 用户已自行滚到底，只恢复后续内容的跟随，不写回位置打断原生滚动。
+    resumeTimelineFollow()
   }
   if (element.scrollTop <= 64) loadOlderHistory()
 }
@@ -411,7 +434,7 @@ function handleTimelineScroll(event) {
 function handleTimelineWheel(event) {
   if (!canScrollTimeline(event.currentTarget)) return
   if (event.deltaY < 0 && Math.abs(event.deltaY) >= Math.abs(event.deltaX)) pauseTimelineFollow()
-  else if (event.deltaY > 0 && isTimelineAtBottom(event.currentTarget)) jumpToLatest()
+  else if (timelineScrollPointerId === null && event.deltaY > 0 && isTimelineAtBottom(event.currentTarget)) resumeTimelineFollow()
 }
 
 function handleTimelineTouchStart(event) {
@@ -422,7 +445,7 @@ function handleTimelineTouchMove(event) {
   const y = event.touches[0]?.clientY
   if (!canScrollTimeline(event.currentTarget)) { timelineTouchY = y ?? null; return }
   if (timelineTouchY !== null && y > timelineTouchY + 1) pauseTimelineFollow()
-  else if (timelineTouchY !== null && y < timelineTouchY - 1 && isTimelineAtBottom(event.currentTarget)) jumpToLatest()
+  else if (timelineTouchY !== null && y < timelineTouchY - 1 && isTimelineAtBottom(event.currentTarget)) resumeTimelineFollow()
   timelineTouchY = y ?? null
 }
 
@@ -651,7 +674,7 @@ async function updateAgentSettings(input) {
 async function scrollToBottom() {
   const requestVersion = timelineRequestVersion
   await nextTick()
-  if (!followingTimeline.value || !paneVisible.value || !parentTimelineVisible.value || document.hidden || requestVersion !== timelineRequestVersion) return
+  if (timelineScrollPointerId !== null || !followingTimeline.value || !paneVisible.value || !parentTimelineVisible.value || document.hidden || requestVersion !== timelineRequestVersion) return
   const element = timelineElement.value
   if (!element) return
   element.scrollTo({ top: element.scrollHeight, behavior: 'instant' })
@@ -673,7 +696,7 @@ function jumpToLatest() {
 
 function scheduleTimelineFollow() {
   timelineScrollable.value = canScrollTimeline(timelineElement.value)
-  if (!followingTimeline.value || !paneVisible.value || !parentTimelineVisible.value || document.hidden || timelineScrollFrame) return
+  if (timelineScrollPointerId !== null || !followingTimeline.value || !paneVisible.value || !parentTimelineVisible.value || document.hidden || timelineScrollFrame) return
   timelineScrollFrame = requestAnimationFrame(() => {
     timelineScrollFrame = null
     scrollToBottom()
@@ -693,6 +716,7 @@ function handleGlobalKeydown(event) {
 }
 
 watch(activeTaskId, (taskId) => {
+  cancelTimelinePointer()
   serviceTerminals.value = []
   selectedTerminalId.value = ''
   toolExpansion.clear()
@@ -701,7 +725,7 @@ watch(activeTaskId, (taskId) => {
   if (paneVisible.value) selectTask(taskId)
 }, { immediate: true })
 watch(paneVisible, async (visible) => {
-  if (!visible) { closeEvents(); return }
+  if (!visible) { cancelTimelinePointer(); closeEvents(); return }
   if (!timelineEpoch.value || displayedTaskId.value !== activeTaskId.value) { selectTask(activeTaskId.value); return }
   await nextTick()
   if (timelineElement.value) timelineElement.value.scrollTop = lastTimelineScrollTop
@@ -715,11 +739,17 @@ watch(() => props.task?.lifecycle, (lifecycle, previous) => {
 
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('pointerup', handleTimelinePointerEnd)
+  window.addEventListener('pointercancel', handleTimelinePointerEnd)
+  window.addEventListener('blur', cancelTimelinePointer)
   document.addEventListener('visibilitychange', syncVisibleTimeline)
 })
 onBeforeUnmount(() => {
   timelineRequestVersion += 1
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('pointerup', handleTimelinePointerEnd)
+  window.removeEventListener('pointercancel', handleTimelinePointerEnd)
+  window.removeEventListener('blur', cancelTimelinePointer)
   document.removeEventListener('visibilitychange', syncVisibleTimeline)
   closeEvents()
   if (timelineScrollFrame) cancelAnimationFrame(timelineScrollFrame)
@@ -755,7 +785,7 @@ onBeforeUnmount(() => {
     <template v-if="task">
       <div ref="timelineAreaElement" class="timeline-area relative flex min-h-0 flex-1 flex-col" :class="{ 'service-card-wide': serviceCardWide }">
         <TaskServices :key="activeTaskId" :task-id="activeTaskId" :services="serviceTerminals" :compact="!serviceCardWide" :visible="paneVisible" @open-terminal="openServiceTerminal" @changed="refreshServices" />
-        <div ref="timelineElement" class="timeline min-h-0 flex-1 overflow-y-auto" tabindex="0" @scroll.passive="handleTimelineScroll" @wheel.passive="handleTimelineWheel" @touchstart.passive="handleTimelineTouchStart" @touchmove.passive="handleTimelineTouchMove" @keydown="handleTimelineKeydown">
+        <div ref="timelineElement" class="timeline min-h-0 flex-1 overflow-y-auto" tabindex="0" @pointerdown.passive="handleTimelinePointerDown" @scroll.passive="handleTimelineScroll" @wheel.passive="handleTimelineWheel" @touchstart.passive="handleTimelineTouchStart" @touchmove.passive="handleTimelineTouchMove" @keydown="handleTimelineKeydown">
           <div v-if="timelineSyncError && !timelineHasContent" class="flex h-full items-center justify-center p-8 text-center"><div class="max-w-sm"><p class="error-row rounded-sm border px-3 py-2 text-left text-xs">Timeline 同步失败：{{ timelineSyncError }}</p><PxButton variant="secondary" size="sm" class="mt-3" @click="selectTask(activeTaskId)">重试</PxButton></div></div>
           <div v-else-if="!entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">开始一段新的协作</p><p class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else ref="timelineContent" class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">

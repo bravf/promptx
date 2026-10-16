@@ -593,7 +593,7 @@ test('短 Timeline 上滚不显示回到底部，增高仍跟随，内容收起�
   for (const mobile of [false, true]) {
     const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1440, height: 1000 }, isMobile: mobile })
     await page.goto(fixture.baseUrl)
-    if (mobile) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    if (mobile) await page.getByRole('button', { name: '主回归会话', exact: true }).click()
     await page.getByText('回归基线已经准备完成。').waitFor()
     const timeline = page.locator('.timeline:visible')
     assert.equal(await timeline.evaluate(el => el.scrollHeight <= el.clientHeight), true)
@@ -2315,6 +2315,108 @@ test('本地默认展开历史与实时工具，保留手动收起和任务结�
   assert.deepEqual(failures, [])
 })
 
+test('Timeline 接近底部不吸附，拖动期间不跟随，松手到底后恢复', { timeout: 60000 }, async t => {
+  const devPort = await availablePort()
+  const devOrigin = `http://127.0.0.1:${devPort}`
+  const fixture = await createFixture(t, { allowedOrigins: [devOrigin] })
+  const dev = await createViteServer({
+    root: path.resolve(webRoot, '..'),
+    configFile: path.resolve(webRoot, '../vite.config.js'),
+    cacheDir: path.join(fixture.root, 'vite-cache'),
+    define: { 'import.meta.env.VITE_API_BASE_URL': JSON.stringify(fixture.baseUrl) },
+    server: { host: '127.0.0.1', port: devPort, strictPort: true, hmr: false },
+    logLevel: 'error',
+  })
+  t.after(() => dev.close())
+  await dev.listen()
+  for (const mobile of [false, true]) {
+    const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1440, height: 844 }, isMobile: mobile, hasTouch: mobile })
+    const failures = collectPageFailures(page)
+    await page.goto(mobile ? devOrigin : fixture.baseUrl)
+    if (mobile) await page.getByRole('button', { name: '主回归会话', exact: true }).click()
+    await page.getByText('回归基线已经准备完成。').waitFor()
+    const timeline = page.locator('.timeline:visible')
+    const waitForLayout = () => timeline.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const waitAtBottom = () => page.waitForFunction(() => [...document.querySelectorAll('.timeline')].some(el => el.clientHeight > 0 && el.scrollHeight - el.clientHeight - el.scrollTop <= 2))
+    await timeline.locator(':scope > .mx-auto').evaluate(el => {
+      const spacer = document.createElement('div')
+      spacer.className = 'scroll-regression-spacer'
+      spacer.style.height = '1600px'
+      el.append(spacer)
+    })
+    await waitAtBottom()
+    await timeline.evaluate(el => {
+      const scrollTo = el.scrollTo.bind(el)
+      el.testScrollWrites = 0
+      el.scrollTo = (...args) => { el.testScrollWrites++; scrollTo(...args) }
+      el.scrollTop -= 200
+      el.dispatchEvent(new Event('scroll'))
+    })
+    await page.locator('.timeline-jump-button').waitFor()
+    for (const gap of [64, 32, 8, 3]) {
+      await timeline.evaluate((el, gap) => {
+        el.scrollTop = el.scrollHeight - el.clientHeight - gap
+        el.dispatchEvent(new Event('scroll'))
+      }, gap)
+      await waitForLayout()
+      assert.equal(await timeline.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop), gap)
+      assert.equal(await page.locator('.timeline-jump-button').count(), 1)
+    }
+    await timeline.dispatchEvent('wheel', { deltaY: 1, deltaX: 0 })
+    await timeline.dispatchEvent('touchstart', { touches: [{ identifier: 1, clientY: 100 }] })
+    await timeline.dispatchEvent('touchmove', { touches: [{ identifier: 1, clientY: 90 }] })
+    // 以不足 1px 的最后一步触底也能恢复，但不应主动重写滚动位置。
+    for (const gap of [2.5, 2]) {
+      await timeline.evaluate((el, gap) => { el.scrollTop = el.scrollHeight - el.clientHeight - gap; el.dispatchEvent(new Event('scroll')) }, gap)
+    }
+    await page.locator('.timeline-jump-button').waitFor({ state: 'detached' })
+    await timeline.dispatchEvent('wheel', { deltaY: 1, deltaX: 0 })
+    await timeline.dispatchEvent('touchstart', { touches: [{ identifier: 1, clientY: 100 }] })
+    await timeline.dispatchEvent('touchmove', { touches: [{ identifier: 1, clientY: 90 }] })
+    await waitForLayout()
+    assert.equal(await timeline.evaluate(el => el.testScrollWrites), 0)
+    // 模拟原生滚动条手势；新内容增高时，鼠标仍按住就不能抢走阅读点。
+    await timeline.dispatchEvent('pointerdown', { pointerType: 'mouse', button: 0, pointerId: 41 })
+    await timeline.evaluate(el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')) })
+    await page.locator('.timeline-jump-button').waitFor()
+    const readingTop = await timeline.evaluate(el => el.scrollTop)
+    await timeline.locator('.scroll-regression-spacer').evaluate(el => { el.style.height = '1800px' })
+    await waitForLayout()
+    assert.equal(await timeline.evaluate(el => el.scrollTop), readingTop)
+    await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 41 })))
+    await waitForLayout()
+    assert.equal(await page.locator('.timeline-jump-button').count(), 1)
+    await timeline.dispatchEvent('pointerdown', { pointerType: 'mouse', button: 0, pointerId: 42 })
+    await timeline.evaluate(el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')) })
+    await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 42 })))
+    await page.locator('.timeline-jump-button').waitFor({ state: 'detached' })
+    await timeline.locator('.scroll-regression-spacer').evaluate(el => { el.style.height = '2000px' })
+    await waitAtBottom()
+    if (!mobile) {
+      const scrollbar = await timeline.evaluate(el => {
+        const bounds = el.getBoundingClientRect()
+        const thumbHeight = Math.max(32, el.clientHeight * el.clientHeight / el.scrollHeight)
+        return { x: bounds.right - 5, bottom: bounds.bottom - thumbHeight / 2 }
+      })
+      await page.mouse.move(scrollbar.x, scrollbar.bottom)
+      await page.mouse.down()
+      await page.mouse.move(scrollbar.x, scrollbar.bottom - 25, { steps: 8 })
+      await page.locator('.timeline-jump-button').waitFor()
+      await page.mouse.move(scrollbar.x, scrollbar.bottom, { steps: 8 })
+      await waitAtBottom()
+      await timeline.locator('.scroll-regression-spacer').evaluate(el => { el.style.height = '2200px' })
+      await waitForLayout()
+      assert.equal(await page.locator('.timeline-jump-button').count(), 1)
+      await page.mouse.up()
+      await page.getByRole('button', { name: '回到底部', exact: true }).click()
+      await waitAtBottom()
+    }
+    await saveScreenshot(page, `timeline-scroll-${mobile ? 'mobile' : 'desktop'}.png`)
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
+})
+
 test('自动展开异步增高持续跟随，桌面上滚与手机触摸暂停，手动展开保留位置', { timeout: 90000 }, async t => {
   for (const mobile of [false, true]) {
     const fixture = await createFixture(t)
@@ -2336,7 +2438,7 @@ test('自动展开异步增高持续跟随，桌面上滚与手机触摸暂停�
       current.emit('timeline', { type: 'tool_call', callId: 'scroll-tool', name: '滚动测试命令', status: 'running', detail: { type: 'commandExecution', command: 'echo scroll-test', aggregatedOutput: '逐步加载的日志内容\n'.repeat(90) } })
     }
     await page.goto(fixture.baseUrl)
-    if (mobile) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    if (mobile) await page.getByRole('button', { name: '主回归会话', exact: true }).click()
     await page.getByText('回归基线已经准备完成。').waitFor()
     await page.getByPlaceholder('向 Agent 发送消息').fill('保持运行，测试自动展开滚动')
     await page.getByRole('button', { name: '发送', exact: true }).click()
