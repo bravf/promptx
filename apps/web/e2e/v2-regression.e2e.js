@@ -22,6 +22,198 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist')
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+const visualizationReference = (filePath, title) => '\ue200visualize\ue202' + JSON.stringify({ path: filePath, title }) + '\ue201'
+
+function addVisualizationMessage(fixture, text) {
+  const repository = fixture.app.sqliteRepository
+  const turn = repository.createTurn(fixture.task.id, 'visualization-demo')
+  repository.updateTurn(turn.id, { status: 'completed' })
+  repository.appendTimeline(fixture.task.id, turn.id, { type: 'assistant_message', messageId: 'visualization-demo', phase: 'final_answer', text })
+}
+
+test('可视化卡片支持桌面标签和手机 Relay 动效：交互、源码、返回、阅读位置和文件错误', { timeout: 60000 }, async t => {
+  const requests = []
+  const fixture = await createFixture(t, { onRequest: async request => { if (request.url.includes('/visualization?')) requests.push(request.url) } })
+  const file = path.join(fixture.workspace, 'chart.html')
+  const html = `<div class="card"><h1>互动图表示例</h1><button id="increment">增加</button><output id="count">0</output></div>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script>if (!window.d3) throw new Error('D3 未加载');let count=0;document.querySelector('#increment').onclick=()=>{document.querySelector('#count').textContent=++count;window.openai.setWidgetState({privateContent:{count}})};</script>`
+  fs.writeFileSync(file, html)
+  addVisualizationMessage(fixture, '图表说明\n\n' + visualizationReference(file, '互动趋势') + '\n\n' + visualizationReference('missing.html', '已清理的图表'))
+  const relay = await startRelayServer({ logger: false, webDistDir: webRoot, config: { host: '127.0.0.1', port: 0 } })
+  const service = new RelayService({ localBaseUrl: fixture.baseUrl, logger: false, configPath: path.join(fixture.root, 'visualization-relay.json'), identityPath: path.join(fixture.root, 'visualization-identity.json') })
+  t.after(async () => { service.stop(); await relay.close() })
+  service.updateConfig({ enabled: true, relayUrl: `ws://127.0.0.1:${relay.port}/relay/ws`, appUrl: `http://127.0.0.1:${relay.port}` })
+  for (let attempt = 0; !service.getStatus().connected && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 20))
+  assert.equal(service.getStatus().connected, true)
+  for (const remote of [false, true]) {
+    const page = await fixture.browser.newPage({ viewport: { width: remote ? 390 : 1440, height: 844 }, isMobile: remote, hasTouch: remote })
+    const failures = collectPageFailures(page)
+    await page.route('https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js', route => route.fulfill({ contentType: 'text/javascript', body: 'window.d3 = { version: "7.9.0" }' }))
+    await page.goto(remote ? service.getOffer().url : fixture.baseUrl)
+    if (remote) await page.getByRole('button', { name: '主回归会话', exact: true }).click()
+    const card = page.getByRole('region', { name: '交互图表' }).filter({ hasText: '互动趋势' })
+    await card.waitFor()
+    const beforeRequests = requests.length
+    const timeline = page.locator('.timeline:visible')
+    await card.getByRole('button', { name: '打开预览' }).scrollIntoViewIfNeeded()
+    const scrollTop = await timeline.evaluate(el => el.scrollTop)
+    if (remote) await page.evaluate(() => {
+      window.visualizationMotion = []
+      new MutationObserver(() => {
+        const el = document.querySelector('.visualization-dialog')
+        if (el) window.visualizationMotion.push({ classes: el.className, duration: getComputedStyle(el).transitionDuration })
+      }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })
+    })
+    await card.getByRole('button', { name: '打开预览' }).click()
+    const viewer = remote ? page.getByRole('dialog', { name: '图表预览', exact: true }) : page.getByRole('tabpanel', { name: '互动趋势', exact: true })
+    await viewer.waitFor()
+    const preview = viewer.frameLocator('iframe')
+    await preview.getByRole('button', { name: '增加', exact: true }).click()
+    assert.equal(await preview.locator('#count').textContent(), '1')
+    assert.equal(requests.length, beforeRequests + 1, '仅点击后读取图表')
+    assert.equal(await viewer.locator('iframe').getAttribute('sandbox'), 'allow-scripts')
+    assert.equal(await viewer.getByRole('status').count(), 0)
+    if (remote) {
+      const bounds = await viewer.boundingBox()
+      assert.ok(Math.abs(bounds.width - 390) < 1); assert.ok(Math.abs(bounds.height - 844) < 1)
+      await viewer.evaluate(async el => { await Promise.all(el.getAnimations().map(animation => animation.finished)) })
+    }
+    await saveScreenshot(page, `visualization-${remote ? 'relay-mobile' : 'desktop'}.png`)
+    const sessionTab = page.getByRole('tab', { name: '主回归会话', exact: true })
+    if (!remote) {
+      assert.equal(await page.getByRole('dialog', { name: '图表预览' }).count(), 0)
+      await sessionTab.click()
+      await card.getByRole('button', { name: '打开预览' }).click()
+      assert.equal(await page.getByRole('tab', { name: '互动趋势', exact: true }).count(), 1)
+      assert.equal(await preview.locator('#count').textContent(), '1')
+      assert.equal(requests.length, beforeRequests + 1, '切换标签不重新读取')
+    }
+    await viewer.getByRole('button', { name: '源码', exact: true }).click()
+    assert.equal(await viewer.locator('iframe:visible').count(), 0)
+    assert.equal(await viewer.getByLabel('图表 HTML 源码', { exact: true }).textContent(), html)
+    await viewer.getByRole('button', { name: '预览', exact: true }).click()
+    assert.equal(await preview.locator('#count').textContent(), '1', '切换源码保留图表状态')
+    if (remote) {
+      await page.goBack()
+      await viewer.waitFor({ state: 'detached' })
+      const motion = await page.evaluate(() => window.visualizationMotion)
+      assert.ok(motion.some(item => item.classes.includes('visualization-drawer-enter-active') && item.duration.includes('0.24s')))
+      assert.ok(motion.some(item => item.classes.includes('visualization-drawer-leave-active') && item.duration.includes('0.18s')))
+    } else await sessionTab.click()
+    assert.ok(Math.abs((await timeline.evaluate(el => el.scrollTop)) - scrollTop) < 2)
+    await card.getByRole('button', { name: '查看源码' }).click()
+    await viewer.getByLabel('图表 HTML 源码', { exact: true }).waitFor()
+    if (remote) {
+      assert.equal(await viewer.locator('iframe').count(), 0, '首次查看源码不运行图表')
+      await viewer.getByRole('button', { name: '预览', exact: true }).click()
+      await preview.getByRole('button', { name: '增加', exact: true }).click()
+      await page.keyboard.press('Escape')
+      await viewer.waitFor({ state: 'detached' })
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await page.evaluate(() => { window.visualizationMotion = [] })
+      await card.getByRole('button', { name: '查看源码' }).click()
+      await viewer.getByLabel('图表 HTML 源码', { exact: true }).waitFor()
+      assert.ok((await page.evaluate(() => window.visualizationMotion)).every(item => item.duration === '0s'))
+      await viewer.getByRole('button', { name: '关闭图表预览' }).click()
+      await viewer.waitFor({ state: 'detached' })
+      await page.emulateMedia({ reducedMotion: 'no-preference' })
+    } else {
+      assert.equal(await page.getByRole('tab', { name: '互动趋势', exact: true }).count(), 1)
+      await viewer.getByRole('button', { name: '预览', exact: true }).click()
+      assert.equal(await preview.locator('#count').textContent(), '1')
+      await page.getByRole('button', { name: '互动趋势 的标签操作', exact: true }).click()
+      await page.getByRole('menuitem', { name: '向右拆分', exact: true }).click()
+      assert.equal(await page.locator('.workbench-group').count(), 2)
+      assert.equal(await preview.locator('#count').textContent(), '1', '移动分屏不重建图表')
+      assert.equal(requests.length, beforeRequests + 1)
+    }
+    const missing = page.getByRole('region', { name: '交互图表' }).filter({ hasText: '已清理的图表' })
+    await missing.getByRole('button', { name: '打开预览' }).click()
+    const missingViewer = remote ? viewer : page.getByRole('tabpanel', { name: '已清理的图表', exact: true })
+    await missingViewer.getByText('图表文件不存在或已被清理。', { exact: true }).waitFor()
+    if (!remote) {
+      assert.equal(await page.getByRole('tab', { name: '互动趋势', exact: true }).count(), 1)
+      assert.equal(await page.getByRole('tab', { name: '已清理的图表', exact: true }).count(), 1)
+      const sourceGroup = page.locator('.workbench-group').filter({ has: sessionTab })
+      assert.equal(await sourceGroup.getByRole('tab', { name: '已清理的图表', exact: true }).count(), 1)
+    }
+    fs.writeFileSync(path.join(fixture.workspace, 'missing.html'), '<h1>重新生成成功</h1>')
+    await missingViewer.getByRole('button', { name: '重试', exact: true }).click()
+    await missingViewer.frameLocator('iframe').getByRole('heading', { name: '重新生成成功' }).waitFor()
+    if (remote) await missingViewer.getByRole('button', { name: '关闭图表预览' }).click()
+    else await page.getByRole('button', { name: '关闭标签 已清理的图表', exact: true }).click()
+    await missingViewer.waitFor({ state: 'detached' })
+    if (!remote) {
+      await viewer.getByRole('button', { name: '源码', exact: true }).click()
+      await page.reload()
+      await viewer.getByLabel('图表 HTML 源码', { exact: true }).waitFor()
+      assert.equal(await viewer.locator('iframe').count(), 0, '恢复源码标签时不执行图表')
+      assert.equal(await page.locator('.workbench-group').count(), 2)
+      const saved = await page.evaluate(() => localStorage.getItem('promptx:v2:workbench-tabs'))
+      assert.equal(saved.includes('window.openai.setWidgetState'), false, '布局不保存图表内容')
+      await viewer.getByRole('button', { name: '预览', exact: true }).click()
+      await preview.getByRole('button', { name: '增加', exact: true }).waitFor()
+      assert.equal(await preview.locator('#count').textContent(), '0')
+      await page.getByRole('button', { name: '关闭标签 互动趋势', exact: true }).click()
+      await viewer.waitFor({ state: 'detached' })
+      await card.getByRole('button', { name: '打开预览' }).click()
+      await preview.getByRole('button', { name: '增加', exact: true }).waitFor()
+      assert.equal(await preview.locator('#count').textContent(), '0', '关闭后重新创建预览')
+      await page.getByRole('button', { name: '关闭标签 互动趋势', exact: true }).click()
+      await viewer.waitFor({ state: 'detached' })
+    }
+    fs.unlinkSync(path.join(fixture.workspace, 'missing.html'))
+    await assertNoHorizontalOverflow(page)
+    assert.deepEqual(failures.filter(message => !message.includes('404')), [])
+    await page.close()
+  }
+  const response = await fixture.app.inject({ method: 'GET', headers: { host: new URL(fixture.baseUrl).host }, url: `/api/v2/tasks/${fixture.task.id}/visualization?path=${encodeURIComponent(file)}` })
+  assert.equal(response.statusCode, 200); assert.equal(response.headers['cache-control'], 'no-store')
+  assert.equal(response.json().visualization.html, html)
+  for (const [requestedPath, expected] of [['../private.html', 403], ['README.md', 400], ['missing.html', 404]]) {
+    const result = await fixture.app.inject({ method: 'GET', headers: { host: new URL(fixture.baseUrl).host }, url: `/api/v2/tasks/${fixture.task.id}/visualization?path=${encodeURIComponent(requestedPath)}` })
+    assert.equal(result.statusCode, expected)
+  }
+})
+
+test('可视化沙箱隔离父页面、存储和联网，源码不执行，支持开发模式', { timeout: 60000 }, async t => {
+  const devPort = await availablePort()
+  const devOrigin = `http://127.0.0.1:${devPort}`
+  const fixture = await createFixture(t, { allowedOrigins: [devOrigin] })
+  const dev = await createViteServer({ root: path.resolve(webRoot, '..'), configFile: path.resolve(webRoot, '../vite.config.js'), cacheDir: path.join(fixture.root, 'vite-cache'), define: { 'import.meta.env.VITE_API_BASE_URL': JSON.stringify(fixture.baseUrl) }, server: { host: '127.0.0.1', port: devPort, strictPort: true, hmr: false }, logLevel: 'error' })
+  t.after(() => dev.close()); await dev.listen()
+  const html = `<html><head><base href="${fixture.baseUrl}/"><meta http-equiv="refresh" content="0;url=https://blocked.invalid/refresh"></head><body>
+<h1>隔离测试</h1><output id="isolation"></output><a href="https://blocked.invalid/link" target="_top">外部链接</a>
+<img src="https://blocked.invalid/image"><iframe src="https://blocked.invalid/frame"></iframe>
+<script>const result={};try{parent.document.body.dataset.compromised='true';result.parent=false}catch{result.parent=true}try{localStorage.setItem('compromised','true');result.storage=false}catch{result.storage=true}fetch('${fixture.baseUrl}/api/v2/projects').then(()=>result.network=false).catch(()=>{result.network=true;document.querySelector('#isolation').textContent=JSON.stringify(result)});</script>
+<form action="https://blocked.invalid/form"><button>提交</button></form></body></html>`
+  fs.writeFileSync(path.join(fixture.workspace, 'isolation.html'), html)
+  addVisualizationMessage(fixture, visualizationReference('isolation.html', '隔离测试'))
+  const page = await fixture.browser.newPage()
+  const leaked = []
+  await page.route('https://blocked.invalid/**', async route => { leaked.push(route.request().url()); await route.abort() })
+  await page.goto(devOrigin)
+  const card = page.getByRole('region', { name: '交互图表' })
+  await card.getByRole('button', { name: '查看源码' }).click()
+  const viewer = page.getByRole('tabpanel', { name: '隔离测试', exact: true })
+  await viewer.getByLabel('图表 HTML 源码').waitFor()
+  assert.equal(await viewer.locator('iframe').count(), 0)
+  await viewer.getByRole('button', { name: '预览', exact: true }).click()
+  const frame = viewer.frameLocator('iframe')
+  await frame.locator('#isolation').filter({ hasText: 'network' }).waitFor()
+  assert.deepEqual(JSON.parse(await frame.locator('#isolation').textContent()), { parent: true, storage: true, network: true })
+  assert.equal(await page.evaluate(() => document.body.dataset.compromised), undefined)
+  assert.equal(await page.evaluate(() => localStorage.getItem('compromised')), null)
+  await frame.getByRole('link', { name: '外部链接' }).click()
+  await frame.getByRole('button', { name: '提交', exact: true }).click()
+  assert.equal(page.url(), devOrigin + '/')
+  assert.deepEqual(leaked, [])
+  await frame.getByRole('heading', { name: '隔离测试' }).click()
+  await page.getByRole('button', { name: '关闭标签 隔离测试', exact: true }).click()
+  await viewer.waitFor({ state: 'detached' })
+  assert.equal(fixture.browser.contexts().flatMap(context => context.pages()).length, 1)
+})
 
 function runGit(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()

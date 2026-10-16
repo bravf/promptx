@@ -28,6 +28,22 @@ function providerTurn(sourceTurnId, localTurnId = '') {
   }
 }
 
+test('工作区外图表授权只认当前会话助手消息中的完整展示指令', () => {
+  const { db, repository, task } = setup()
+  try {
+    const directive = '\ue200visualize\ue202' + JSON.stringify({ path: '/codex/visualizations/a.html' }) + '\ue201'
+    const referenced = () => repository.hasVisualizationReference(task.id, '/codex/visualizations/a.html')
+    assert.equal(referenced(), false)
+    repository.appendTimeline(task.id, null, { type: 'user_message', content: [{ type: 'text', text: directive }] })
+    repository.appendTimeline(task.id, null, { type: 'assistant_message', text: '```\n' + directive + '\n```' })
+    assert.equal(referenced(), false)
+    repository.appendTimeline(task.id, null, { type: 'assistant_message', text: directive })
+    assert.equal(referenced(), true)
+    assert.equal(repository.hasVisualizationReference('other-task', '/codex/visualizations/a.html'), false)
+    assert.equal(repository.hasVisualizationReference(task.id, '/codex/visualizations/b.html'), false)
+  } finally { db.close() }
+})
+
 function row(sourceTurnId, providerMessageId, text = '完成') {
   return {
     sourceTurnId,

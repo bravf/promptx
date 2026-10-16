@@ -14,6 +14,38 @@ test('同一会话的文件共用浏览标签，并保留最新路径和行号',
   assert.equal(layout.root.tabs[0].path, 'src/b.js')
 })
 
+test('图表按会话和路径去重，切源码及跨区移动保留同一标签', () => {
+  const layout = createLayout()
+  openTab(layout, { type: 'session', taskId: 'a' })
+  const chart = openTab(layout, { type: 'visualization', taskId: 'a', path: '/chart.html', title: '趋势', mode: 'preview', html: '不应保存' })
+  const otherGroup = splitGroup(layout, layout.root.id, 'right')
+  assert.equal(openTab(layout, { type: 'visualization', taskId: 'a', path: '/chart.html', title: '趋势源码', mode: 'source' }), chart)
+  assert.notEqual(layout.focusedId, otherGroup)
+  moveTab(layout, chart, otherGroup)
+  const current = findNode(layout.root, otherGroup).tabs[0]
+  assert.equal(current.mode, 'source')
+  assert.equal(current.title, '趋势源码')
+  assert.equal(current.html, undefined)
+  openTab(layout, { type: 'visualization', taskId: 'a', path: '/chart.html' })
+  assert.equal(current.mode, 'source')
+  openTab(layout, { type: 'visualization', taskId: 'a', path: '/other.html' })
+  openTab(layout, { type: 'visualization', taskId: 'b', path: '/chart.html' })
+  assert.equal(groups(layout.root).flatMap(group => group.tabs).filter(tab => tab.type === 'visualization').length, 3)
+})
+
+test('恢复图表标签仅保留有效视图信息，不保留 HTML 和无效路径', () => {
+  const layout = createLayout()
+  const id = openTab(layout, { type: 'visualization', taskId: 'a', path: '/chart.html', title: '图表', mode: 'source' })
+  Object.assign(layout.root.tabs[0], { html: '<script>private</script>', token: 'secret' })
+  openTab(layout, { type: 'visualization', taskId: 'a', path: '' })
+  openTab(layout, { type: 'visualization', taskId: 'deleted', path: '/chart.html' })
+  const restored = restoreWorkbenchLayout({ version: 2, layout }, [{ id: 'a' }])
+  assert.deepEqual(restored.root.tabs, [{ type: 'visualization', taskId: 'a', path: '/chart.html', title: '图表', mode: 'source', id }])
+  const invalid = restoreWorkbenchLayout({ version: 2, layout: { root: { id: 'g', type: 'group', tabs: [{ type: 'visualization', taskId: 'a', path: '/chart.html', title: '长'.repeat(300), mode: 'invalid' }] } } }, [{ id: 'a' }])
+  assert.equal(invalid.root.tabs[0].title.length, 200)
+  assert.equal(invalid.root.tabs[0].mode, undefined)
+})
+
 test('混合拆分、跨区移动和关闭标签保持树完整且不丢失其他标签', () => {
   const layout = createLayout()
   const a = openTab(layout, { type: 'session', taskId: 'a' })

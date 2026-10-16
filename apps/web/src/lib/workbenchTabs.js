@@ -12,9 +12,13 @@ export function findNode(node, id) {
   return node.type === 'split' ? findNode(node.first, id) || findNode(node.second, id) : null
 }
 export function tabId(tab) { return JSON.stringify([tab.type, tab.taskId || '', ['files', 'diff'].includes(tab.type) ? '' : tab.path || '']) }
+function visualizationMetadata(tab) {
+  if (tab.type !== 'visualization') return {}
+  return { ...(typeof tab.title === 'string' ? { title: tab.title.trim().slice(0, 200) } : {}), ...(['preview', 'source'].includes(tab.mode) ? { mode: tab.mode } : {}) }
+}
 export function openTab(layout, tab, groupId = layout.focusedId) {
   const hasPath = Object.hasOwn(tab, 'path')
-  tab = { type: tab.type, taskId: tab.taskId || '', path: tab.path || '', ...(tab.line ? { line: tab.line } : {}) }
+  tab = { type: tab.type, taskId: tab.taskId || '', path: tab.path || '', ...(tab.line ? { line: tab.line } : {}), ...visualizationMetadata(tab) }
   const id = tabId(tab)
   const existing = groups(layout.root).find(group => group.tabs.some(item => item.id === id))
   const group = existing || findNode(layout.root, groupId) || groups(layout.root)[0]
@@ -111,9 +115,10 @@ export function restoreWorkbenchLayout(raw, tasks) {
         const tabs = []
         let activeId = ''
         for (const tab of Array.isArray(node.tabs) ? node.tabs.slice(0, 100) : []) {
-          if (!['session', 'files', 'diff', 'task-details', 'terminal', 'settings'].includes(tab?.type)) continue
+          if (!['session', 'files', 'diff', 'visualization', 'task-details', 'terminal', 'settings'].includes(tab?.type)) continue
           if (tab.type !== 'settings' && !taskIds.has(tab.taskId)) continue
-          const clean = { type: tab.type, taskId: tab.type === 'settings' ? '' : tab.taskId, path: typeof tab.path === 'string' ? tab.path : '', ...(Number.isInteger(tab.line) && tab.line > 0 ? { line: tab.line } : {}) }
+          if (tab.type === 'visualization' && (typeof tab.path !== 'string' || !tab.path.trim())) continue
+          const clean = { type: tab.type, taskId: tab.type === 'settings' ? '' : tab.taskId, path: typeof tab.path === 'string' ? tab.path : '', ...(Number.isInteger(tab.line) && tab.line > 0 ? { line: tab.line } : {}), ...visualizationMetadata(tab) }
           clean.id = tabId(clean)
           if (tab.id === node.activeId) activeId = clean.id
           if (seen.has(clean.id)) {

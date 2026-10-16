@@ -29,6 +29,7 @@ import TaskTimelinePane from './TaskTimelinePane.vue'
 import DesktopWorkbench from './DesktopWorkbench.vue'
 import V2SettingsDialog from './V2SettingsDialog.vue'
 import TimelineVideoPreview from './TimelineVideoPreview.vue'
+import TimelineVisualizationPreview from './TimelineVisualizationPreview.vue'
 
 const projects = ref([])
 const router = useRouter()
@@ -56,6 +57,25 @@ const isMobile = ref(false)
 // 视频独立于响应式会话树，横竖屏切换时保留播放器与全屏状态。
 const videoPreview = ref(null)
 provide('openVideoPreview', preview => { videoPreview.value = preview })
+const visualizationPreview = ref(null)
+let visualizationHistoryId = ''
+provide('openVisualizationPreview', preview => {
+  visualizationPreview.value = preview
+  if (isMobile.value && !visualizationHistoryId) {
+    visualizationHistoryId = crypto.randomUUID()
+    window.history.pushState({ ...window.history.state, promptxVisualization: visualizationHistoryId }, '')
+  }
+})
+function closeVisualizationPreview() {
+  if (!visualizationPreview.value) return
+  visualizationPreview.value = null
+  if (visualizationHistoryId && window.history.state?.promptxVisualization === visualizationHistoryId) window.history.back()
+  else visualizationHistoryId = ''
+}
+function handleVisualizationHistoryPop(event) {
+  if (event.state?.promptxVisualization === visualizationHistoryId) return
+  visualizationPreview.value = null; visualizationHistoryId = ''
+}
 provide('timelineVisible', computed(() => !isMobile.value || mobileView.value === 'timeline'))
 const dialog = ref('')
 const importSessions = ref([])
@@ -533,6 +553,7 @@ function updateMobileState(event) {
 watch(() => router.currentRoute.value.fullPath, () => handleMobileHistoryPop({ state: window.history.state }))
 
 onMounted(async () => {
+  window.addEventListener('popstate', handleVisualizationHistoryPop)
   removeHistoryListener = router.options.history.listen(() => {
     // 浏览器原生返回已有交互动画，仅页面内返回使用应用转场。
     mobileTransitions.value = appBackPending
@@ -547,6 +568,7 @@ onMounted(async () => {
   openGlobalEvents()
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('popstate', handleVisualizationHistoryPop)
   removeHistoryListener?.()
   clearInterval(listDateTimer)
   mobileMediaQuery?.removeEventListener('change', updateMobileState); closeGlobalEvents(); cancelDirectorySearch(); cancelImportSearch()
@@ -638,6 +660,7 @@ onBeforeUnmount(() => {
     <div v-if="error" class="shell-error error-row absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-sm border px-3 py-2 text-xs"><span>{{ error }}</span><PxIconButton class="h-6 w-6" label="关闭错误提示" @click="error = ''"><X class="h-3.5 w-3.5" /></PxIconButton></div>
     <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" @changed="refreshProjects" />
     <TimelineVideoPreview v-if="videoPreview" :task-id="videoPreview.taskId" :path="videoPreview.path" :label="videoPreview.label" :kind="videoPreview.kind || 'video'" @close="videoPreview = null" />
+    <TimelineVisualizationPreview :preview="visualizationPreview" @close="closeVisualizationPreview" />
 
     <PxDialog :open="dialog === 'conversation'" panel-class="new-conversation-panel max-h-[calc(100dvh-1.5rem)] max-w-none border-0 sm:max-h-[calc(100dvh-3rem)] sm:max-w-md sm:border" header-class="h-14 shrink-0 px-4 sm:px-5" body-class="flex min-h-0 flex-col" @close="closeDialog">
       <template #title><h2 class="text-sm font-semibold">新会话</h2></template>

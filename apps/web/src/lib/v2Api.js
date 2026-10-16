@@ -39,6 +39,7 @@ export const v2Api = {
   syncTaskTimeline: (taskId) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/timeline/sync`, { method: 'POST' }),
   listTaskFiles: (taskId, filePath = '') => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/files?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
   readTaskFile: (taskId, filePath) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/file?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store' }),
+  readTaskVisualization: (taskId, filePath, options = {}) => request(`/api/v2/tasks/${encodeURIComponent(taskId)}/visualization?${new URLSearchParams({ path: filePath })}`, { cache: 'no-store', signal: options.signal }),
   taskVideoSource: (taskId, filePath, options = {}) => {
     const url = `${getApiBase()}/api/v2/tasks/${encodeURIComponent(taskId)}/file/content?${new URLSearchParams({ path: filePath })}`
     return options.kind === 'audio' ? createAudioSource(url, options) : createVideoSource(url, options)

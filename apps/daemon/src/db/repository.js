@@ -2,6 +2,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_AGENT_TITLE } from '../agent/sessionTitle.js'
 import { canonicalPath, canonicalPathKey, resolveExistingDirectory } from '../paths/canonicalPath.js'
+import { splitVisualizationContent } from '../../../../packages/protocol/src/visualization.js'
 
 function parseJson(value, fallback = {}) {
   try {
@@ -621,6 +622,13 @@ export function createRepository(db) {
     },
     listTimelineRows(taskId) {
       return db.prepare('SELECT * FROM agent_timeline_rows WHERE task_id = ? ORDER BY seq').all(taskId).map(mapTimelineRow)
+    },
+    hasVisualizationReference(taskId, filePath) {
+      const rows = db.prepare("SELECT json_extract(item_json, '$.text') AS text FROM agent_timeline_rows WHERE task_id = ? AND item_type = 'assistant_message' AND instr(json_extract(item_json, '$.text'), ?) > 0").iterate(taskId, '\ue200visualize\ue202')
+      for (const row of rows) {
+        if (splitVisualizationContent(row.text).some(part => part.type === 'visualization' && part.path === filePath)) return true
+      }
+      return false
     },
   }
 }

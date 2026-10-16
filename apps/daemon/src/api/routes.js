@@ -19,6 +19,7 @@ import fs from 'node:fs'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { searchDirectories } from '../workspaces/directorySearch.js'
+import { readVisualization } from '../workspaces/visualizationPreview.js'
 import {
   getWorkspaceGitDiff,
   getWorkspaceGitStatus,
@@ -396,6 +397,16 @@ export function registerRoutes(app, context) {
     const current = taskContext(repository, request.params.taskId)
     return current ? { file: await readWorkspaceFile(current.environment.cwd, request.query.path || '') }
       : reply.code(404).send({ error: 'task_not_found' })
+  })
+  app.get('/api/v2/tasks/:taskId/visualization', async (request, reply) => {
+    const current = taskContext(repository, request.params.taskId)
+    if (!current) return reply.code(404).send({ error: 'task_not_found' })
+    const visualization = readVisualization(current.environment.cwd, request.query.path, {
+      authorizeExternal: filePath => current.agent?.providerId === 'codex' && repository.hasVisualizationReference(current.task.id, filePath),
+    })
+    reply.header('Cache-Control', 'no-store')
+    reply.header('X-Content-Type-Options', 'nosniff')
+    return { visualization }
   })
   // 本机生成图片可能位于 /tmp 等工作区外目录，仅开放已有的限大小栅格图片预览。
   app.get('/api/v2/tasks/:taskId/local-image/content', async (request, reply) => {

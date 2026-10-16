@@ -1,6 +1,6 @@
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Columns2, FileDiff, Files, Info, LoaderCircle, MessageSquare, Rows2, Settings, TerminalSquare, X } from 'lucide-vue-next'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, provide, ref, watch } from 'vue'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChartNoAxesCombined, Columns2, FileDiff, Files, Info, LoaderCircle, MessageSquare, Rows2, Settings, TerminalSquare, X } from 'lucide-vue-next'
 import { closeEmptyGroup, closeTab, createLayout, findNode, groups, layoutRects, moveTab, openTab, restoreWorkbenchLayout, splitGroup, WORKBENCH_STORAGE_KEY } from '../lib/workbenchTabs.js'
 import { sessionActivity } from '../lib/backgroundTaskPresentation.js'
 import { useTheme } from '../composables/useTheme.js'
@@ -12,6 +12,7 @@ import PxActionMenu from './PxActionMenu.vue'
 import PxIconButton from './PxIconButton.vue'
 import PxButton from './PxButton.vue'
 import AgentProviderIcon from './AgentProviderIcon.vue'
+import TimelineVisualizationContent from './TimelineVisualizationContent.vue'
 const TaskTerminal = defineAsyncComponent(() => import('./TaskTerminal.vue'))
 const props = defineProps({ tasks: { type: Array, default: () => [] }, projects: { type: Array, default: () => [] }, ready: Boolean, mobile: Boolean, fallbackTaskId: { type: String, default: '' } })
 const emit = defineEmits(['focus-task', 'agent-event', 'changed'])
@@ -32,7 +33,7 @@ watch(panels, entries => {
   const existing = new Set(entries.map(panel => panel.key))
   mountedPanels.value = new Set([...mountedPanels.value].filter(key => existing.has(key)).concat(entries.filter(panel => panel.active).map(panel => panel.key)))
 }, { immediate: true })
-const icons = { files: Files, diff: FileDiff, 'task-details': Info, settings: Settings, terminal: TerminalSquare }
+const icons = { files: Files, diff: FileDiff, visualization: ChartNoAxesCombined, 'task-details': Info, settings: Settings, terminal: TerminalSquare }
 const names = { files: '文件', diff: 'Diff', 'task-details': '会话详情', terminal: '终端', settings: '设置' }
 const splitItems = [
   { id: 'left', label: '向左拆分', icon: ArrowLeft }, { id: 'right', label: '向右拆分', icon: ArrowRight },
@@ -42,6 +43,7 @@ function taskFor(id) { return props.tasks.find(task => task.id === id) }
 function projectFor(id) { return props.projects.find(project => project.id === taskFor(id)?.projectId) }
 function title(tab) {
   if (tab.type === 'session') return taskFor(tab.taskId)?.title || '会话'
+  if (tab.type === 'visualization') return tab.title || tab.path?.split('/').pop() || '交互图表'
   return tab.type === 'settings' ? '设置' : `${names[tab.type]} · ${taskFor(tab.taskId)?.title || ''}`
 }
 function persist() {
@@ -65,6 +67,12 @@ function openSettings() {
   openTab(layout.value, { type: 'settings' })
   announceFocus(); revealActiveTab()
 }
+function openVisualization(preview) {
+  if (!layout.value || !taskFor(preview.taskId)) return
+  openTab(layout.value, { type: 'visualization', taskId: preview.taskId, path: preview.path, title: preview.title, mode: preview.mode || 'preview' })
+  announceFocus(); revealActiveTab()
+}
+provide('openVisualizationPreview', openVisualization)
 function focusGroup(id) {
   if (!layout.value) return
   layout.value.focusedId = id
@@ -239,6 +247,7 @@ defineExpose({ openSession, openSettings })
     <section v-for="panel in renderedPanels" v-show="panel.active" :key="panel.key" class="workbench-content absolute flex min-h-0 min-w-0 flex-col overflow-hidden" :style="panelStyle(panel)" role="tabpanel" :aria-label="title(panel)" :inert="!panel.active" @pointerdown.capture="focusGroup(panel.groupId)" @focusin.capture="focusGroup(panel.groupId)">
       <TaskTimelinePane v-if="panel.type === 'session'" class="h-full" :task="taskFor(panel.taskId)" :project="projectFor(panel.taskId)" :focused="panel.active && layout?.focusedId === panel.groupId" :visible="panel.active" tabbed :split-enabled="geometry.leaves.length > 1" @open-tab="openResource(panel.taskId, $event, panel.groupId)" @agent-event="emit('agent-event', $event)" @changed="emit('changed')" />
       <WorkspaceInspector v-else-if="['files', 'diff'].includes(panel.type)" class="h-full" :task-id="panel.taskId" :workspace-cwd="taskFor(panel.taskId)?.environment?.cwd || projectFor(panel.taskId)?.repositoryRoot" :is-dark="isDark" :mode="panel.type" :target-path="panel.path || ''" :target-line="panel.line" :visible="panel.active" tabbed @selection-change="updateSelection(panel.id, $event)" @close="close(panel.id)" />
+      <TimelineVisualizationContent v-else-if="panel.type === 'visualization'" :task-id="panel.taskId" :path="panel.path" :title="panel.title" :mode="panel.mode" :visible="panel.active" @update:mode="updateSelection(panel.id, { mode: $event })" />
       <TaskDetailsDrawer tabbed v-else-if="panel.type === 'task-details'" class="h-full" :task-id="panel.taskId" @close="close(panel.id)" @changed="emit('changed')" />
       <TaskTerminal v-else-if="panel.type === 'terminal'" class="workbench-terminal" :task-id="panel.taskId" :terminal-id="panel.terminalId || ''" :selection-key="panel.terminalSelection || 0" :visible="panel.active" embedded @close="close(panel.id)" />
       <V2SettingsDialog v-else-if="panel.type === 'settings'" open embedded @close="close(panel.id)" @changed="emit('changed')" />
