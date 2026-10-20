@@ -641,6 +641,10 @@ function toggleDrawer(mode) {
 
 async function submitPrompt(content) {
   if (!content.length || !activeTaskId.value || isRunning.value) return
+  // 发送新 prompt 后回到底部，并重新跟随本轮生成内容。
+  followingTimeline.value = true
+  hasNewTimelineItems.value = false
+  scheduleTimelineFollow()
   sending.value = true
   error.value = ''
   try {

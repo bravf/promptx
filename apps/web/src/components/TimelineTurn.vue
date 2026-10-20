@@ -99,7 +99,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
       <div v-if="expanded && hasProcessEntries" class="process-content pb-1 pl-5 pt-1">
         <div v-for="entry in visibleProcessEntries" :key="`${entry.seqStart}-${entry.item.callId || entry.item.type}`" class="process-entry py-1.5 text-xs">
           <TimelineMarkdown v-if="entry.item.type === 'assistant_message'" class="theme-secondary-text" :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
-          <div v-else-if="entry.item.type === 'reasoning'" class="theme-secondary-text whitespace-pre-wrap leading-5">{{ entry.item.text }}</div>
+          <div v-else-if="entry.item.type === 'reasoning'" class="process-reasoning theme-secondary-text whitespace-pre-wrap leading-5">{{ entry.item.text }}</div>
           <TimelineToolCall v-else-if="entry.item.type === 'tool_call'" :entry="entry" :task-id="taskId" :workspace-cwd="workspaceCwd" :running="running" :active-turn-id="activeTurnId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
           <div v-else-if="entry.item.type === 'todo'" class="space-y-1">
             <div v-for="(item, index) in entry.item.items" :key="`${index}-${item.text}`" class="theme-secondary-text flex items-start gap-2">
@@ -136,6 +136,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
 </template>
 
 <style scoped>
+.process-reasoning { min-width: 0; overflow-wrap: anywhere; }
 .process-toggle { border: 0; background: transparent; }
 .process-toggle:hover { color: var(--theme-textPrimary); }
 .error-row { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
