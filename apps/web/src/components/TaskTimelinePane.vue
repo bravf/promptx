@@ -63,7 +63,9 @@ const hasOlderHistory = ref(false)
 const loadingOlderHistory = ref(false)
 const followingTimeline = ref(true)
 const timelineScrollable = ref(false)
+const timelineDistanceFromBottom = ref(0)
 const hasNewTimelineItems = ref(false)
+const TIMELINE_JUMP_BUTTON_DISTANCE = 64
 const timelineElement = ref(null)
 const timelineContent = ref(null)
 provide('pauseTimelineFollow', pauseTimelineFollow)
@@ -406,6 +408,7 @@ function cancelTimelinePointer() {
 
 function recordTimelinePosition(element) {
   timelineScrollable.value = canScrollTimeline(element)
+  timelineDistanceFromBottom.value = Math.max(0, element.scrollHeight - element.clientHeight - element.scrollTop)
   lastTimelineScrollTop = element.scrollTop
   lastTimelineHeight = element.scrollHeight
   lastTimelineViewportHeight = element.clientHeight
@@ -814,7 +817,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="timelineLoading" class="timeline-loading-overlay absolute inset-0 z-10 flex items-start justify-center pt-16" role="status" aria-label="加载中"><div class="status-float status-float-pill timeline-loading-indicator gap-2"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /><span>加载中</span></div></div>
         <div v-if="loadingOlderHistory" class="status-float status-float-icon pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2" role="status" aria-label="正在加载更早记录"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
-        <PxIconButton v-if="!followingTimeline && timelineScrollable && timelineHasContent" class="timeline-jump-button absolute bottom-3 left-1/2 z-10 h-9 w-9 -translate-x-1/2 p-0" :class="{ 'is-running': isRunning || sending }" :label="isRunning || sending ? '正在生成，回到底部' : (hasNewTimelineItems ? '有新消息，回到底部' : '回到底部')" @click="jumpToLatest">
+        <PxIconButton v-if="!followingTimeline && timelineScrollable && timelineHasContent && timelineDistanceFromBottom > TIMELINE_JUMP_BUTTON_DISTANCE" class="timeline-jump-button absolute bottom-3 left-1/2 z-10 h-9 w-9 -translate-x-1/2 p-0" :class="{ 'is-running': isRunning || sending }" :label="isRunning || sending ? '正在生成，回到底部' : (hasNewTimelineItems ? '有新消息，回到底部' : '回到底部')" @click="jumpToLatest">
           <span v-if="isRunning || sending" class="timeline-jump-loading" aria-hidden="true"><span class="timeline-jump-loading-dot" /><span class="timeline-jump-loading-dot" /><span class="timeline-jump-loading-dot" /></span><ArrowDown v-else class="h-4 w-4" />
         </PxIconButton>
       </div>
