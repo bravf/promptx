@@ -106,13 +106,13 @@ body {
 /* 桌面滚动条使用主题色，触摸设备保留系统滚动体验。 */
 @media (hover: hover) and (pointer: fine) {
   :root {
-    --theme-scrollbarThumb: color-mix(in srgb, var(--theme-textMuted) 32%, transparent);
-    --theme-scrollbarThumbHover: color-mix(in srgb, var(--theme-textMuted) 55%, transparent);
+    --theme-scrollbarThumb: color-mix(in srgb, var(--theme-textMuted) 15%, transparent);
+    --theme-scrollbarThumbHover: color-mix(in srgb, var(--theme-textMuted) 30%, transparent);
   }
 
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track,
