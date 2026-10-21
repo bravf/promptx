@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { TriangleAlert } from 'lucide-vue-next'
+import { PhWarning } from '@phosphor-icons/vue'
 import DialogShell from './DialogShell.vue'
 import PxButton from './PxButton.vue'
 
@@ -61,7 +61,7 @@ const resolvedCancelText = computed(() => props.cancelText || '取消')
           class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-sm border border-dashed"
           :class="danger ? 'theme-status-danger' : 'theme-status-neutral'"
         >
-          <TriangleAlert class="h-4 w-4" />
+          <PhWarning class="h-4 w-4" />
         </span>
         <div class="min-w-0 max-h-[calc(100dvh-9rem)] flex-1 overflow-y-auto [overflow-wrap:anywhere]">
           <h2 class="theme-heading text-base font-semibold">{{ resolvedTitle }}</h2>

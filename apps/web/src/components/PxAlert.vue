@@ -1,5 +1,5 @@
 <script setup>
-import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from 'lucide-vue-next'
+import { PhWarningCircle, PhCheckCircle, PhInfo, PhWarning, PhX } from '@phosphor-icons/vue'
 import { computed } from 'vue'
 import PxIconButton from './PxIconButton.vue'
 
@@ -9,7 +9,7 @@ const props = defineProps({
   dismissible: { type: Boolean, default: false },
 })
 const emit = defineEmits(['dismiss'])
-const icon = computed(() => ({ error: CircleAlert, warning: TriangleAlert, info: Info, success: CircleCheck }[props.variant] || CircleAlert))
+const icon = computed(() => ({ error: PhWarningCircle, warning: PhWarning, info: PhInfo, success: PhCheckCircle }[props.variant] || PhWarningCircle))
 </script>
 
 <template>
@@ -19,6 +19,6 @@ const icon = computed(() => ({ error: CircleAlert, warning: TriangleAlert, info:
       <div v-if="props.title" class="font-medium">{{ props.title }}</div>
       <div :class="props.title ? 'mt-0.5' : ''"><slot /></div>
     </div>
-    <PxIconButton v-if="props.dismissible" class="px-alert-dismiss h-6 w-6" label="关闭提示" @click="emit('dismiss')"><X class="h-3.5 w-3.5" /></PxIconButton>
+    <PxIconButton v-if="props.dismissible" class="px-alert-dismiss h-6 w-6" label="关闭提示" @click="emit('dismiss')"><PhX class="h-3.5 w-3.5" /></PxIconButton>
   </div>
 </template>

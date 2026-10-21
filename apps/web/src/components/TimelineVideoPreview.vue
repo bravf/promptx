@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Music, X } from 'lucide-vue-next'
+import { PhMusicNotes, PhX } from '@phosphor-icons/vue'
 import MediaPreviewPlaceholder from './MediaPreviewPlaceholder.vue'
 import PxIconButton from './PxIconButton.vue'
 import { v2Api } from '../lib/v2Api.js'
@@ -82,12 +82,12 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <div ref="dialog" role="dialog" aria-modal="true" :aria-label="`${mediaLabel}预览`" tabindex="-1" class="video-preview-backdrop fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-4 sm:p-6" @click.self="close">
-      <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 z-10 h-9 w-9" label="关闭预览" @click="close"><X class="h-4 w-4" /></PxIconButton>
+      <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 z-10 h-9 w-9" label="关闭预览" @click="close"><PhX class="h-4 w-4" /></PxIconButton>
       <MediaPreviewPlaceholder v-if="loading || error" :kind="kind" :error="error">
         <button v-if="error" class="tool-button rounded-sm px-3 py-2" @click="load">重试</button>
       </MediaPreviewPlaceholder>
       <div v-if="kind === 'audio' && src && !error" class="audio-preview-panel flex w-full max-w-lg flex-col items-center gap-5 rounded-lg border p-6">
-        <Music class="h-10 w-10" />
+        <PhMusicNotes class="h-10 w-10" />
         <p class="w-full break-all text-center text-sm">{{ label }}</p>
         <audio ref="video" crossorigin="anonymous" :src="src" :aria-label="label" controls preload="metadata" class="w-full" @loadedmetadata="loading = false" @error="loading = false; error ||= '音频无法播放，浏览器可能不支持此编码'" />
       </div>

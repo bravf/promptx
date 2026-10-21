@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArchiveRestore, CopyPlus, FolderOpen, LoaderCircle, Search, Trash2, Unplug } from 'lucide-vue-next'
+import { PhArrowUUpLeft, PhCopySimple, PhFolderOpen, PhCircleNotch, PhMagnifyingGlass, PhTrash, PhPlugs } from '@phosphor-icons/vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import PxAlert from './PxAlert.vue'
 import PxButton from './PxButton.vue'
@@ -147,9 +147,9 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
     </div>
 
     <form class="archive-search flex h-9 items-center gap-2 rounded-sm border px-3" @submit.prevent="load">
-      <Search class="theme-muted-text h-3.5 w-3.5 shrink-0" />
+      <PhMagnifyingGlass class="theme-muted-text h-3.5 w-3.5 shrink-0" />
       <input v-model="query" class="min-w-0 flex-1 bg-transparent text-xs outline-none" placeholder="搜索工作区、会话、Provider 或分支" />
-      <LoaderCircle v-if="loading" class="theme-muted-text h-3.5 w-3.5 animate-spin" />
+      <PhCircleNotch v-if="loading" class="theme-muted-text h-3.5 w-3.5 animate-spin" />
     </form>
 
     <PxAlert v-if="error" class="mt-4" dismissible @dismiss="error = ''">{{ error }}</PxAlert>
@@ -165,8 +165,8 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
               <div class="theme-muted-text mt-1 text-[10px]">{{ project.activeTaskCount }} 个活动会话 · {{ project.archivedTaskCount }} 个归档会话 · 归档于 {{ formatDate(project.archivedAt) }}</div>
             </div>
             <div class="flex shrink-0 gap-2">
-              <PxButton size="sm" class="h-8 text-xs" :loading="pendingKey === `project:${project.id}`" :disabled="Boolean(pendingKey)" @click="restoreProject(project)"><ArchiveRestore class="h-3.5 w-3.5" />恢复</PxButton>
-              <PxButton v-if="project.activeTaskCount + project.archivedTaskCount === 0" variant="danger" size="sm" class="h-8 text-xs" :disabled="Boolean(pendingKey)" @click="askDeleteProject(project)"><Trash2 class="h-3.5 w-3.5" />永久删除</PxButton>
+              <PxButton size="sm" class="h-8 text-xs" :loading="pendingKey === `project:${project.id}`" :disabled="Boolean(pendingKey)" @click="restoreProject(project)"><PhArrowUUpLeft class="h-3.5 w-3.5" />恢复</PxButton>
+              <PxButton v-if="project.activeTaskCount + project.archivedTaskCount === 0" variant="danger" size="sm" class="h-8 text-xs" :disabled="Boolean(pendingKey)" @click="askDeleteProject(project)"><PhTrash class="h-3.5 w-3.5" />永久删除</PxButton>
             </div>
           </article>
         </div>
@@ -186,12 +186,12 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
                 <div class="theme-muted-text mt-1 text-[10px]">归档于 {{ formatDate(task.archivedAt) }}</div>
               </div>
               <div class="flex shrink-0 flex-wrap gap-2">
-                <PxButton v-if="taskAction(task) === 'restore'" size="sm" class="h-8 text-xs" :loading="pendingKey === `task:${task.id}`" :disabled="Boolean(pendingKey)" @click="restoreTask(task)"><ArchiveRestore class="h-3.5 w-3.5" />恢复</PxButton>
-                <PxButton v-else-if="taskAction(task) === 'copy'" size="sm" class="h-8 text-xs" :loading="pendingKey === `task:${task.id}`" :disabled="Boolean(pendingKey)" @click="copyTask(task)"><CopyPlus class="h-3.5 w-3.5" />复制到新 Worktree</PxButton>
-                <PxButton v-else-if="taskAction(task) === 'rebind'" size="sm" class="h-8 text-xs" :loading="pendingKey === `task:${task.id}`" :disabled="Boolean(pendingKey)" @click="rebindTask(task)"><FolderOpen class="h-3.5 w-3.5" />重新绑定目录</PxButton>
+                <PxButton v-if="taskAction(task) === 'restore'" size="sm" class="h-8 text-xs" :loading="pendingKey === `task:${task.id}`" :disabled="Boolean(pendingKey)" @click="restoreTask(task)"><PhArrowUUpLeft class="h-3.5 w-3.5" />恢复</PxButton>
+                <PxButton v-else-if="taskAction(task) === 'copy'" size="sm" class="h-8 text-xs" :loading="pendingKey === `task:${task.id}`" :disabled="Boolean(pendingKey)" @click="copyTask(task)"><PhCopySimple class="h-3.5 w-3.5" />复制到新 Worktree</PxButton>
+                <PxButton v-else-if="taskAction(task) === 'rebind'" size="sm" class="h-8 text-xs" :loading="pendingKey === `task:${task.id}`" :disabled="Boolean(pendingKey)" @click="rebindTask(task)"><PhFolderOpen class="h-3.5 w-3.5" />重新绑定目录</PxButton>
                 <PxButton v-else size="sm" class="h-8 text-xs" disabled>先恢复工作区</PxButton>
-                <PxButton v-if="task.environment?.kind === 'worktree' && task.environment?.ownership === 'promptx' && task.environment?.status !== 'removed'" size="sm" class="h-8 text-xs" :disabled="Boolean(pendingKey)" @click="askClean(task)"><Unplug class="h-3.5 w-3.5" />清理 Worktree</PxButton>
-                <PxButton variant="danger" size="sm" class="h-8 text-xs" :disabled="Boolean(pendingKey)" @click="askDeleteTask(task)"><Trash2 class="h-3.5 w-3.5" />永久删除</PxButton>
+                <PxButton v-if="task.environment?.kind === 'worktree' && task.environment?.ownership === 'promptx' && task.environment?.status !== 'removed'" size="sm" class="h-8 text-xs" :disabled="Boolean(pendingKey)" @click="askClean(task)"><PhPlugs class="h-3.5 w-3.5" />清理 Worktree</PxButton>
+                <PxButton variant="danger" size="sm" class="h-8 text-xs" :disabled="Boolean(pendingKey)" @click="askDeleteTask(task)"><PhTrash class="h-3.5 w-3.5" />永久删除</PxButton>
               </div>
             </div>
           </article>

@@ -1,5 +1,5 @@
 <script setup>
-import { LoaderCircle } from 'lucide-vue-next'
+import { PhCircleNotch } from '@phosphor-icons/vue'
 
 const props = defineProps({
   variant: { type: String, default: 'secondary' },
@@ -17,7 +17,7 @@ const props = defineProps({
     :class="[`px-button-${props.variant}`, `px-button-${props.size}`]"
     :disabled="props.disabled || props.loading"
   >
-    <LoaderCircle v-if="props.loading" class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+    <PhCircleNotch v-if="props.loading" class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
     <slot />
   </button>
 </template>

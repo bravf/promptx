@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { vTouchTap } from '../lib/touchTap.js'
-import { Archive, Folder, FolderOpen, LoaderCircle, Pencil, Pin, PinOff, Plus, Settings, TerminalSquare, X } from 'lucide-vue-next'
+import { PhArchive, PhFolder, PhFolderOpen, PhCircleNotch, PhPencilSimple, PhPushPin, PhPushPinSlash, PhPlus, PhGear, PhTerminalWindow, PhX } from '@phosphor-icons/vue'
 import { sessionActivity } from '../lib/backgroundTaskPresentation.js'
 import { v2Api, globalEventsUrl } from '../lib/v2Api.js'
 import { warmVideoWorker } from '../lib/videoSource.js'
@@ -279,11 +279,11 @@ function toggleProject(projectId) { setProjectExpanded(projectId, !expandedProje
 function providerLabel(providerId) { return providers.value.find((provider) => provider.id === providerId)?.label || providerId }
 
 function projectMenuItems(project) {
-  return [{ id: 'new', label: '新建会话', icon: Plus }, { id: 'pin', label: project.pinnedAt ? '取消置顶' : '置顶', icon: project.pinnedAt ? PinOff : Pin }, { separator: true }, { id: 'archive', label: '归档工作区', icon: Archive }]
+  return [{ id: 'new', label: '新建会话', icon: PhPlus }, { id: 'pin', label: project.pinnedAt ? '取消置顶' : '置顶', icon: project.pinnedAt ? PhPushPinSlash : PhPushPin }, { separator: true }, { id: 'archive', label: '归档工作区', icon: PhArchive }]
 }
 
 function taskMenuItems(task) {
-  return [{ id: 'rename', label: '重命名', icon: Pencil }, { id: 'pin', label: task.pinnedAt ? '取消置顶' : '置顶', icon: task.pinnedAt ? PinOff : Pin }, { separator: true }, { id: 'archive', label: '归档会话', icon: Archive }]
+  return [{ id: 'rename', label: '重命名', icon: PhPencilSimple }, { id: 'pin', label: task.pinnedAt ? '取消置顶' : '置顶', icon: task.pinnedAt ? PhPushPinSlash : PhPushPin }, { separator: true }, { id: 'archive', label: '归档会话', icon: PhArchive }]
 }
 
 function focusDesktopTask(taskId, projectId, visibleTaskIds) {
@@ -584,11 +584,11 @@ onBeforeUnmount(() => {
 
     <aside class="workspace-sidebar panel flex min-h-0 flex-col overflow-hidden" :class="mobileView === 'sidebar' ? 'mobile-panel-active' : 'mobile-panel-hidden'" :inert="isMobile && mobileView !== 'sidebar'" :aria-hidden="isMobile ? mobileView !== 'sidebar' : undefined">
       <header class="flex h-14 shrink-0 items-center border-b px-3">
-        <div class="flex min-w-0 items-center gap-2"><div class="brand-mark flex h-7 w-7 items-center justify-center rounded-sm"><TerminalSquare class="h-4 w-4" /></div><span class="text-sm font-semibold">PromptX</span><span class="theme-muted-text text-[10px]">V2</span></div>
+        <div class="flex min-w-0 items-center gap-2"><div class="brand-mark flex h-7 w-7 items-center justify-center rounded-sm"><PhTerminalWindow class="h-4 w-4" /></div><span class="text-sm font-semibold">PromptX</span><span class="theme-muted-text text-[10px]">V2</span></div>
       </header>
       <div class="shrink-0 px-2 pb-2 pt-2">
-        <PxButton variant="primary" size="sm" class="sidebar-primary-action h-9 w-full justify-start px-2 text-left text-xs" @click="openConversationDialog()"><Plus class="h-4 w-4 shrink-0" /><span>新会话</span></PxButton>
-        <PxButton variant="ghost" size="sm" class="sidebar-secondary-action mt-1 h-8 w-full justify-start px-2 text-left text-xs" @click="openImportDialog"><FolderOpen class="h-3.5 w-3.5 shrink-0" /><span>导入会话</span></PxButton>
+        <PxButton variant="primary" size="sm" class="sidebar-primary-action h-9 w-full justify-start px-2 text-left text-xs" @click="openConversationDialog()"><PhPlus class="h-4 w-4 shrink-0" /><span>新会话</span></PxButton>
+        <PxButton variant="ghost" size="sm" class="sidebar-secondary-action mt-1 h-8 w-full justify-start px-2 text-left text-xs" @click="openImportDialog"><PhFolderOpen class="h-3.5 w-3.5 shrink-0" /><span>导入会话</span></PxButton>
       </div>
       <div data-session-scroll class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <div class="session-list-switch flex items-center gap-1 py-1" role="group" aria-label="会话列表视图">
@@ -597,8 +597,8 @@ onBeforeUnmount(() => {
         <template v-if="sessionListView === 'workspace'">
         <div v-for="project in projects" :key="project.id" class="workspace-group mb-2">
           <div class="workspace-heading group flex h-9 min-w-0 cursor-pointer items-center rounded-sm" :class="project.id === activeProjectId ? 'workspace-active' : ''" @click="toggleProject(project.id)">
-            <PxIconButton class="workspace-toggle h-7 w-7 shrink-0" :label="expandedProjectIds.has(project.id) ? '收起工作区' : '展开工作区'" :aria-expanded="expandedProjectIds.has(project.id)" @click.stop="toggleProject(project.id)"><FolderOpen v-if="expandedProjectIds.has(project.id)" class="h-4 w-4" /><Folder v-else class="h-4 w-4" /></PxIconButton>
-            <button type="button" class="flex min-w-0 flex-1 items-center gap-2 py-1 text-left" :title="project.repositoryRoot" @click.stop="toggleProject(project.id)"><span class="min-w-0 flex-1 truncate text-xs font-medium">{{ project.displayName }}</span><Pin v-if="project.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" /></button>
+            <PxIconButton class="workspace-toggle h-7 w-7 shrink-0" :label="expandedProjectIds.has(project.id) ? '收起工作区' : '展开工作区'" :aria-expanded="expandedProjectIds.has(project.id)" @click.stop="toggleProject(project.id)"><PhFolderOpen v-if="expandedProjectIds.has(project.id)" class="h-4 w-4" /><PhFolder v-else class="h-4 w-4" /></PxIconButton>
+            <button type="button" class="flex min-w-0 flex-1 items-center gap-2 py-1 text-left" :title="project.repositoryRoot" @click.stop="toggleProject(project.id)"><span class="min-w-0 flex-1 truncate text-xs font-medium">{{ project.displayName }}</span><PhPushPin v-if="project.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" /></button>
             <PxActionMenu class="workspace-action" :label="`${project.displayName} 的更多操作`" :items="projectMenuItems(project)" @select="handleProjectMenu($event, project)" />
           </div>
           <Transition name="workspace-agents">
@@ -610,13 +610,13 @@ onBeforeUnmount(() => {
                     <AgentProviderIcon :provider-id="task.providerId" :label="providerLabel(task.providerId)" />
                     <SessionTitleMarquee class="min-w-0 flex-1 text-xs" :title="task.title" :active="task.id === focusedTaskId" />
                     <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
-                    <Pin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
+                    <PhPushPin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
                     <span v-if="sessionActivity(task).waiting" class="shrink-0 text-[10px] text-[var(--theme-warningText)]">待回答</span>
-                    <LoaderCircle v-else-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
+                    <PhCircleNotch v-else-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" />
                   </button>
                   <PxActionMenu class="agent-action" :label="`${task.title} 的更多操作`" :items="taskMenuItems(task)" @select="handleTaskMenu($event, task)" />
                 </div>
-                <button v-if="!tasksForProject(project.id).length" type="button" class="theme-muted-text flex h-8 w-full items-center justify-start gap-2 pl-8 pr-2 text-left text-[10px]" @click="openConversationDialog(project)"><Plus class="h-3 w-3" />新会话</button>
+                <button v-if="!tasksForProject(project.id).length" type="button" class="theme-muted-text flex h-8 w-full items-center justify-start gap-2 pl-8 pr-2 text-left text-[10px]" @click="openConversationDialog(project)"><PhPlus class="h-3 w-3" />新会话</button>
               </div>
             </div>
           </Transition>
@@ -633,11 +633,11 @@ onBeforeUnmount(() => {
                   <AgentProviderIcon :provider-id="task.providerId" :label="providerLabel(task.providerId)" />
                   <SessionTitleMarquee class="min-w-0 flex-1 text-xs font-medium" :title="task.title" :active="task.id === focusedTaskId" />
                   <span v-if="agentStatusClass(task)" class="agent-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="agentStatusClass(task)" />
-                  <Pin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
+                  <PhPushPin v-if="task.pinnedAt" class="theme-muted-text h-3 w-3 shrink-0" aria-label="已置顶" />
                   <span v-if="sessionActivity(task).waiting" class="shrink-0 text-[10px] text-[var(--theme-warningText)]">待回答</span>
-                  <LoaderCircle v-else-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" aria-label="运行中" />
+                  <PhCircleNotch v-else-if="sessionActivity(task).running" class="theme-muted-text h-3 w-3 shrink-0 animate-spin" aria-label="运行中" />
                 </div>
-                <div class="theme-muted-text mt-1 flex min-w-0 items-center gap-2 text-[11px]" :title="projectForTask(task)?.repositoryRoot"><Folder class="h-[1em] w-[1em] shrink-0" /><span class="truncate">{{ projectForTask(task)?.displayName || '未知工作区' }}</span></div>
+                <div class="theme-muted-text mt-1 flex min-w-0 items-center gap-2 text-[11px]" :title="projectForTask(task)?.repositoryRoot"><PhFolder class="h-[1em] w-[1em] shrink-0" /><span class="truncate">{{ projectForTask(task)?.displayName || '未知工作区' }}</span></div>
               </button>
               <PxActionMenu class="agent-action shrink-0" :label="`${task.title} 的更多操作`" :items="taskMenuItems(task)" @select="handleTaskMenu($event, task)" />
             </div>
@@ -645,7 +645,7 @@ onBeforeUnmount(() => {
           <div v-if="!allTasks.length && !loading" class="theme-muted-text px-3 py-8 text-center text-xs">还没有会话</div>
         </template>
       </div>
-      <footer class="border-t p-2"><PxButton variant="ghost" size="sm" class="settings-entry h-9 w-full justify-start gap-2 px-2 text-left text-xs" @click="openManagedDialog('settings')"><Settings class="h-4 w-4 shrink-0" /><span>设置</span></PxButton></footer>
+      <footer class="border-t p-2"><PxButton variant="ghost" size="sm" class="settings-entry h-9 w-full justify-start gap-2 px-2 text-left text-xs" @click="openManagedDialog('settings')"><PhGear class="h-4 w-4 shrink-0" /><span>设置</span></PxButton></footer>
     </aside>
 
     <div class="workspace-sidebar-divider theme-resize-handle" :class="{ 'is-resizing': sidebarDragging }" role="separator" aria-label="调整工作区侧栏宽度" aria-orientation="vertical" :aria-valuenow="sidebarWidth" :aria-valuemin="sidebarResize.minWidth" :aria-valuemax="sidebarMaxWidth" :aria-valuetext="`${sidebarWidth} 像素`" tabindex="0" title="拖动调整左栏宽度，双击恢复默认" @pointerdown="sidebarResize.start" @pointermove="sidebarResize.resize" @pointerup="sidebarResize.stop" @pointercancel="sidebarResize.stop" @lostpointercapture="sidebarResize.stop" @keydown="sidebarResize.resizeKey" @dblclick="sidebarResize.reset" />
@@ -657,7 +657,7 @@ onBeforeUnmount(() => {
       </KeepAlive>
     </main>
 
-    <div v-if="error" class="shell-error error-row absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-sm border px-3 py-2 text-xs"><span>{{ error }}</span><PxIconButton class="h-6 w-6" label="关闭错误提示" @click="error = ''"><X class="h-3.5 w-3.5" /></PxIconButton></div>
+    <div v-if="error" class="shell-error error-row absolute left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-sm border px-3 py-2 text-xs"><span>{{ error }}</span><PxIconButton class="h-6 w-6" label="关闭错误提示" @click="error = ''"><PhX class="h-3.5 w-3.5" /></PxIconButton></div>
     <V2SettingsDialog :open="dialog === 'settings'" @close="closeDialog" @changed="refreshProjects" />
     <TimelineVideoPreview v-if="videoPreview" :task-id="videoPreview.taskId" :path="videoPreview.path" :label="videoPreview.label" :kind="videoPreview.kind || 'video'" @close="videoPreview = null" />
     <TimelineVisualizationPreview :preview="visualizationPreview" @close="closeVisualizationPreview" />
@@ -714,16 +714,16 @@ onBeforeUnmount(() => {
             <button v-for="provider in providers" :key="provider.id" type="button" class="import-provider-filter flex h-8 items-center justify-start px-2 text-left text-xs" :class="importProviderFilter === provider.id ? 'is-active' : ''" @click="selectImportProvider(provider.id)">{{ provider.label }}</button>
           </aside>
           <section class="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div class="relative shrink-0"><input v-model="importQuery" class="tool-input h-9 w-full pr-9 text-xs" placeholder="搜索标题、目录、Session ID 或首条消息" @input="scheduleImportSearch" /><PxIconButton v-if="importQuery" class="import-query-clear theme-muted-text absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2" label="清空搜索" @click="clearImportQuery"><X class="h-3.5 w-3.5" /></PxIconButton><LoaderCircle v-else-if="importLoading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin" /></div>
+            <div class="relative shrink-0"><input v-model="importQuery" class="tool-input h-9 w-full pr-9 text-xs" placeholder="搜索标题、目录、Session ID 或首条消息" @input="scheduleImportSearch" /><PxIconButton v-if="importQuery" class="import-query-clear theme-muted-text absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2" label="清空搜索" @click="clearImportQuery"><PhX class="h-3.5 w-3.5" /></PxIconButton><PhCircleNotch v-else-if="importLoading" class="theme-muted-text pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin" /></div>
             <div v-if="importError" class="error-row mt-3 rounded-sm border px-3 py-2 text-xs">{{ importError }}</div>
             <div class="relative mt-2 flex min-h-0 flex-1 flex-col">
-              <div v-if="importLoading && !importSessions.length" class="theme-muted-text flex h-full items-center justify-center text-xs"><LoaderCircle class="mr-2 h-4 w-4 animate-spin" />正在扫描本机 Provider 会话</div>
+              <div v-if="importLoading && !importSessions.length" class="theme-muted-text flex h-full items-center justify-center text-xs"><PhCircleNotch class="mr-2 h-4 w-4 animate-spin" />正在扫描本机 Provider 会话</div>
               <div v-else-if="!importSessions.length" class="theme-muted-text flex h-full items-center justify-center text-xs">没有可导入的会话</div>
               <div v-else class="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1">
                 <button v-for="session in importSessions" :key="`${session.providerId}:${session.providerHandleId}`" type="button" class="import-session-row flex w-full min-w-0 items-center gap-3 rounded-sm border px-3 py-2 text-left" :disabled="Boolean(importingId)" @click="importSession(session)">
                   <span class="import-provider-mark flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-[10px] font-semibold">{{ providerLabel(session.providerId).slice(0, 1) }}</span>
                   <span class="min-w-0 flex-1"><span class="flex items-center gap-2"><span class="truncate text-xs font-medium">{{ session.title }}</span><span class="theme-muted-text shrink-0 text-[10px]">{{ providerLabel(session.providerId) }}</span><span class="theme-muted-text ml-auto shrink-0 text-[10px]">{{ formatImportActivity(session.lastActivityAt) }}</span></span><span class="theme-muted-text mt-0.5 block truncate font-mono text-[10px]" :title="session.cwd || '未记录工作目录，将使用当前项目目录'">{{ session.cwd || '未记录工作目录，将使用当前项目目录' }}</span><span class="theme-muted-text mt-0.5 block truncate text-[11px]">{{ session.lastPromptPreview || session.firstPromptPreview }}</span></span>
-                  <LoaderCircle v-if="importingId === session.providerHandleId" class="theme-muted-text h-4 w-4 shrink-0 animate-spin" /><span v-else class="theme-muted-text shrink-0 text-[10px]">导入</span>
+                  <PhCircleNotch v-if="importingId === session.providerHandleId" class="theme-muted-text h-4 w-4 shrink-0 animate-spin" /><span v-else class="theme-muted-text shrink-0 text-[10px]">导入</span>
                 </button>
               </div>
             </div>

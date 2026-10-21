@@ -1,6 +1,6 @@
 ﻿<script setup>
 import { computed } from 'vue'
-import { Check } from 'lucide-vue-next'
+import { PhCheck } from '@phosphor-icons/vue'
 import { useTheme } from '../composables/useTheme.js'
 
 const { currentTheme, setTheme, themes } = useTheme()
@@ -54,7 +54,7 @@ function handleThemeSelect(themeId) {
           <div class="min-w-0 flex-1">
             <div class="flex items-center justify-between gap-2">
               <span class="truncate text-sm font-medium">{{ theme.shortName }}</span>
-              <Check v-if="theme.id === currentTheme.id" class="h-4 w-4 shrink-0" />
+              <PhCheck v-if="theme.id === currentTheme.id" class="h-4 w-4 shrink-0" />
             </div>
             <div class="theme-muted-text theme-note-text mt-1">{{ theme.description }}</div>
           </div>

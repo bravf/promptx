@@ -1,5 +1,5 @@
 <script setup>
-import { MoreHorizontal } from 'lucide-vue-next'
+import { PhDotsThree } from '@phosphor-icons/vue'
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import PxIconButton from './PxIconButton.vue'
 
@@ -105,7 +105,7 @@ onBeforeUnmount(() => {
   <div class="inline-flex shrink-0">
     <PxIconButton ref="trigger" class="h-7 w-7" :label="label" :aria-expanded="open" aria-haspopup="menu"
       @click.stop="open ? closeMenu() : openMenu()" @keydown="onKeydown">
-      <MoreHorizontal class="h-4 w-4" />
+      <PhDotsThree class="h-4 w-4" />
     </PxIconButton>
     <Teleport to="body">
       <div v-if="open" ref="menu" class="action-menu fixed z-[130] rounded-sm border p-1 shadow-sm" :style="menuStyle" role="menu">

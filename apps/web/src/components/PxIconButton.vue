@@ -1,5 +1,5 @@
 <script setup>
-import { LoaderCircle } from 'lucide-vue-next'
+import { PhCircleNotch } from '@phosphor-icons/vue'
 
 const props = defineProps({
   variant: { type: String, default: 'quiet' },
@@ -20,7 +20,7 @@ const props = defineProps({
     :aria-label="props.label || undefined"
     :title="props.label || undefined"
   >
-    <LoaderCircle v-if="props.loading" class="h-4 w-4 animate-spin" aria-hidden="true" />
+    <PhCircleNotch v-if="props.loading" class="h-4 w-4 animate-spin" aria-hidden="true" />
     <slot v-else />
   </button>
 </template>

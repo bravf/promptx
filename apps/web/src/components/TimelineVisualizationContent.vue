@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { RotateCw } from 'lucide-vue-next'
+import { PhArrowsClockwise } from '@phosphor-icons/vue'
 import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
 import { useTheme } from '../composables/useTheme.js'
@@ -65,7 +65,7 @@ onBeforeUnmount(() => {
       <PxButton size="sm" :variant="mode === 'preview' ? 'primary' : 'ghost'" :aria-pressed="mode === 'preview'" @click="selectMode('preview')">预览</PxButton>
       <PxButton size="sm" :variant="mode === 'source' ? 'primary' : 'ghost'" :aria-pressed="mode === 'source'" @click="selectMode('source')">源码</PxButton>
       <span class="theme-muted-text ml-auto text-xs">隔离预览</span>
-      <PxIconButton label="重新加载图表" :disabled="loading" @click="load"><RotateCw class="h-4 w-4" /></PxIconButton>
+      <PxIconButton label="重新加载图表" :disabled="loading" @click="load"><PhArrowsClockwise class="h-4 w-4" /></PxIconButton>
     </div>
     <div v-if="loading || error" class="theme-muted-text flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm" role="status">
       <p>{{ error || '正在读取图表…' }}</p><PxButton v-if="error" size="sm" @click="load">重试</PxButton>

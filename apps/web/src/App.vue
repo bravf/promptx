@@ -1,5 +1,5 @@
 <script setup>
-import { CircleAlert, X } from 'lucide-vue-next'
+import { PhWarningCircle, PhX } from '@phosphor-icons/vue'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import PxIconButton from './components/PxIconButton.vue'
 
@@ -61,9 +61,9 @@ onBeforeUnmount(() => {
 <template>
   <div class="app-shell">
     <div v-if="globalError" class="status-float status-float-panel status-float-error fixed inset-x-3 top-3 z-[100] mx-auto flex max-w-2xl items-start gap-2.5" role="alert">
-      <CircleAlert class="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
+      <PhWarningCircle class="mt-px h-4 w-4 shrink-0" aria-hidden="true" />
       <span class="min-w-0 flex-1">{{ globalError }}</span>
-      <PxIconButton class="h-6 w-6 shrink-0" size="sm" label="关闭错误提示" @click="clearGlobalError"><X class="h-3.5 w-3.5" /></PxIconButton>
+      <PxIconButton class="h-6 w-6 shrink-0" size="sm" label="关闭错误提示" @click="clearGlobalError"><PhX class="h-3.5 w-3.5" /></PxIconButton>
     </div>
     <main class="app-main flex min-h-0 flex-1 overflow-hidden p-2">
       <div class="app-stage h-full min-h-0 w-full overflow-hidden">

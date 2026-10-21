@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
-import { Maximize2, Minimize2, Plus, X, RotateCw, Pencil } from 'lucide-vue-next'
+import { PhCornersOut, PhCornersIn, PhPlus, PhX, PhArrowsClockwise, PhPencilSimple } from '@phosphor-icons/vue'
 import PxIconButton from './PxIconButton.vue'
 import TerminalScreen from './TerminalScreen.vue'
 import { request } from '../lib/request.js'
@@ -134,14 +134,14 @@ onBeforeUnmount(() => { disposed = true; revision++; clearTimeout(timer); dragCl
         <div v-for="item in terminals" :key="item.id" class="terminal-tab flex shrink-0 items-center" :class="{ 'is-active': item.id === activeId }">
           <input v-if="editingId === item.id" :ref="el => el?.focus()" v-model="editName" class="tool-input mx-1 w-28 px-1 text-xs" aria-label="终端名称" maxlength="40" @keydown.enter.prevent="rename(item)" @keydown.esc.prevent="editingId = ''" @blur="rename(item)">
           <button v-else class="max-w-40 truncate px-2 py-1.5 text-xs" role="tab" :aria-selected="item.id === activeId" :title="`${item.name} · ${item.running ? '运行中' : '已退出'}`" @click="select(item.id)" @dblclick="edit(item)">{{ item.name }}<span v-if="!item.running" class="theme-muted-text ml-1 text-[10px]">已退出</span></button>
-          <PxIconButton class="h-6 w-6" :label="`关闭 ${item.name}（结束进程）`" :disabled="busy" @click="remove(item)"><X class="h-3 w-3" /></PxIconButton>
+          <PxIconButton class="h-6 w-6" :label="`关闭 ${item.name}（结束进程）`" :disabled="busy" @click="remove(item)"><PhX class="h-3 w-3" /></PxIconButton>
         </div>
       </div>
-      <PxIconButton class="h-7 w-7 shrink-0" label="新建终端" :disabled="busy || loading" @click="create(false)"><Plus class="h-3.5 w-3.5" /></PxIconButton>
-      <PxIconButton v-if="active" class="h-7 w-7 shrink-0" label="重命名终端" :disabled="busy" @click="edit(active)"><Pencil class="h-3.5 w-3.5" /></PxIconButton>
-      <PxIconButton v-if="active && !active.running" class="h-7 w-7 shrink-0" label="重新启动终端" :disabled="busy" @click="restart"><RotateCw class="h-3.5 w-3.5" /></PxIconButton>
-      <PxIconButton v-if="!embedded" class="h-7 w-7 shrink-0" :label="maximized ? '还原终端' : '放大终端'" @click="maximized = !maximized"><Minimize2 v-if="maximized" class="h-3.5 w-3.5" /><Maximize2 v-else class="h-3.5 w-3.5" /></PxIconButton>
-      <PxIconButton v-if="!embedded" class="h-7 w-7 shrink-0" label="收起终端（保留进程）" @click="emit('close')"><X class="h-3.5 w-3.5" /></PxIconButton>
+      <PxIconButton class="h-7 w-7 shrink-0" label="新建终端" :disabled="busy || loading" @click="create(false)"><PhPlus class="h-3.5 w-3.5" /></PxIconButton>
+      <PxIconButton v-if="active" class="h-7 w-7 shrink-0" label="重命名终端" :disabled="busy" @click="edit(active)"><PhPencilSimple class="h-3.5 w-3.5" /></PxIconButton>
+      <PxIconButton v-if="active && !active.running" class="h-7 w-7 shrink-0" label="重新启动终端" :disabled="busy" @click="restart"><PhArrowsClockwise class="h-3.5 w-3.5" /></PxIconButton>
+      <PxIconButton v-if="!embedded" class="h-7 w-7 shrink-0" :label="maximized ? '还原终端' : '放大终端'" @click="maximized = !maximized"><PhCornersIn v-if="maximized" class="h-3.5 w-3.5" /><PhCornersOut v-else class="h-3.5 w-3.5" /></PxIconButton>
+      <PxIconButton v-if="!embedded" class="h-7 w-7 shrink-0" label="收起终端（保留进程）" @click="emit('close')"><PhX class="h-3.5 w-3.5" /></PxIconButton>
     </header>
     <p v-if="error" class="theme-status-danger px-2 py-1 text-xs" role="alert">{{ error }} <button class="underline" @click="refresh">刷新列表</button></p>
     <p v-if="loading" class="theme-muted-text p-3 text-xs">正在连接终端…</p>

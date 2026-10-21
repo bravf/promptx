@@ -1,13 +1,13 @@
 <script setup>
-import { Image, LoaderCircle, Music, Video } from 'lucide-vue-next'
+import { PhImage, PhCircleNotch, PhMusicNotes, PhVideoCamera } from '@phosphor-icons/vue'
 defineProps({ kind: { type: String, default: 'image' }, error: { type: String, default: '' } })
 </script>
 
 <template>
   <div class="media-preview-placeholder rounded-sm" :class="{ 'is-video': kind === 'video' }" :role="error ? 'alert' : 'status'" :aria-busy="!error">
-    <component :is="kind === 'video' ? Video : kind === 'audio' ? Music : Image" class="h-10 w-10" aria-hidden="true" />
+    <component :is="kind === 'video' ? PhVideoCamera : kind === 'audio' ? PhMusicNotes : PhImage" class="h-10 w-10" aria-hidden="true" />
     <div class="flex items-center justify-center gap-2 text-sm font-medium">
-      <LoaderCircle v-if="!error" class="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+      <PhCircleNotch v-if="!error" class="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
       <span>{{ error || (kind === 'video' ? '正在加载视频' : kind === 'audio' ? '正在加载音频' : '正在加载图片') }}</span>
     </div>
     <p v-if="!error" class="theme-muted-text text-xs">加载完成后将自动显示</p>

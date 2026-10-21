@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { X } from 'lucide-vue-next'
+import { PhX } from '@phosphor-icons/vue'
 import PxIconButton from './PxIconButton.vue'
 
 const props = defineProps({
@@ -195,7 +195,7 @@ onBeforeUnmount(() => {
                 :disabled="closeDisabled"
                 @click="requestClose"
               >
-                <X class="h-4 w-4" />
+                <PhX class="h-4 w-4" />
               </PxIconButton>
             </div>
           </div>

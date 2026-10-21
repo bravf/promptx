@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, ref, watch } from 'vue'
-import { ChevronRight } from 'lucide-vue-next'
+import { PhCaretRight } from '@phosphor-icons/vue'
 import { buildBackgroundTaskTree, isBackgroundTaskRunning } from '../lib/backgroundTaskPresentation.js'
 import TimelineBackgroundTask from './TimelineBackgroundTask.vue'
 import PxButton from './PxButton.vue'
@@ -27,7 +27,7 @@ watch(running, (count, previous) => { if (count > 0 && !previous) expanded.value
 <template>
   <section v-if="tasks.length" class="timeline-subagents mb-5 ml-7 min-w-0 rounded-sm border border-dashed px-3 py-2 text-xs" aria-label="子任务与结果">
     <button type="button" class="flex w-full min-w-0 items-center gap-2 text-left" :aria-expanded="expanded" @click="pauseTimelineFollow(); expanded = !expanded; emit('rendered')">
-      <ChevronRight class="theme-muted-text h-3.5 w-3.5 shrink-0" :class="{ 'rotate-90': expanded }" />
+      <PhCaretRight class="theme-muted-text h-3.5 w-3.5 shrink-0" :class="{ 'rotate-90': expanded }" />
       <span class="font-medium">{{ title }}</span>
       <span class="theme-muted-text">{{ completed }}/{{ tasks.length }} 已完成</span>
       <span v-if="taskTree.length < tasks.length" class="theme-muted-text">含子 Agent 内部任务</span>

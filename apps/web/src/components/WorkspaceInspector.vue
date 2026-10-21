@@ -1,25 +1,7 @@
 <script setup>
 import { createTaskEventSource } from '../lib/taskEventSource.js'
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import {
-  ChevronRight,
-  File,
-  Files,
-  FileWarning,
-  Folder,
-  FolderOpen,
-  GitBranch,
-  Eye,
-  EyeOff,
-  Image as ImageIcon,
-  Link2,
-  LoaderCircle,
-  RefreshCw,
-  Video,
-  Music,
-  Play,
-  X,
-} from 'lucide-vue-next'
+import { PhCaretRight, PhFile, PhFiles, PhFileX, PhFolder, PhFolderOpen, PhGitBranch, PhEye, PhEyeSlash, PhImage as ImageIcon, PhLink, PhCircleNotch, PhArrowsClockwise, PhVideoCamera, PhMusicNotes, PhPlay, PhX } from '@phosphor-icons/vue'
 import { v2Api } from '../lib/v2Api.js'
 import PxIconButton from './PxIconButton.vue'
 import InspectorSplitPane from './InspectorSplitPane.vue'
@@ -354,15 +336,15 @@ defineExpose({ openPath, refreshGit })
   <aside class="workspace-inspector relative flex min-h-0 min-w-0 flex-col">
     <header class="flex h-12 shrink-0 items-center border-b px-3">
       <div class="flex min-w-0 flex-1 items-center gap-2">
-        <Files v-if="mode === 'files'" class="h-4 w-4 shrink-0" />
-        <GitBranch v-else class="h-4 w-4 shrink-0" />
+        <PhFiles v-if="mode === 'files'" class="h-4 w-4 shrink-0" />
+        <PhGitBranch v-else class="h-4 w-4 shrink-0" />
         <span class="truncate font-mono text-xs font-medium" :title="drawerTitle">{{ drawerTitle }}</span>
         <span v-if="mode === 'diff' && gitStatus?.files.length" class="tab-count">{{ gitStatus.files.length }}</span>
       </div>
       <div class="flex items-center gap-0.5">
-        <PxIconButton v-if="mode === 'files'" class="drawer-action h-8 w-8" :class="!showHiddenFiles ? 'is-active' : ''" :label="showHiddenFiles ? '隐藏点文件' : '显示点文件'" :aria-pressed="!showHiddenFiles" @click="showHiddenFiles = !showHiddenFiles"><Eye v-if="showHiddenFiles" class="h-3.5 w-3.5" /><EyeOff v-else class="h-3.5 w-3.5" /></PxIconButton>
-        <PxIconButton class="h-8 w-8" label="刷新" @click="refreshPreview"><RefreshCw class="h-3.5 w-3.5" :class="(directoryLoading.has('') || gitLoading) ? 'animate-spin' : ''" /></PxIconButton>
-        <PxIconButton v-if="!tabbed" class="h-8 w-8" label="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="mode === 'files'" class="drawer-action h-8 w-8" :class="!showHiddenFiles ? 'is-active' : ''" :label="showHiddenFiles ? '隐藏点文件' : '显示点文件'" :aria-pressed="!showHiddenFiles" @click="showHiddenFiles = !showHiddenFiles"><PhEye v-if="showHiddenFiles" class="h-3.5 w-3.5" /><PhEyeSlash v-else class="h-3.5 w-3.5" /></PxIconButton>
+        <PxIconButton class="h-8 w-8" label="刷新" @click="refreshPreview"><PhArrowsClockwise class="h-3.5 w-3.5" :class="(directoryLoading.has('') || gitLoading) ? 'animate-spin' : ''" /></PxIconButton>
+        <PxIconButton v-if="!tabbed" class="h-8 w-8" label="关闭抽屉" @click="emit('close')"><PhX class="h-4 w-4" /></PxIconButton>
       </div>
     </header>
 
@@ -385,14 +367,14 @@ defineExpose({ openPath, refreshGit })
               :title="entry.path"
               @click="selectTreeEntry(entry)"
             >
-              <ChevronRight v-if="entry.type === 'directory'" class="h-3 w-3 shrink-0 transition-transform" :class="expandedPaths.has(entry.path) ? 'rotate-90' : ''" />
+              <PhCaretRight v-if="entry.type === 'directory'" class="h-3 w-3 shrink-0 transition-transform" :class="expandedPaths.has(entry.path) ? 'rotate-90' : ''" />
               <span v-else class="w-3 shrink-0" />
-              <FolderOpen v-if="entry.type === 'directory' && expandedPaths.has(entry.path)" class="folder-icon h-3.5 w-3.5 shrink-0" />
-              <Folder v-else-if="entry.type === 'directory'" class="folder-icon h-3.5 w-3.5 shrink-0" />
-              <Link2 v-else-if="entry.type === 'symlink'" class="theme-muted-text h-3.5 w-3.5 shrink-0" />
-              <File v-else class="theme-muted-text h-3.5 w-3.5 shrink-0" />
+              <PhFolderOpen v-if="entry.type === 'directory' && expandedPaths.has(entry.path)" class="folder-icon h-3.5 w-3.5 shrink-0" />
+              <PhFolder v-else-if="entry.type === 'directory'" class="folder-icon h-3.5 w-3.5 shrink-0" />
+              <PhLink v-else-if="entry.type === 'symlink'" class="theme-muted-text h-3.5 w-3.5 shrink-0" />
+              <PhFile v-else class="theme-muted-text h-3.5 w-3.5 shrink-0" />
               <span class="truncate">{{ entry.name }}</span>
-              <LoaderCircle v-if="directoryLoading.has(entry.path)" class="theme-muted-text ml-auto h-3 w-3 shrink-0 animate-spin" />
+              <PhCircleNotch v-if="directoryLoading.has(entry.path)" class="theme-muted-text ml-auto h-3 w-3 shrink-0 animate-spin" />
             </button>
           </template>
           <div v-if="directoryCache[''] && !visibleFiles.length" class="theme-muted-text px-3 py-8 text-center text-xs">工作区为空</div>
@@ -400,8 +382,8 @@ defineExpose({ openPath, refreshGit })
 
       </template>
       <div ref="previewPane" class="preview-pane relative min-h-0 min-w-0 flex-1 overflow-auto">
-        <div v-if="fileLoading && !filePreview" class="theme-muted-text flex h-full items-center justify-center"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
-        <div v-else-if="!filePreview" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><Files class="mb-2 h-6 w-6" />选择文件进行预览</div>
+        <div v-if="fileLoading && !filePreview" class="theme-muted-text flex h-full items-center justify-center"><PhCircleNotch class="h-4 w-4 animate-spin" /></div>
+        <div v-else-if="!filePreview" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><PhFiles class="mb-2 h-6 w-6" />选择文件进行预览</div>
         <template v-else>
           <div class="preview-heading sticky top-0 z-[1] flex min-w-0 items-center justify-between gap-2 border-b px-3 py-2">
             <span class="truncate font-mono text-[11px]" :title="filePreview.path">{{ filePreview.path }}</span>
@@ -412,12 +394,12 @@ defineExpose({ openPath, refreshGit })
           </div>
           <div v-else-if="filePreview.kind === 'image'" class="flex min-h-full items-center justify-center p-4"><img v-if="filePreviewObjectUrl" class="max-h-full max-w-full object-contain" :src="filePreviewObjectUrl" :alt="filePreview.name" /></div>
           <div v-else-if="['video', 'audio'].includes(filePreview.kind)" class="theme-muted-text flex flex-col items-center justify-center gap-3 p-6 text-center text-xs">
-            <component :is="workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? Music : Video" class="h-8 w-8" />
-            <button class="tool-button inline-flex items-center gap-2 px-3 py-2" @click="playVideo(filePreview.path)"><Play class="h-4 w-4" />{{ workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? '播放音频' : '播放视频' }}</button>
+            <component :is="workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? PhMusicNotes : PhVideoCamera" class="h-8 w-8" />
+            <button class="tool-button inline-flex items-center gap-2 px-3 py-2" @click="playVideo(filePreview.path)"><PhPlay class="h-4 w-4" />{{ workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? '播放音频' : '播放视频' }}</button>
           </div>
-          <div v-else class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><component :is="filePreview.kind === 'too_large' ? FileWarning : ImageIcon" class="mb-2 h-6 w-6" />{{ filePreview.kind === 'too_large' ? '文件过大，暂不支持预览' : '二进制文件暂不支持预览' }}</div>
+          <div v-else class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><component :is="filePreview.kind === 'too_large' ? PhFileX : ImageIcon" class="mb-2 h-6 w-6" />{{ filePreview.kind === 'too_large' ? '文件过大，暂不支持预览' : '二进制文件暂不支持预览' }}</div>
         </template>
-        <div v-if="fileLoading && filePreview" class="inspector-loading-overlay" role="status" aria-label="正在加载文件预览"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
+        <div v-if="fileLoading && filePreview" class="inspector-loading-overlay" role="status" aria-label="正在加载文件预览"><PhCircleNotch class="h-4 w-4 animate-spin" /></div>
       </div>
     </InspectorSplitPane>
 
@@ -430,7 +412,7 @@ defineExpose({ openPath, refreshGit })
           <div v-else-if="gitStatus && !gitStatus.available" class="theme-muted-text px-4 py-8 text-center text-xs">当前工作区不在 Git 仓库中</div>
           <div v-else-if="gitStatus && !gitStatus.files.length" class="theme-muted-text px-4 py-8 text-center text-xs">没有未提交的变更</div>
           <template v-else>
-            <div v-if="gitStatus?.branch" class="theme-muted-text flex h-7 items-center gap-1.5 px-3 text-[10px]"><GitBranch class="h-3 w-3" />{{ gitStatus.branch }}</div>
+            <div v-if="gitStatus?.branch" class="theme-muted-text flex h-7 items-center gap-1.5 px-3 text-[10px]"><PhGitBranch class="h-3 w-3" />{{ gitStatus.branch }}</div>
             <button v-for="file in gitStatus?.files" :key="file.path" type="button" class="change-row flex h-8 min-h-0 w-full min-w-0 items-center justify-start gap-2 border-0 px-3 text-left text-xs" :class="selectedDiffPath === file.path ? 'is-selected' : ''" :title="file.path" @click="selectDiff(file.path)">
               <span class="change-status w-4 shrink-0 text-center font-mono text-[10px]" :data-status="file.status">{{ statusLabel(file.status) }}</span>
               <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{{ file.path }}</span>
@@ -441,12 +423,12 @@ defineExpose({ openPath, refreshGit })
 
       </template>
       <div class="diff-pane relative min-h-0 min-w-0 flex-1 overflow-auto">
-        <div v-if="!selectedDiffPath" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><GitBranch class="mb-2 h-6 w-6" />选择文件查看 Diff</div>
+        <div v-if="!selectedDiffPath" class="theme-muted-text flex h-full flex-col items-center justify-center p-5 text-center text-xs"><PhGitBranch class="mb-2 h-6 w-6" />选择文件查看 Diff</div>
         <template v-else>
           <div class="preview-heading sticky top-0 z-[1] border-b px-3 py-2 font-mono text-[11px]">{{ displayedDiffPath || selectedDiffPath }}</div>
           <div v-if="diffVideo" class="theme-muted-text flex flex-col items-center justify-center gap-3 p-6 text-center text-xs">
-            <component :is="workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? Music : Video" class="h-8 w-8" />
-            <button class="tool-button inline-flex items-center gap-2 px-3 py-2" @click="playVideo(selectedDiffPath)"><Play class="h-4 w-4" />{{ workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? '播放音频' : '播放视频' }}</button>
+            <component :is="workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? PhMusicNotes : PhVideoCamera" class="h-8 w-8" />
+            <button class="tool-button inline-flex items-center gap-2 px-3 py-2" @click="playVideo(selectedDiffPath)"><PhPlay class="h-4 w-4" />{{ workspaceMediaKind(mode === 'files' ? filePreview.path : selectedDiffPath) === 'audio' ? '播放音频' : '播放视频' }}</button>
           </div>
           <div v-if="diff?.truncated" class="inspector-warning border-b px-3 py-2 text-[10px]">Diff 过大，仅显示前 2 MB 或 8000 行</div>
           <div v-if="diff && !diffSections.length && !diffVideo" class="theme-muted-text px-4 py-8 text-center text-xs">没有可显示的文本 Diff</div>
@@ -455,7 +437,7 @@ defineExpose({ openPath, refreshGit })
             <pre class="diff-code m-0 min-w-max"><code><span v-for="(line, index) in section.content.split('\n')" :key="index" class="diff-line block px-3" :class="diffLineClass(line)">{{ line || ' ' }}</span></code></pre>
           </section>
         </template>
-        <div v-if="diffLoading" class="inspector-loading-overlay" role="status" aria-label="正在加载 Diff"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
+        <div v-if="diffLoading" class="inspector-loading-overlay" role="status" aria-label="正在加载 Diff"><PhCircleNotch class="h-4 w-4 animate-spin" /></div>
       </div>
     </InspectorSplitPane>
   </aside>

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { ChevronLeft, ChevronRight, FileText, ImageOff, LoaderCircle, RotateCw, X } from 'lucide-vue-next'
+import { PhCaretLeft, PhCaretRight, PhFileText, PhImageBroken, PhCircleNotch, PhArrowsClockwise, PhX } from '@phosphor-icons/vue'
 import { v2Api } from '../lib/v2Api.js'
 import { importedMessageText } from '../lib/importedMessageText.js'
 import { useImageZoom } from '../composables/useImageZoom.js'
@@ -189,19 +189,19 @@ onBeforeUnmount(() => {
           @error="markImageError(block.assetId)"
         />
         <span v-if="['loading', 'decoding'].includes(assetStates[block.assetId])" class="message-image-status absolute inset-0 flex items-center justify-center">
-          <LoaderCircle class="h-4 w-4 animate-spin" />
+          <PhCircleNotch class="h-4 w-4 animate-spin" />
           <span class="sr-only">正在加载图片</span>
         </span>
         <span v-else-if="assetStates[block.assetId] === 'error'" class="message-image-status absolute inset-0 flex flex-col items-center justify-center gap-1">
-          <ImageOff class="h-4 w-4" />
-          <span class="flex items-center gap-1 text-[10px]"><RotateCw class="h-3 w-3" />重试</span>
+          <PhImageBroken class="h-4 w-4" />
+          <span class="flex items-center gap-1 text-[10px]"><PhArrowsClockwise class="h-3 w-3" />重试</span>
         </span>
       </PxButton>
     </div>
     <TimelineMarkdown v-if="text" :class="images.length ? 'mt-2' : ''" :text="text" :is-dark="isDark" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
     <div v-if="files.length" class="flex flex-wrap gap-2" :class="images.length || text ? 'mt-2' : ''">
       <a v-for="block in files" :key="block.assetId" class="message-file flex min-w-0 max-w-64 items-center gap-2 rounded-sm px-2 py-1.5" :href="assetUrls[block.assetId] || undefined" :download="block.name">
-        <FileText class="h-4 w-4 shrink-0" />
+        <PhFileText class="h-4 w-4 shrink-0" />
         <span class="min-w-0"><span class="block truncate text-xs font-medium">{{ block.name }}</span><span class="theme-muted-text block text-[10px]">{{ formatBytes(block.size) }}</span></span>
       </a>
     </div>
@@ -209,18 +209,18 @@ onBeforeUnmount(() => {
 
   <Teleport to="body">
   <div v-if="preview" ref="previewElement" role="dialog" aria-modal="true" aria-label="图片预览" tabindex="-1" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-6" @wheel.prevent="handleWheel" @click.self="closePreview">
-    <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 z-10 h-9 w-9" label="关闭预览" @click="closePreview"><X class="h-4 w-4" /></PxIconButton>
+    <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 z-10 h-9 w-9" label="关闭预览" @click="closePreview"><PhX class="h-4 w-4" /></PxIconButton>
     <template v-if="images.length > 1">
-      <PxIconButton variant="secondary" class="image-preview-overlay__button absolute left-3 top-1/2 z-10 h-9 w-9 -translate-y-1/2" label="上一张图片" :disabled="previewIndex <= 0" @click="movePreview(-1)"><ChevronLeft class="h-4 w-4" /></PxIconButton>
-      <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-3 top-1/2 z-10 h-9 w-9 -translate-y-1/2" label="下一张图片" :disabled="previewIndex >= images.length - 1" @click="movePreview(1)"><ChevronRight class="h-4 w-4" /></PxIconButton>
+      <PxIconButton variant="secondary" class="image-preview-overlay__button absolute left-3 top-1/2 z-10 h-9 w-9 -translate-y-1/2" label="上一张图片" :disabled="previewIndex <= 0" @click="movePreview(-1)"><PhCaretLeft class="h-4 w-4" /></PxIconButton>
+      <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-3 top-1/2 z-10 h-9 w-9 -translate-y-1/2" label="下一张图片" :disabled="previewIndex >= images.length - 1" @click="movePreview(1)"><PhCaretRight class="h-4 w-4" /></PxIconButton>
       <span class="image-preview-overlay__button absolute bottom-3 z-10 rounded-sm px-2 py-1 text-xs" aria-live="polite">{{ previewIndex + 1 }} / {{ images.length }}</span>
     </template>
     <div v-if="previewLoading" class="theme-muted-text pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-xs">
-      <LoaderCircle class="h-4 w-4 animate-spin" />
+      <PhCircleNotch class="h-4 w-4 animate-spin" />
       <span>正在加载大图</span>
     </div>
     <div v-if="previewError" class="theme-muted-text flex flex-col items-center gap-2 text-xs">
-      <ImageOff class="h-6 w-6" />
+      <PhImageBroken class="h-6 w-6" />
       <span>图片加载失败</span>
     </div>
     <img

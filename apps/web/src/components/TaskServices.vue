@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, useId, watch } from 'vue'
-import { TerminalSquare, ExternalLink, Server, ChevronDown, ChevronUp, Square, RotateCw } from 'lucide-vue-next'
+import { PhTerminalWindow, PhArrowSquareOut, PhHardDrives, PhCaretDown, PhCaretUp, PhSquare, PhArrowsClockwise } from '@phosphor-icons/vue'
 import { request } from '../lib/request.js'
 import { isRemoteTransport } from '../lib/transport.js'
 import PxButton from './PxButton.vue'
@@ -42,9 +42,9 @@ async function action(item, type) {
 <template>
   <section v-if="services.length" class="task-services flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border" aria-label="会话服务" @keydown.esc.stop.prevent="collapse">
     <button ref="trigger" type="button" class="service-heading flex w-full shrink-0 items-center gap-2 px-3 py-2.5 text-left text-xs" aria-label="会话服务" :aria-expanded="open" :aria-controls="contentId" @click="open = !open" @keydown.down.prevent="open = true">
-      <Server class="theme-muted-text h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span class="flex-1 font-medium">会话服务</span>
+      <PhHardDrives class="theme-muted-text h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span class="flex-1 font-medium">会话服务</span>
       <span class="service-count rounded px-1.5 py-0.5 text-[10px]" :class="{ 'has-running': runningCount }">{{ runningCount ? `${runningCount} 运行中` : `${services.length} 个服务` }}</span>
-      <ChevronUp v-if="open" class="theme-muted-text h-3.5 w-3.5" /><ChevronDown v-else class="theme-muted-text h-3.5 w-3.5" />
+      <PhCaretUp v-if="open" class="theme-muted-text h-3.5 w-3.5" /><PhCaretDown v-else class="theme-muted-text h-3.5 w-3.5" />
     </button>
     <div v-show="open" :id="contentId" class="service-content min-h-0 overflow-y-auto border-t px-3">
       <article v-for="item in services" :key="item.id" class="service-item py-3">
@@ -53,10 +53,10 @@ async function action(item, type) {
         <div v-if="item.service.url" class="service-address mt-2 rounded px-2 py-1.5 font-mono text-[11px] leading-relaxed">{{ item.service.url }}</div>
         <p v-if="isRemoteTransport() && item.service.url" class="theme-muted-text mt-1.5 text-[10px] leading-relaxed">这是电脑上的本地地址，手机需使用可访问的局域网地址或部署地址。</p>
         <div class="mt-2.5 flex flex-wrap gap-1">
-          <PxButton class="service-action" variant="ghost" size="sm" @click="showTerminal(item.id)"><TerminalSquare class="h-3 w-3 shrink-0" aria-hidden="true" />查看终端</PxButton>
-          <a v-if="item.running && item.service.readiness === 'ready' && !isRemoteTransport()" :href="item.service.url" target="_blank" rel="noopener noreferrer" class="service-action inline-flex items-center justify-center"><ExternalLink class="h-3 w-3 shrink-0" aria-hidden="true" />打开页面</a>
-          <PxButton v-if="item.running" class="service-action service-stop" variant="ghost" size="sm" :disabled="Boolean(busy) || item.stopping" @click="action(item, 'stop')"><Square class="h-2.5 w-2.5 shrink-0" aria-hidden="true" />停止服务</PxButton>
-          <PxButton v-else class="service-action" variant="ghost" size="sm" :disabled="Boolean(busy)" :loading="busy === item.id" @click="action(item, 'restart')"><RotateCw v-if="busy !== item.id" class="h-3 w-3 shrink-0" aria-hidden="true" />重新启动服务</PxButton>
+          <PxButton class="service-action" variant="ghost" size="sm" @click="showTerminal(item.id)"><PhTerminalWindow class="h-3 w-3 shrink-0" aria-hidden="true" />查看终端</PxButton>
+          <a v-if="item.running && item.service.readiness === 'ready' && !isRemoteTransport()" :href="item.service.url" target="_blank" rel="noopener noreferrer" class="service-action inline-flex items-center justify-center"><PhArrowSquareOut class="h-3 w-3 shrink-0" aria-hidden="true" />打开页面</a>
+          <PxButton v-if="item.running" class="service-action service-stop" variant="ghost" size="sm" :disabled="Boolean(busy) || item.stopping" @click="action(item, 'stop')"><PhSquare class="h-2.5 w-2.5 shrink-0" aria-hidden="true" />停止服务</PxButton>
+          <PxButton v-else class="service-action" variant="ghost" size="sm" :disabled="Boolean(busy)" :loading="busy === item.id" @click="action(item, 'restart')"><PhArrowsClockwise v-if="busy !== item.id" class="h-3 w-3 shrink-0" aria-hidden="true" />重新启动服务</PxButton>
         </div>
       </article>
       <p v-if="error" class="theme-status-danger mb-3 rounded p-2 text-xs" role="alert">{{ error }}</p>

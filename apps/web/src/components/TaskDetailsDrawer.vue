@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Copy, FolderOpen, Info, RefreshCw, X } from 'lucide-vue-next'
+import { PhCopy, PhFolderOpen, PhInfo, PhArrowsClockwise, PhX } from '@phosphor-icons/vue'
 import { v2Api } from '../lib/v2Api.js'
 import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
@@ -86,12 +86,12 @@ watch(() => props.taskId, load, { immediate: true })
   <aside class="task-details-drawer relative flex min-h-0 min-w-0 flex-col">
     <header class="flex h-12 shrink-0 items-center border-b px-3">
       <div class="flex min-w-0 flex-1 items-center gap-2">
-        <Info class="h-4 w-4 shrink-0" />
+        <PhInfo class="h-4 w-4 shrink-0" />
         <h2 class="truncate text-xs font-medium" :title="task?.title || '任务详情'">{{ task?.title || '任务详情' }}</h2>
         <span v-if="task" class="details-status shrink-0 px-1.5 py-0.5 text-[9px]">{{ task.lifecycle === 'archived' ? '已归档' : '未归档' }}</span>
       </div>
-      <PxIconButton class="h-8 w-8" label="刷新详情" :disabled="loading" @click="load"><RefreshCw class="h-4 w-4" /></PxIconButton>
-      <PxIconButton v-if="!tabbed" class="h-8 w-8" label="关闭抽屉" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
+      <PxIconButton class="h-8 w-8" label="刷新详情" :disabled="loading" @click="load"><PhArrowsClockwise class="h-4 w-4" /></PxIconButton>
+      <PxIconButton v-if="!tabbed" class="h-8 w-8" label="关闭抽屉" @click="emit('close')"><PhX class="h-4 w-4" /></PxIconButton>
     </header>
     <div v-if="error" class="details-error shrink-0 border-b px-3 py-2 text-xs">{{ error }}</div>
     <div v-if="loading" class="details-loading min-h-0 flex-1 p-3" role="status" aria-label="正在加载任务详情">
@@ -112,9 +112,9 @@ watch(() => props.taskId, load, { immediate: true })
         <dl class="details-grid">
           <dt>执行方式</dt><dd>{{ environment.kind === 'worktree' ? '独立工作树（Worktree）' : '本地目录' }}</dd>
           <dt>目录状态</dt><dd>{{ ({ ready: '可用', clean: '可用', dirty: '有未提交改动', missing: '目录不存在', removed: '已移除', unavailable: '不可用' })[environment.status] || '未知' }}</dd>
-          <dt>目录</dt><dd class="flex items-start gap-1"><span class="min-w-0 flex-1 break-all font-mono">{{ environment.cwd }}</span><PxIconButton class="h-6 w-6 shrink-0" :label="copied === environment.cwd ? '已复制目录' : '复制目录'" @click="copyValue(environment.cwd)"><Copy class="h-3 w-3" /></PxIconButton></dd>
+          <dt>目录</dt><dd class="flex items-start gap-1"><span class="min-w-0 flex-1 break-all font-mono">{{ environment.cwd }}</span><PxIconButton class="h-6 w-6 shrink-0" :label="copied === environment.cwd ? '已复制目录' : '复制目录'" @click="copyValue(environment.cwd)"><PhCopy class="h-3 w-3" /></PxIconButton></dd>
           <template v-if="git?.available">
-            <dt>当前分支</dt><dd class="flex items-start gap-1"><span class="min-w-0 flex-1 break-all font-mono">{{ git.branch === 'HEAD' ? '游离 HEAD' : git.branch }}</span><PxIconButton class="h-6 w-6 shrink-0" :label="copied === git.branch ? '已复制分支名' : '复制分支名'" @click="copyValue(git.branch)"><Copy class="h-3 w-3" /></PxIconButton></dd>
+            <dt>当前分支</dt><dd class="flex items-start gap-1"><span class="min-w-0 flex-1 break-all font-mono">{{ git.branch === 'HEAD' ? '游离 HEAD' : git.branch }}</span><PxIconButton class="h-6 w-6 shrink-0" :label="copied === git.branch ? '已复制分支名' : '复制分支名'" @click="copyValue(git.branch)"><PhCopy class="h-3 w-3" /></PxIconButton></dd>
             <dt>工作区改动</dt><dd>{{ git.files.length ? `${git.files.length} 个未提交文件` : '无未提交改动' }}</dd>
             <dt>跟踪的远端分支</dt><dd class="break-all font-mono">{{ git.upstream || (git.upstream === undefined ? '暂无法获取，请更新本地服务' : '未关联远端分支') }}{{ git.upstreamGone ? '（已删除）' : '' }}</dd>
             <template v-if="git.upstream && !git.upstreamGone"><dt>同步状态</dt><dd>领先 {{ git.ahead }} · 落后 {{ git.behind }}<span class="theme-muted-text block text-[10px]">基于本地远端跟踪记录</span></dd></template>
@@ -127,8 +127,8 @@ watch(() => props.taskId, load, { immediate: true })
           </template>
         </dl>
         <div v-if="['missing', 'unavailable'].includes(environment.status)" class="mt-3 flex flex-wrap gap-2">
-          <PxButton variant="secondary" size="sm" @click="reconcile"><RefreshCw class="h-3.5 w-3.5" />重新检查</PxButton>
-          <PxButton variant="secondary" size="sm" :loading="rebinding" @click="rebind"><FolderOpen class="h-3.5 w-3.5" />重新绑定目录</PxButton>
+          <PxButton variant="secondary" size="sm" @click="reconcile"><PhArrowsClockwise class="h-3.5 w-3.5" />重新检查</PxButton>
+          <PxButton variant="secondary" size="sm" :loading="rebinding" @click="rebind"><PhFolderOpen class="h-3.5 w-3.5" />重新绑定目录</PxButton>
         </div>
       </section>
       <details class="p-3">

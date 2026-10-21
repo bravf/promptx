@@ -11,7 +11,7 @@ function getClient(remote) {
 
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Check, ChevronRight, Circle, CircleAlert, FileDiff, FileText, Globe, LoaderCircle, Search, Terminal, Users, Wrench } from 'lucide-vue-next'
+import { PhCheck, PhCaretRight, PhCircle, PhWarningCircle, PhGitDiff, PhFileText, PhGlobe, PhCircleNotch, PhMagnifyingGlass, PhTerminal, PhUsers, PhWrench } from '@phosphor-icons/vue'
 import { isToolExpanded, toolExpansionKey } from '../lib/toolExpansion.js'
 import { useToolPreferences } from '../composables/useToolPreferences.js'
 import ToolDetailContent from './ToolDetailContent.vue'
@@ -34,7 +34,7 @@ const copied = ref('')
 const item = computed(() => props.entry.item)
 const summary = computed(() => item.value.detail || {})
 const links = computed(() => workspaceLinksForTool(item.value, props.workspaceCwd))
-const icon = computed(() => ({ shell: Terminal, read: FileText, write: FileText, edit: FileDiff, search: Search, fetch: Globe, sub_agent: Users }[summary.value.kind] || Wrench))
+const icon = computed(() => ({ shell: PhTerminal, read: PhFileText, write: PhFileText, edit: PhGitDiff, search: PhMagnifyingGlass, fetch: PhGlobe, sub_agent: PhUsers }[summary.value.kind] || PhWrench))
 const active = computed(() => item.value.status === 'running' && props.running && props.entry.turnId === props.activeTurnId)
 const identity = computed(() => JSON.stringify([props.taskId, props.entry.turnId || '', item.value.callId, epoch.value]))
 const cacheKey = computed(() => `${identity.value}:${props.entry.seqEnd}`)
@@ -130,11 +130,11 @@ onBeforeUnmount(() => { stop(); document.removeEventListener('visibilitychange',
         <span class="flex min-w-0 items-center gap-2">
           <span class="shrink-0 font-medium">{{ summary.displayName || item.name }}</span>
           <span v-if="remote" class="theme-muted-text truncate">{{ summary.summary }}</span>
-          <Check v-if="item.status === 'completed'" class="h-3.5 w-3.5 shrink-0" aria-label="执行完成" />
-          <LoaderCircle v-else-if="active" class="h-3.5 w-3.5 shrink-0 animate-spin" aria-label="执行中" />
-          <CircleAlert v-else-if="item.status === 'failed'" class="theme-danger-text h-3.5 w-3.5 shrink-0" aria-label="工具执行失败" />
-          <Circle v-else class="theme-muted-text h-3.5 w-3.5 shrink-0" :aria-label="item.status === 'canceled' ? '已取消' : '本轮已结束，未收到工具完成状态'" />
-          <ChevronRight class="theme-muted-text ml-auto h-3.5 w-3.5 shrink-0" :class="{ 'rotate-90': expanded }" />
+          <PhCheck v-if="item.status === 'completed'" class="h-3.5 w-3.5 shrink-0" aria-label="执行完成" />
+          <PhCircleNotch v-else-if="active" class="h-3.5 w-3.5 shrink-0 animate-spin" aria-label="执行中" />
+          <PhWarningCircle v-else-if="item.status === 'failed'" class="theme-danger-text h-3.5 w-3.5 shrink-0" aria-label="工具执行失败" />
+          <PhCircle v-else class="theme-muted-text h-3.5 w-3.5 shrink-0" :aria-label="item.status === 'canceled' ? '已取消' : '本轮已结束，未收到工具完成状态'" />
+          <PhCaretRight class="theme-muted-text ml-auto h-3.5 w-3.5 shrink-0" :class="{ 'rotate-90': expanded }" />
         </span>
         <span v-if="!remote && summary.summary" class="theme-muted-text tool-summary mt-1 block font-mono text-[11px]">{{ summary.summary }}</span>
       </span>
@@ -164,7 +164,7 @@ onBeforeUnmount(() => { stop(); document.removeEventListener('visibilitychange',
         <span v-if="exitCode" :class="Number(exitCode.text) === 0 ? 'theme-success-text' : 'theme-danger-text'">{{ Number(exitCode.text) === 0 ? '✓' : '!' }} 退出码 {{ exitCode.text }}</span>
         <span v-if="elapsed">耗时 {{ elapsed }}</span>
       </div>
-      <div v-if="loading" class="theme-muted-text flex items-center gap-1"><LoaderCircle class="h-3 w-3 animate-spin" />加载中</div>
+      <div v-if="loading" class="theme-muted-text flex items-center gap-1"><PhCircleNotch class="h-3 w-3 animate-spin" />加载中</div>
       <div v-if="error" class="theme-danger-text">{{ error }} <button type="button" class="underline" @click="load()">重新加载</button></div>
     </div>
   </div>

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { Check, Copy } from 'lucide-vue-next'
+import { PhCheck, PhCopy } from '@phosphor-icons/vue'
 import { formatMessageDateTime, formatMessageTime } from '../lib/timelinePresentation.js'
 import { writeClipboardText } from '../lib/clipboard.js'
 import PxIconButton from './PxIconButton.vue'
@@ -34,8 +34,8 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 <template>
   <div class="message-meta theme-muted-text mt-1 flex h-6 items-center gap-1 text-[10px]" :class="align === 'right' ? 'justify-end' : 'justify-start'">
     <PxIconButton class="theme-icon-button h-6 w-6" :label="copied ? '已复制' : '复制消息'" @click="copyMessage">
-      <Check v-if="copied" class="h-3 w-3" />
-      <Copy v-else class="h-3 w-3" />
+      <PhCheck v-if="copied" class="h-3 w-3" />
+      <PhCopy v-else class="h-3 w-3" />
     </PxIconButton>
     <time v-if="shortTime" :datetime="timestamp" :title="fullTime">{{ shortTime }}</time>
   </div>

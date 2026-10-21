@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Brain, CircleStop, FileText, LoaderCircle, Paperclip, RotateCcw, Send, X } from 'lucide-vue-next'
+import { PhBrain, PhStopCircle, PhFileText, PhCircleNotch, PhPaperclip, PhArrowCounterClockwise, PhPaperPlaneTilt, PhX } from '@phosphor-icons/vue'
 import { v2Api } from '../lib/v2Api.js'
 import PxSelect from './PxSelect.vue'
 import PxButton from './PxButton.vue'
@@ -272,17 +272,17 @@ onBeforeUnmount(() => {
         <PxButton v-if="item.objectUrl" variant="ghost" size="sm" class="attachment-preview h-10 w-10 min-h-0 shrink-0 overflow-hidden rounded-sm border-0 p-0" title="预览图片" @click="preview = item">
           <img :src="item.objectUrl" :alt="item.file.name" class="h-full w-full object-cover" />
         </PxButton>
-        <div v-else class="attachment-file flex h-10 w-10 shrink-0 items-center justify-center rounded-sm"><FileText class="h-4 w-4" /></div>
+        <div v-else class="attachment-file flex h-10 w-10 shrink-0 items-center justify-center rounded-sm"><PhFileText class="h-4 w-4" /></div>
         <div class="min-w-0">
           <div class="truncate text-xs font-medium">{{ item.file.name }}</div>
           <div v-if="item.status === 'error'" class="attachment-error truncate text-[10px]" :title="item.error">{{ item.error }}</div>
           <div v-else class="theme-muted-text flex items-center gap-1 text-[10px]">
-            <LoaderCircle v-if="item.status === 'uploading'" class="h-3 w-3 animate-spin" />
+            <PhCircleNotch v-if="item.status === 'uploading'" class="h-3 w-3 animate-spin" />
             <span>{{ item.status === 'uploading' ? '上传中' : formatBytes(item.asset?.size || item.file.size) }}</span>
           </div>
         </div>
-        <PxIconButton v-if="item.status === 'error' && item.file.size <= MAX_FILE_SIZE" class="attachment-action absolute right-1 top-1 h-6 w-6" label="重试" @click="uploadAttachment(item)"><RotateCcw class="h-3 w-3" /></PxIconButton>
-        <PxIconButton variant="danger" class="attachment-action absolute bottom-1 right-1 h-6 w-6" label="移除附件" @click="removeAttachment(item)"><X class="h-3 w-3" /></PxIconButton>
+        <PxIconButton v-if="item.status === 'error' && item.file.size <= MAX_FILE_SIZE" class="attachment-action absolute right-1 top-1 h-6 w-6" label="重试" @click="uploadAttachment(item)"><PhArrowCounterClockwise class="h-3 w-3" /></PxIconButton>
+        <PxIconButton variant="danger" class="attachment-action absolute bottom-1 right-1 h-6 w-6" label="移除附件" @click="removeAttachment(item)"><PhX class="h-3 w-3" /></PxIconButton>
       </div>
     </div>
 
@@ -300,10 +300,10 @@ onBeforeUnmount(() => {
     <div class="composer-toolbar flex min-h-11 flex-wrap items-center justify-between gap-2 px-2 pb-2 pt-1">
       <div class="composer-controls flex min-w-0 flex-1 items-center gap-1">
         <input ref="fileInput" class="hidden" type="file" multiple @change="handleFileInput" />
-        <PxIconButton class="composer-control-button h-7 w-7" label="添加图片或文件" :disabled="running || attachments.length >= MAX_ATTACHMENTS" @click="chooseFiles"><Paperclip class="h-4 w-4" /></PxIconButton>
+        <PxIconButton class="composer-control-button h-7 w-7" label="添加图片或文件" :disabled="running || attachments.length >= MAX_ATTACHMENTS" @click="chooseFiles"><PhPaperclip class="h-4 w-4" /></PxIconButton>
         <span v-if="dragging" class="theme-muted-text text-[10px]">松开以添加附件</span>
         <span v-if="controlLoading && !control" role="status" class="theme-muted-text flex items-center gap-1 text-xs">
-          <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin" />正在加载模型与强度
+          <PhCircleNotch class="h-3.5 w-3.5 shrink-0 animate-spin" />正在加载模型与强度
         </span>
         <div v-if="control?.models?.length" class="composer-select-wrap model-select min-w-0 rounded-full">
           <PxSelect
@@ -317,7 +317,7 @@ onBeforeUnmount(() => {
           />
         </div>
         <div v-if="control?.reasoningEfforts?.length" class="composer-select-wrap effort-control relative min-w-0 rounded-full">
-          <Brain class="theme-muted-text pointer-events-none absolute left-1.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2" />
+          <PhBrain class="theme-muted-text pointer-events-none absolute left-1.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2" />
           <PxSelect
             class="effort-select"
             :model-value="control.currentReasoningEffort"
@@ -329,7 +329,7 @@ onBeforeUnmount(() => {
             @update:model-value="changeSetting($event, 'reasoningEffort')"
           />
         </div>
-        <LoaderCircle v-if="settingsLoading" class="theme-muted-text h-3.5 w-3.5 shrink-0 animate-spin" />
+        <PhCircleNotch v-if="settingsLoading" class="theme-muted-text h-3.5 w-3.5 shrink-0 animate-spin" />
       </div>
       <div class="composer-actions flex shrink-0 items-center gap-2">
         <div
@@ -344,17 +344,17 @@ onBeforeUnmount(() => {
             <circle v-if="contextUsage" class="context-ring-progress" :class="contextUsageTone" cx="8" cy="8" r="6" fill="none" stroke-width="2" stroke-linecap="round" :style="contextProgressStyle" />
           </svg>
         </div>
-        <PxIconButton v-if="running" class="h-8 w-8" label="停止" @click="emit('cancel')"><CircleStop class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="running" class="h-8 w-8" label="停止" @click="emit('cancel')"><PhStopCircle class="h-4 w-4" /></PxIconButton>
         <PxIconButton v-else class="composer-send-button h-8 w-8" :label="blockedReason || '发送'" :disabled="sendDisabled" @click="submit">
-          <LoaderCircle v-if="submitting || sending" class="h-4 w-4 animate-spin" />
-          <Send v-else class="h-4 w-4" />
+          <PhCircleNotch v-if="submitting || sending" class="h-4 w-4 animate-spin" />
+          <PhPaperPlaneTilt v-else class="h-4 w-4" />
         </PxIconButton>
       </div>
     </div>
   </div>
 
   <div v-if="preview" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-6" @click.self="preview = null">
-    <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 h-9 w-9" label="关闭预览" @click="preview = null"><X class="h-4 w-4" /></PxIconButton>
+    <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 h-9 w-9" label="关闭预览" @click="preview = null"><PhX class="h-4 w-4" /></PxIconButton>
     <img :src="preview.objectUrl" :alt="preview.file.name" class="max-h-full max-w-full object-contain" />
   </div>
 </template>

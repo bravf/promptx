@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import { MessageCircleQuestion } from 'lucide-vue-next'
+import { PhSealQuestion } from '@phosphor-icons/vue'
 import { validateInteractionResponse } from '../../../../packages/protocol/src/interactionAnswers.js'
 import { v2Api } from '../lib/v2Api.js'
 import PxButton from './PxButton.vue'
@@ -46,7 +46,7 @@ async function submit(input) {
 
 <template>
   <section v-if="pending" class="interaction-card panel mb-5 min-w-0 rounded-lg border p-4" :data-request-id="request.id" aria-label="等待你回答">
-    <header class="mb-3 flex items-center gap-2 text-sm font-bold"><MessageCircleQuestion class="h-4 w-4 shrink-0" /><span>{{ request.title }}</span><span class="theme-muted-text ml-auto text-xs font-normal">等待你回答</span></header>
+    <header class="mb-3 flex items-center gap-2 text-sm font-bold"><PhSealQuestion class="h-4 w-4 shrink-0" /><span>{{ request.title }}</span><span class="theme-muted-text ml-auto text-xs font-normal">等待你回答</span></header>
     <TimelineMarkdown v-if="request.description" :text="request.description" :is-dark="isDark" :task-id="taskId" />
     <p v-if="request.delivery === 'async'" class="theme-muted-text mb-3 text-xs">Agent 发出了异步问题，提交回答后会继续会话。</p>
     <fieldset v-for="question in request.questions" :key="question.id" :disabled="busy || !ready" class="mb-4 min-w-0">

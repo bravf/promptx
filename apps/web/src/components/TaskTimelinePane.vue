@@ -1,7 +1,7 @@
 <script setup>
 import { reactive, computed, defineAsyncComponent, inject, nextTick, onActivated, onDeactivated, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, ArrowLeft, Bot, CircleAlert, Columns2, FileDiff, Files, GitBranch, Info, LoaderCircle, TerminalSquare, X } from 'lucide-vue-next'
+import { PhArrowDown, PhArrowLeft, PhRobot, PhWarningCircle, PhColumns, PhGitDiff, PhFiles, PhGitBranch, PhInfo, PhCircleNotch, PhTerminalWindow, PhX } from '@phosphor-icons/vue'
 import { v2Api } from '../lib/v2Api.js'
 import { createTaskEventSource } from '../lib/taskEventSource.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
@@ -797,26 +797,26 @@ onBeforeUnmount(() => {
     @pointerdown.capture="emit('focus')"
   >
     <header class="timeline-header flex h-14 shrink-0 items-center gap-2 border-b px-3">
-      <PxIconButton v-if="mobile" class="h-8 w-8" label="返回项目列表" @click="emit('back')"><ArrowLeft class="h-4 w-4" /></PxIconButton>
+      <PxIconButton v-if="mobile" class="h-8 w-8" label="返回项目列表" @click="emit('back')"><PhArrowLeft class="h-4 w-4" /></PxIconButton>
       <div v-if="task" class="pane-heading min-w-0 flex-1" :title="currentBranch ? `${task.title} · ${projectDirectoryName} · ${currentBranch}` : task.title">
         <span class="pane-title block truncate text-xs font-semibold">{{ task.title }}</span>
         <span class="theme-muted-text flex min-w-0 items-center gap-1 text-[9px]">
           <span class="min-w-0 truncate">{{ projectDirectoryName }}</span>
           <template v-if="currentBranch">
-            <GitBranch class="h-2.5 w-2.5 shrink-0 opacity-70" aria-hidden="true" />
+            <PhGitBranch class="h-2.5 w-2.5 shrink-0 opacity-70" aria-hidden="true" />
             <span class="min-w-0 truncate font-mono" :title="currentBranch">{{ currentBranch }}</span>
           </template>
         </span>
       </div>
       <div v-else class="theme-muted-text min-w-0 flex-1 truncate text-xs">选择会话</div>
       <div class="ml-auto flex shrink-0 items-center gap-1">
-        <div v-if="timelineSyncing" class="timeline-sync-status theme-muted-text flex h-8 w-8 items-center justify-center" title="正在同步 Timeline" aria-label="正在同步 Timeline"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
+        <div v-if="timelineSyncing" class="timeline-sync-status theme-muted-text flex h-8 w-8 items-center justify-center" title="正在同步 Timeline" aria-label="正在同步 Timeline"><PhCircleNotch class="h-3.5 w-3.5 animate-spin" /></div>
         <div v-if="task" :title="activity.label" :aria-label="activity.label" class="status-chip flex items-center gap-1.5 px-1 py-1 text-[10px]"><span class="status-dot h-1.5 w-1.5 rounded-full" :class="activity.running ? 'status-dot-running' : ''" /><span class="status-text">{{ activity.label }}</span></div>
-        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="terminalOpen ? 'is-active' : ''" label="终端" :aria-pressed="terminalOpen" @click="tabbed ? emit('open-tab', { type: 'terminal' }) : (terminalOpen = !terminalOpen)"><TerminalSquare class="h-4 w-4" /></PxIconButton>
-        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :label="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><Files class="h-4 w-4" /></PxIconButton>
-        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :label="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><FileDiff class="h-4 w-4" /></PxIconButton>
-        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'task-details' ? 'is-active' : ''" label="任务详情" :aria-pressed="drawerMode === 'task-details'" @click="toggleDrawer('task-details')"><Info class="h-4 w-4" /></PxIconButton>
-        <PxIconButton v-if="!mobile && !tabbed" class="split-trigger h-8 w-8" :label="splitEnabled ? '关闭此窗格' : '拆分 Timeline'" @click="splitEnabled ? emit('close') : emit('split')"><X v-if="splitEnabled" class="h-4 w-4" /><Columns2 v-else class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="terminalOpen ? 'is-active' : ''" label="终端" :aria-pressed="terminalOpen" @click="tabbed ? emit('open-tab', { type: 'terminal' }) : (terminalOpen = !terminalOpen)"><PhTerminalWindow class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'files' ? 'is-active' : ''" :label="drawerMode === 'files' ? '关闭文件抽屉' : '浏览文件'" :aria-pressed="drawerMode === 'files'" @click="toggleDrawer('files')"><PhFiles class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'diff' ? 'is-active' : ''" :label="drawerMode === 'diff' ? '关闭 Diff 抽屉' : '查看 Diff'" :aria-pressed="drawerMode === 'diff'" @click="toggleDrawer('diff')"><PhGitDiff class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="task" class="drawer-trigger h-8 w-8" :class="drawerMode === 'task-details' ? 'is-active' : ''" label="任务详情" :aria-pressed="drawerMode === 'task-details'" @click="toggleDrawer('task-details')"><PhInfo class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="!mobile && !tabbed" class="split-trigger h-8 w-8" :label="splitEnabled ? '关闭此窗格' : '拆分 Timeline'" @click="splitEnabled ? emit('close') : emit('split')"><PhX v-if="splitEnabled" class="h-4 w-4" /><PhColumns v-else class="h-4 w-4" /></PxIconButton>
       </div>
     </header>
 
@@ -825,7 +825,7 @@ onBeforeUnmount(() => {
         <TaskServices :key="activeTaskId" :task-id="activeTaskId" :services="serviceTerminals" :compact="!serviceCardWide" :visible="paneVisible" @open-terminal="openServiceTerminal" @changed="refreshServices" />
         <div ref="timelineElement" class="timeline min-h-0 flex-1 overflow-y-auto" tabindex="0" @pointerdown.passive="handleTimelinePointerDown" @scroll.passive="handleTimelineScroll" @wheel.passive="handleTimelineWheel" @touchstart.passive="handleTimelineTouchStart" @touchmove.passive="handleTimelineTouchMove" @keydown="handleTimelineKeydown">
           <div v-if="timelineSyncError && !timelineHasContent" class="flex h-full items-center justify-center p-8 text-center"><div class="max-w-sm"><p class="error-row rounded-sm border px-3 py-2 text-left text-xs">Timeline 同步失败：{{ timelineSyncError }}</p><PxButton variant="secondary" size="sm" class="mt-3" @click="selectTask(activeTaskId)">重试</PxButton></div></div>
-          <div v-else-if="!entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><Bot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">开始一段新的协作</p><p class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
+          <div v-else-if="!entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><PhRobot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">开始一段新的协作</p><p class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
           <div v-else ref="timelineContent" class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
               <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="groupedTurnTiming(entry, turnTimings)" :running="processIsRunning(entry)" :waiting="pendingInteractions.length > 0 && entry.turnIds.includes(latestTurnId)" :active-turn-id="latestTurnId" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" @rendered="scheduleTimelineFollow" @open-workspace-path="openProjectPath">
@@ -837,19 +837,19 @@ onBeforeUnmount(() => {
             </template>
             <TimelineSubagents :tasks="backgroundGroups.get('') || []" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" :stopping="stoppingTasks" @stop-all="stopAllTasks" @rendered="scheduleTimelineFollow" @open-workspace-path="openProjectPath" />
             <TimelineInteraction v-for="request in pendingInteractions" :key="request.id" :request="request" :task-id="activeTaskId" :is-dark="isDark" pending :ready="interactionsReady" @refresh="refreshInteractions" />
-            <div v-if="!isRunning && activity.count" class="theme-muted-text mb-3 ml-7 flex items-center gap-2 text-xs" role="status"><LoaderCircle class="h-3.5 w-3.5 animate-spin" />等待 {{ activity.count }} 个子任务结束</div>
+            <div v-if="!isRunning && activity.count" class="theme-muted-text mb-3 ml-7 flex items-center gap-2 text-xs" role="status"><PhCircleNotch class="h-3.5 w-3.5 animate-spin" />等待 {{ activity.count }} 个子任务结束</div>
             <div v-if="!pendingInteractions.length" class="timeline-generating-slot ml-7 flex h-8 items-start">
               <div class="timeline-generating-indicator flex items-center gap-1" :class="isRunning || sending ? 'is-visible' : ''" role="status" :aria-hidden="!(isRunning || sending)" :aria-label="isRunning || sending ? '正在生成' : undefined">
                 <span class="timeline-generating-dot" aria-hidden="true">.</span><span class="timeline-generating-dot" aria-hidden="true">.</span><span class="timeline-generating-dot" aria-hidden="true">.</span>
               </div>
             </div>
           </div>
-          <div v-if="timelineSyncError && timelineHasContent" class="status-float status-float-pill status-float-error timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 gap-2" role="alert"><CircleAlert class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>同步失败</span><PxButton variant="ghost" size="sm" class="font-medium" @click="selectTask(activeTaskId)">重试</PxButton></div>
+          <div v-if="timelineSyncError && timelineHasContent" class="status-float status-float-pill status-float-error timeline-sync-error absolute left-1/2 top-3 z-10 flex -translate-x-1/2 gap-2" role="alert"><PhWarningCircle class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>同步失败</span><PxButton variant="ghost" size="sm" class="font-medium" @click="selectTask(activeTaskId)">重试</PxButton></div>
         </div>
-        <div v-if="timelineLoading" class="timeline-loading-overlay absolute inset-0 z-10 flex items-start justify-center pt-16" role="status" aria-label="加载中"><div class="status-float status-float-pill timeline-loading-indicator gap-2"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /><span>加载中</span></div></div>
-        <div v-if="loadingOlderHistory" class="status-float status-float-icon pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2" role="status" aria-label="正在加载更早记录"><LoaderCircle class="h-3.5 w-3.5 animate-spin" /></div>
+        <div v-if="timelineLoading" class="timeline-loading-overlay absolute inset-0 z-10 flex items-start justify-center pt-16" role="status" aria-label="加载中"><div class="status-float status-float-pill timeline-loading-indicator gap-2"><PhCircleNotch class="h-3.5 w-3.5 animate-spin" /><span>加载中</span></div></div>
+        <div v-if="loadingOlderHistory" class="status-float status-float-icon pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2" role="status" aria-label="正在加载更早记录"><PhCircleNotch class="h-3.5 w-3.5 animate-spin" /></div>
         <PxIconButton v-if="!followingTimeline && timelineScrollable && timelineHasContent && timelineDistanceFromBottom > TIMELINE_JUMP_BUTTON_DISTANCE" class="timeline-jump-button absolute bottom-3 left-1/2 z-10 h-9 w-9 -translate-x-1/2 p-0" :class="{ 'is-running': isRunning || sending }" :label="isRunning || sending ? '正在生成，回到底部' : (hasNewTimelineItems ? '有新消息，回到底部' : '回到底部')" @click="jumpToLatest">
-          <span v-if="isRunning || sending" class="timeline-jump-loading" aria-hidden="true"><span class="timeline-jump-loading-dot" /><span class="timeline-jump-loading-dot" /><span class="timeline-jump-loading-dot" /></span><ArrowDown v-else class="h-4 w-4" />
+          <span v-if="isRunning || sending" class="timeline-jump-loading" aria-hidden="true"><span class="timeline-jump-loading-dot" /><span class="timeline-jump-loading-dot" /><span class="timeline-jump-loading-dot" /></span><PhArrowDown v-else class="h-4 w-4" />
         </PxIconButton>
       </div>
 
@@ -862,8 +862,8 @@ onBeforeUnmount(() => {
     </template>
 
     <div v-else class="theme-empty-state flex min-h-0 flex-1 flex-col items-center justify-center p-8 text-center">
-      <Columns2 v-if="splitEnabled" class="theme-muted-text h-8 w-8" />
-      <Bot v-else class="theme-muted-text h-8 w-8" />
+      <PhColumns v-if="splitEnabled" class="theme-muted-text h-8 w-8" />
+      <PhRobot v-else class="theme-muted-text h-8 w-8" />
       <p class="mt-3 text-sm font-medium">{{ splitEnabled ? '从左栏选择一个会话' : '新建一条会话' }}</p>
       <p v-if="splitEnabled" class="theme-muted-text mt-1 text-xs">所选会话会在此窗格打开</p>
     </div>

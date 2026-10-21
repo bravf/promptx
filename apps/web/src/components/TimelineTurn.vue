@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
-import { Bot, Check, ChevronRight, Circle, CircleDot, LoaderCircle } from 'lucide-vue-next'
+import { PhRobot, PhCheck, PhCaretRight, PhCircle, PhRecord, PhCircleNotch } from '@phosphor-icons/vue'
 import { formatElapsedTime, getTurnActivityState, userMessageCopyText } from '../lib/timelinePresentation.js'
 import { isToolExpanded, toolExpansionKey } from '../lib/toolExpansion.js'
 import { useToolPreferences } from '../composables/useToolPreferences.js'
@@ -93,7 +93,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
     <section v-if="showProcess" class="process-group mb-5 ml-7">
       <button v-if="hasProcessEntries" type="button" class="process-toggle theme-muted-text inline-flex items-center gap-1.5 py-1 text-left text-xs" :aria-expanded="expanded" @click="toggleProcess">
         <span>{{ heading }}</span>
-        <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform" :class="expanded ? 'rotate-90' : ''" />
+        <PhCaretRight class="h-3.5 w-3.5 shrink-0 transition-transform" :class="expanded ? 'rotate-90' : ''" />
       </button>
       <div v-else class="theme-muted-text py-1 text-xs">{{ heading }}</div>
       <div v-if="expanded && hasProcessEntries" class="process-content pb-1 pl-5 pt-1">
@@ -103,14 +103,14 @@ onBeforeUnmount(() => clearInterval(clockTimer))
           <TimelineToolCall v-else-if="entry.item.type === 'tool_call'" :entry="entry" :task-id="taskId" :workspace-cwd="workspaceCwd" :running="running" :active-turn-id="activeTurnId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
           <div v-else-if="entry.item.type === 'todo'" class="space-y-1">
             <div v-for="(item, index) in entry.item.items" :key="`${index}-${item.text}`" class="theme-secondary-text flex items-start gap-2">
-              <Check v-if="item.status === 'completed'" class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <CircleDot v-else-if="item.status === 'in_progress'" class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <Circle v-else class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <PhCheck v-if="item.status === 'completed'" class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <PhRecord v-else-if="item.status === 'in_progress'" class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <PhCircle v-else class="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>{{ item.text }}</span>
             </div>
           </div>
           <div v-else-if="entry.item.type === 'system_notice'" class="flex items-center gap-2 text-[var(--theme-warningText)]">
-            <LoaderCircle v-if="entry.item.code === 'provider_retrying' && running && entry.turnId === activeTurnId" class="h-3.5 w-3.5 shrink-0 animate-spin" />
+            <PhCircleNotch v-if="entry.item.code === 'provider_retrying' && running && entry.turnId === activeTurnId" class="h-3.5 w-3.5 shrink-0 animate-spin" />
             <span>{{ entry.item.text }}</span>
           </div>
         </div>
@@ -121,7 +121,7 @@ onBeforeUnmount(() => clearInterval(clockTimer))
 
     <article v-for="entry in turn.outputEntries" :key="entry.seqStart" class="mb-5" :class="entry.item.type === 'assistant_message' ? 'timeline-message' : ''" :data-timeline-seq="entry.seqEnd">
       <div v-if="entry.item.type === 'assistant_message'" class="flex gap-3">
-        <Bot class="mt-1 h-4 w-4 shrink-0" />
+        <PhRobot class="mt-1 h-4 w-4 shrink-0" />
         <div class="min-w-0 flex-1">
           <TimelineMarkdown :text="entry.item.text" :is-dark="isDark" :streaming="running" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
           <TimelineMessageMeta :text="entry.item.text" :timestamp="entry.timestamp" />

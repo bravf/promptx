@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Archive, Check, Copy, Info, LoaderCircle, Palette, RadioTower, RefreshCw, RotateCcw, Settings2, X } from 'lucide-vue-next'
+import { PhArchive, PhCheck, PhCopy, PhInfo, PhCircleNotch, PhPalette, PhBroadcast, PhArrowsClockwise, PhArrowCounterClockwise, PhSlidersHorizontal, PhX } from '@phosphor-icons/vue'
 import QRCode from 'qrcode'
 import DialogShell from './DialogShell.vue'
 import InlineSettingsPanel from './InlineSettingsPanel.vue'
@@ -36,11 +36,11 @@ const copied = ref(false)
 const confirmReset = ref(false)
 
 const sections = [
-  { id: 'appearance', label: '外观', icon: Palette },
-  ...(!remoteTransport ? [{ id: 'timeline', label: '执行过程', icon: Settings2 }] : []),
-  { id: 'archive', label: '归档', icon: Archive },
-  { id: 'remote', label: '远程访问', icon: RadioTower },
-  { id: 'about', label: '关于', icon: Info },
+  { id: 'appearance', label: '外观', icon: PhPalette },
+  ...(!remoteTransport ? [{ id: 'timeline', label: '执行过程', icon: PhSlidersHorizontal }] : []),
+  { id: 'archive', label: '归档', icon: PhArchive },
+  { id: 'remote', label: '远程访问', icon: PhBroadcast },
+  { id: 'about', label: '关于', icon: PhInfo },
 ]
 
 const relayStatusLabel = computed(() => {
@@ -158,10 +158,10 @@ watch(
     <template #title>
       <div class="flex h-full items-center justify-between gap-4">
         <h2 class="theme-heading flex min-w-0 items-center gap-2 text-sm font-semibold">
-          <Settings2 class="h-4 w-4 shrink-0" />
+          <PhSlidersHorizontal class="h-4 w-4 shrink-0" />
           <span>设置</span>
         </h2>
-        <PxIconButton v-if="!embedded" class="h-8 w-8 shrink-0" label="关闭设置" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
+        <PxIconButton v-if="!embedded" class="h-8 w-8 shrink-0" label="关闭设置" @click="emit('close')"><PhX class="h-4 w-4" /></PxIconButton>
       </div>
     </template>
 
@@ -211,7 +211,7 @@ watch(
           </div>
         </div>
 
-        <div v-if="relayLoading && !relayData" class="theme-muted-text flex h-40 items-center justify-center"><LoaderCircle class="h-4 w-4 animate-spin" /></div>
+        <div v-if="relayLoading && !relayData" class="theme-muted-text flex h-40 items-center justify-center"><PhCircleNotch class="h-4 w-4 animate-spin" /></div>
         <template v-else>
           <div v-if="relayError" class="relay-error mb-4 rounded-sm px-3 py-2 text-xs">{{ relayError }}</div>
 
@@ -239,11 +239,11 @@ watch(
               <p class="theme-muted-text mt-1 text-xs">完整链接等同远程访问凭证，不要公开分享。</p>
               <div class="relay-link mt-3 flex min-w-0 items-center gap-2 rounded-sm px-3 py-2">
                 <span class="min-w-0 flex-1 truncate font-mono text-[11px]">{{ relayData.pairing.url }}</span>
-                <PxIconButton class="h-7 w-7 shrink-0" :label="copied ? '已复制' : '复制链接'" @click="copyPairingUrl"><Check v-if="copied" class="h-3.5 w-3.5" /><Copy v-else class="h-3.5 w-3.5" /></PxIconButton>
+                <PxIconButton class="h-7 w-7 shrink-0" :label="copied ? '已复制' : '复制链接'" @click="copyPairingUrl"><PhCheck v-if="copied" class="h-3.5 w-3.5" /><PhCopy v-else class="h-3.5 w-3.5" /></PxIconButton>
               </div>
               <div class="mt-4 flex flex-wrap gap-2">
-                <PxButton variant="secondary" size="sm" class="h-8 gap-1.5 text-xs" :disabled="relayLoading" @click="reconnectRelay"><RefreshCw class="h-3.5 w-3.5" :class="relayLoading ? 'animate-spin' : ''" />重新连接</PxButton>
-                <PxButton variant="secondary" size="sm" class="h-8 gap-1.5 text-xs" :disabled="relayLoading" @click="confirmReset = true"><RotateCcw class="h-3.5 w-3.5" />重置远程身份</PxButton>
+                <PxButton variant="secondary" size="sm" class="h-8 gap-1.5 text-xs" :disabled="relayLoading" @click="reconnectRelay"><PhArrowsClockwise class="h-3.5 w-3.5" :class="relayLoading ? 'animate-spin' : ''" />重新连接</PxButton>
+                <PxButton variant="secondary" size="sm" class="h-8 gap-1.5 text-xs" :disabled="relayLoading" @click="confirmReset = true"><PhArrowCounterClockwise class="h-3.5 w-3.5" />重置远程身份</PxButton>
               </div>
             </div>
             <img v-if="pairingQr" :src="pairingQr" alt="PromptX 远程访问二维码" class="relay-qr h-40 w-40 rounded-sm p-2" />

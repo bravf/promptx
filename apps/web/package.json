@@ -12,11 +12,11 @@
   },
   "dependencies": {
     "@fontsource/geist-mono": "^5.2.7",
+    "@phosphor-icons/vue": "^2.2.1",
     "@promptx/protocol": "workspace:*",
     "@promptx/relay": "workspace:*",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "lucide-vue-next": "^0.577.0",
     "markdown-it": "^14.3.2",
     "qrcode": "^1.5.4",
     "shiki": "^4.0.2",

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, provide, ref, watch } from 'vue'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChartNoAxesCombined, Columns2, FileDiff, Files, Info, LoaderCircle, MessageSquare, Rows2, Settings, TerminalSquare, X } from 'lucide-vue-next'
+import { PhArrowDown, PhArrowLeft, PhArrowRight, PhArrowUp, PhChartLine, PhColumns, PhGitDiff, PhFiles, PhInfo, PhCircleNotch, PhChat, PhRows, PhGear, PhTerminalWindow, PhX } from '@phosphor-icons/vue'
 import { closeEmptyGroup, closeTab, createLayout, findNode, groups, layoutRects, moveTab, openTab, restoreWorkbenchLayout, splitGroup, WORKBENCH_STORAGE_KEY } from '../lib/workbenchTabs.js'
 import { sessionActivity } from '../lib/backgroundTaskPresentation.js'
 import { useTheme } from '../composables/useTheme.js'
@@ -33,11 +33,11 @@ watch(panels, entries => {
   const existing = new Set(entries.map(panel => panel.key))
   mountedPanels.value = new Set([...mountedPanels.value].filter(key => existing.has(key)).concat(entries.filter(panel => panel.active).map(panel => panel.key)))
 }, { immediate: true })
-const icons = { files: Files, diff: FileDiff, visualization: ChartNoAxesCombined, 'task-details': Info, settings: Settings, terminal: TerminalSquare }
+const icons = { files: PhFiles, diff: PhGitDiff, visualization: PhChartLine, 'task-details': PhInfo, settings: PhGear, terminal: PhTerminalWindow }
 const names = { files: '文件', diff: 'Diff', 'task-details': '会话详情', terminal: '终端', settings: '设置' }
 const splitItems = [
-  { id: 'left', label: '向左拆分', icon: ArrowLeft }, { id: 'right', label: '向右拆分', icon: ArrowRight },
-  { id: 'top', label: '向上拆分', icon: ArrowUp }, { id: 'bottom', label: '向下拆分', icon: ArrowDown },
+  { id: 'left', label: '向左拆分', icon: PhArrowLeft }, { id: 'right', label: '向右拆分', icon: PhArrowRight },
+  { id: 'top', label: '向上拆分', icon: PhArrowUp }, { id: 'bottom', label: '向下拆分', icon: PhArrowDown },
 ]
 function taskFor(id) { return props.tasks.find(task => task.id === id) }
 function projectFor(id) { return props.projects.find(project => project.id === taskFor(id)?.projectId) }
@@ -114,7 +114,7 @@ function split(id, direction, tab = '') {
   announceFocus()
 }
 function tabMenu(group, tab) {
-  return [...splitItems, ...(geometry.value.leaves.length > 1 ? [{ separator: true }, ...geometry.value.leaves.filter(item => item.group.id !== group.id).map(item => ({ id: `move:${item.group.id}`, label: `移至分区 ${geometry.value.leaves.indexOf(item) + 1}`, icon: Columns2 }))] : []), { separator: true }, { id: 'close', label: '关闭标签', icon: X }, { id: 'close-others', label: '关闭其他标签', icon: X, disabled: group.tabs.length < 2 }]
+  return [...splitItems, ...(geometry.value.leaves.length > 1 ? [{ separator: true }, ...geometry.value.leaves.filter(item => item.group.id !== group.id).map(item => ({ id: `move:${item.group.id}`, label: `移至分区 ${geometry.value.leaves.indexOf(item) + 1}`, icon: PhColumns }))] : []), { separator: true }, { id: 'close', label: '关闭标签', icon: PhX }, { id: 'close-others', label: '关闭其他标签', icon: PhX, disabled: group.tabs.length < 2 }]
 }
 function menuAction(action, group, tab) {
   if (action === 'close') close(tab.id)
@@ -226,20 +226,20 @@ defineExpose({ openSession, openSettings })
             <component :is="icons[tab.type]" v-else class="h-3.5 w-3.5 shrink-0" />
             <span class="min-w-0 flex-1 truncate">{{ title(tab) }}</span>
             <span v-if="tab.type === 'session' && sessionActivity(taskFor(tab.taskId)).waiting" class="shrink-0 text-[10px] text-[var(--theme-warningText)]">待回答</span>
-            <LoaderCircle v-else-if="tab.type === 'session' && sessionActivity(taskFor(tab.taskId)).running" class="h-3.5 w-3.5 shrink-0 animate-spin" aria-label="运行中" />
+            <PhCircleNotch v-else-if="tab.type === 'session' && sessionActivity(taskFor(tab.taskId)).running" class="h-3.5 w-3.5 shrink-0 animate-spin" aria-label="运行中" />
             <span v-if="tab.type === 'session' && taskFor(tab.taskId)?.requiresAttention" class="workbench-attention" aria-label="需要关注" />
             <PxActionMenu class="tab-menu h-6 w-6 shrink-0" :label="`${title(tab)} 的标签操作`" :items="tabMenu(rect.group, tab)" @click.stop @select="menuAction($event, rect.group, tab)" />
-            <button type="button" class="tab-close flex h-6 w-6 shrink-0 items-center justify-center rounded-full" :aria-label="`关闭标签 ${title(tab)}`" :title="`关闭标签 ${title(tab)}`" @click.stop="close(tab.id)"><X class="h-3 w-3" /></button>
+            <button type="button" class="tab-close flex h-6 w-6 shrink-0 items-center justify-center rounded-full" :aria-label="`关闭标签 ${title(tab)}`" :title="`关闭标签 ${title(tab)}`" @click.stop="close(tab.id)"><PhX class="h-3 w-3" /></button>
           </div>
         </div>
-        <PxIconButton class="h-7 w-7 shrink-0" label="向右拆分" @click="split(rect.group.id, 'right')"><Columns2 class="h-3.5 w-3.5" /></PxIconButton>
-        <PxIconButton class="h-7 w-7 shrink-0" label="向下拆分" @click="split(rect.group.id, 'bottom')"><Rows2 class="h-3.5 w-3.5" /></PxIconButton>
+        <PxIconButton class="h-7 w-7 shrink-0" label="向右拆分" @click="split(rect.group.id, 'right')"><PhColumns class="h-3.5 w-3.5" /></PxIconButton>
+        <PxIconButton class="h-7 w-7 shrink-0" label="向下拆分" @click="split(rect.group.id, 'bottom')"><PhRows class="h-3.5 w-3.5" /></PxIconButton>
       </header>
       <div v-if="!rect.group.tabs.length" class="theme-empty-state flex h-[calc(100%-36px)] flex-col items-center justify-center p-5 text-center text-xs">
-        <MessageSquare class="mb-3 h-7 w-7" />
+        <PhChat class="mb-3 h-7 w-7" />
         <p>从左栏打开会话，或将标签拖到这里</p>
         <PxButton v-if="geometry.leaves.length > 1" variant="ghost" size="sm" class="mt-4" @click="closeEmptyGroup(layout, rect.group.id); announceFocus()">
-          <X class="h-3.5 w-3.5" aria-hidden="true" />关闭空分区
+          <PhX class="h-3.5 w-3.5" aria-hidden="true" />关闭空分区
         </PxButton>
       </div>
     </section>

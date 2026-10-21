@@ -1,6 +1,6 @@
 <script setup>
 import { inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { X } from 'lucide-vue-next'
+import { PhX } from '@phosphor-icons/vue'
 import MediaPreviewPlaceholder from './MediaPreviewPlaceholder.vue'
 import PxIconButton from './PxIconButton.vue'
 import { useImageZoom } from '../composables/useImageZoom.js'
@@ -48,7 +48,7 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
   <div v-if="src" ref="previewElement" role="dialog" aria-modal="true" aria-label="图片预览" tabindex="-1" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center overflow-hidden p-6" @wheel.prevent="handleWheel" @click.self="closePreview">
-    <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 z-10 h-9 w-9" label="关闭预览" @click="closePreview"><X class="h-4 w-4" /></PxIconButton>
+    <PxIconButton variant="secondary" class="image-preview-overlay__button absolute right-4 top-4 z-10 h-9 w-9" label="关闭预览" @click="closePreview"><PhX class="h-4 w-4" /></PxIconButton>
     <MediaPreviewPlaceholder v-if="previewLoading || previewError" :error="previewError ? '图片加载失败，请关闭后重试' : ''" />
     <img
       v-if="src"

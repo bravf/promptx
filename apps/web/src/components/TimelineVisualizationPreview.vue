@@ -1,6 +1,6 @@
 <script setup>
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { X } from 'lucide-vue-next'
+import { PhX } from '@phosphor-icons/vue'
 import PxIconButton from './PxIconButton.vue'
 import TimelineVisualizationContent from './TimelineVisualizationContent.vue'
 
@@ -41,7 +41,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKey, true))
       <section v-if="preview" ref="dialog" class="panel visualization-dialog fixed inset-0 z-[60] flex min-h-0 min-w-0 flex-col overflow-hidden" role="dialog" aria-modal="true" aria-label="图表预览" tabindex="-1">
         <header class="flex h-14 shrink-0 items-center gap-2 border-b px-3">
           <h2 class="theme-heading min-w-0 flex-1 truncate text-sm font-medium">{{ preview.title }}</h2>
-          <PxIconButton label="关闭图表预览" @click="emit('close')"><X class="h-4 w-4" /></PxIconButton>
+          <PxIconButton label="关闭图表预览" @click="emit('close')"><PhX class="h-4 w-4" /></PxIconButton>
         </header>
         <TimelineVisualizationContent :key="JSON.stringify([preview.taskId, preview.path])" :task-id="preview.taskId" :path="preview.path" :title="preview.title" v-model:mode="mode" @escape="emit('close')" />
       </section>
