@@ -800,10 +800,10 @@ onBeforeUnmount(() => {
       <PxIconButton v-if="mobile" class="h-8 w-8" label="返回项目列表" @click="emit('back')"><PhArrowLeft class="h-4 w-4" /></PxIconButton>
       <div v-if="task" class="pane-heading min-w-0 flex-1" :title="currentBranch ? `${task.title} · ${projectDirectoryName} · ${currentBranch}` : task.title">
         <span class="pane-title block truncate text-xs font-semibold">{{ task.title }}</span>
-        <span class="theme-muted-text flex min-w-0 items-center gap-1 text-[9px]">
+        <span class="theme-muted-text flex min-w-0 items-center gap-1 text-[11px]">
           <span class="min-w-0 truncate">{{ projectDirectoryName }}</span>
           <template v-if="currentBranch">
-            <PhGitBranch class="h-2.5 w-2.5 shrink-0 opacity-70" aria-hidden="true" />
+            <PhGitBranch class="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />
             <span class="min-w-0 truncate font-mono" :title="currentBranch">{{ currentBranch }}</span>
           </template>
         </span>
