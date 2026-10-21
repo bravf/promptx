@@ -78,6 +78,26 @@ test('首次导入同步失败时清理新建的空项目', async () => {
   }
 })
 
+test('导入会话到已归档工作区时自动恢复工作区', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-session-import-archived-project-'))
+  const loader = async () => [{ providerId: 'codex', providerHandleId: 'thread-archived-project', title: '已归档工作区会话', cwd: root }]
+  const { db, repository, service } = setup({ loader })
+  try {
+    const project = repository.createProject({ repositoryRoot: root, displayName: '已归档工作区' })
+    repository.archiveProject(project.id)
+
+    const result = await service.import({ providerId: 'codex', providerHandleId: 'thread-archived-project' })
+
+    assert.equal(result.project.id, project.id)
+    assert.equal(result.project.lifecycle, 'active')
+    assert.equal(repository.getTask(result.task.id).lifecycle, 'active')
+    assert.equal(repository.listProjects().some(item => item.id === project.id), true)
+  } finally {
+    db.close()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('导入 linked worktree 会话时归属主仓库项目', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-session-import-worktree-'))
   const projectRoot = path.join(root, 'project')

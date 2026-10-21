@@ -79,13 +79,13 @@ export class SessionImportService {
       if (!project) {
         project = this.repository.createProject({ repositoryRoot: root, displayName: root.split(/[\\/]/).pop(), defaultBranch: await defaultBranch(root) })
         projectCreated = true
-      }
+      } else if (project.lifecycle === 'archived') project = this.repository.restoreProject(project.id)
     } catch {
       project = this.repository.getProjectByRoot(requestedCwd)
       if (!project) {
         project = this.repository.createProject({ repositoryRoot: requestedCwd, displayName: requestedCwd.split(/[\\/]/).pop() })
         projectCreated = true
-      }
+      } else if (project.lifecycle === 'archived') project = this.repository.restoreProject(project.id)
     }
     const environment = this.repository.createEnvironment({
       kind: gitContext?.isWorktree ? 'worktree' : 'local',
@@ -97,12 +97,14 @@ export class SessionImportService {
       status: fs.existsSync(requestedCwd) ? 'ready' : 'unavailable',
     })
     const task = this.repository.createTask({ projectId: project.id, environmentId: environment.id, providerId: provider.id, title: String(title || session?.title || `${provider.label} 会话`).slice(0, 120) })
-    const nativeHandle = provider.id === 'codex' ? { threadId: providerHandleId } : { sessionId: providerHandleId }
+    const importOptions = provider.createImportOptions
+      ? provider.createImportOptions(session)
+      : { nativeHandle: provider.id === 'codex' ? { threadId: providerHandleId } : { sessionId: providerHandleId } }
     let agent = null
     try {
       agent = this.repository.createAgent(task.id, {
         providerId: provider.id,
-        nativeHandle,
+        ...importOptions,
       }, provider.capabilities)
       agent = this.repository.updateAgent(agent.id, { lifecycle: 'ready' })
       if (environment.status !== 'unavailable') {

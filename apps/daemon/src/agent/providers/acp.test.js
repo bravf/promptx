@@ -270,7 +270,7 @@ test('Kimi 和 Grok 共用 ACP Runtime，仅注册命令和历史读取', () => 
 
 test('默认 Provider 列表包含 Kimi 和 Grok', () => {
   const registry = new ProviderRegistry()
-  assert.deepEqual(registry.list().map((item) => item.id), ['codex', 'claude', 'kimi', 'grok'])
+  assert.deepEqual(registry.list().map((item) => item.id), ['codex', 'claude', 'kimi', 'grok', 'pi'])
   assert.equal(registry.get('kimi').capabilities.protocol, 'acp')
   assert.equal(registry.get('grok').capabilities.protocol, 'acp')
   assert.equal(typeof registry.get('grok').listHistorySessions, 'function')

@@ -4,12 +4,13 @@ import claude from '../assets/providers/claude.svg?raw'
 import codex from '../assets/providers/codex.svg?raw'
 import grok from '../assets/providers/grok.svg?raw'
 import kimi from '../assets/providers/kimi.svg?raw'
+import pi from '../assets/providers/pi.svg?raw'
 
 const props = defineProps({
   providerId: { type: String, default: '' },
   label: { type: String, default: '' },
 })
-const icons = { claude, codex, grok, kimi }
+const icons = { claude, codex, grok, kimi, pi }
 const icon = computed(() => icons[props.providerId])
 const name = computed(() => props.label || props.providerId || 'Agent')
 </script>
