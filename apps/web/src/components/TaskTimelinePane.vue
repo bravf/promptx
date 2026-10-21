@@ -1,7 +1,7 @@
 <script setup>
 import { reactive, computed, defineAsyncComponent, inject, nextTick, onActivated, onDeactivated, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { projectTimelineRows } from '@promptx/protocol/timeline-projection'
-import { ArrowDown, ArrowLeft, Bot, CircleAlert, Columns2, FileDiff, Files, Info, LoaderCircle, TerminalSquare, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, Bot, CircleAlert, Columns2, FileDiff, Files, GitBranch, Info, LoaderCircle, TerminalSquare, X } from 'lucide-vue-next'
 import { v2Api } from '../lib/v2Api.js'
 import { createTaskEventSource } from '../lib/taskEventSource.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
@@ -119,6 +119,22 @@ const projectDirectoryName = computed(() => {
   const cwd = String(props.project?.repositoryRoot || '').replace(/[\\/]+$/, '')
   return cwd.split(/[\\/]/).pop() || props.project?.displayName || ''
 })
+const gitStatuses = reactive(new Map())
+const currentBranch = computed(() => {
+  const git = gitStatuses.get(activeTaskId.value)
+  if (!git?.available || !git.branch) return ''
+  return git.branch === 'HEAD' ? '游离 HEAD' : git.branch
+})
+let gitStatusRequestVersion = 0
+async function loadGitStatus(taskId) {
+  const requestVersion = ++gitStatusRequestVersion
+  try {
+    const result = await v2Api.getTaskGitStatus(taskId)
+    if (requestVersion === gitStatusRequestVersion) gitStatuses.set(taskId, result.git)
+  } catch {
+    if (requestVersion === gitStatusRequestVersion) gitStatuses.delete(taskId)
+  }
+}
 
 function cacheTimeline(taskId = displayedTaskId.value || activeTaskId.value) {
   if (!taskId || displayedTaskId.value !== taskId || !timelineEpoch.value) return
@@ -731,6 +747,9 @@ watch(activeTaskId, (taskId) => {
   drawerMode.value = null
   if (paneVisible.value) selectTask(taskId)
 }, { immediate: true })
+watch([activeTaskId, paneVisible], ([taskId, visible]) => {
+  if (taskId && visible) loadGitStatus(taskId)
+}, { immediate: true })
 watch(paneVisible, async (visible) => {
   if (!visible) { cancelTimelinePointer(); closeEvents(); return }
   if (!timelineEpoch.value || displayedTaskId.value !== activeTaskId.value) { selectTask(activeTaskId.value); return }
@@ -744,12 +763,17 @@ watch(() => props.task?.lifecycle, (lifecycle, previous) => {
   if (previous === 'running' && lifecycle !== 'running') reconcileTerminalTaskTurns()
 })
 
+function refreshVisibleGitStatus() {
+  if (!document.hidden && paneVisible.value && activeTaskId.value) loadGitStatus(activeTaskId.value)
+}
+
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('pointerup', handleTimelinePointerEnd)
   window.addEventListener('pointercancel', handleTimelinePointerEnd)
   window.addEventListener('blur', cancelTimelinePointer)
   document.addEventListener('visibilitychange', syncVisibleTimeline)
+  document.addEventListener('visibilitychange', refreshVisibleGitStatus)
 })
 onBeforeUnmount(() => {
   timelineRequestVersion += 1
@@ -758,6 +782,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointercancel', handleTimelinePointerEnd)
   window.removeEventListener('blur', cancelTimelinePointer)
   document.removeEventListener('visibilitychange', syncVisibleTimeline)
+  document.removeEventListener('visibilitychange', refreshVisibleGitStatus)
   closeEvents()
   if (timelineScrollFrame) cancelAnimationFrame(timelineScrollFrame)
   timelineResizeObserver?.disconnect()
@@ -773,9 +798,15 @@ onBeforeUnmount(() => {
   >
     <header class="timeline-header flex h-14 shrink-0 items-center gap-2 border-b px-3">
       <PxIconButton v-if="mobile" class="h-8 w-8" label="返回项目列表" @click="emit('back')"><ArrowLeft class="h-4 w-4" /></PxIconButton>
-      <div v-if="task" class="pane-heading min-w-0 flex-1" :title="task.title">
-        <span class="pane-title block truncate text-xs font-medium">{{ task.title }}</span>
-        <span class="theme-muted-text block truncate text-[9px]">{{ projectDirectoryName }}</span>
+      <div v-if="task" class="pane-heading min-w-0 flex-1" :title="currentBranch ? `${task.title} · ${projectDirectoryName} · ${currentBranch}` : task.title">
+        <span class="pane-title block truncate text-xs font-semibold">{{ task.title }}</span>
+        <span class="theme-muted-text flex min-w-0 items-center gap-1 text-[9px]">
+          <span class="min-w-0 truncate">{{ projectDirectoryName }}</span>
+          <template v-if="currentBranch">
+            <GitBranch class="h-2.5 w-2.5 shrink-0 opacity-70" aria-hidden="true" />
+            <span class="min-w-0 truncate font-mono" :title="currentBranch">{{ currentBranch }}</span>
+          </template>
+        </span>
       </div>
       <div v-else class="theme-muted-text min-w-0 flex-1 truncate text-xs">选择会话</div>
       <div class="ml-auto flex shrink-0 items-center gap-1">
