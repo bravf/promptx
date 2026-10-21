@@ -303,6 +303,14 @@ defineExpose({ openSession, openSettings })
 .workbench-tab.is-active::before { left: -8px; background: radial-gradient(circle at 0 0, transparent 7.5px, var(--theme-appPanel) 8px); }
 .workbench-tab.is-active::after { right: -8px; background: radial-gradient(circle at 100% 0, transparent 7.5px, var(--theme-appPanel) 8px); }
 .workbench-tab:not(.is-active):hover { background: var(--theme-appPanelHover); }
+:global(.dark .workbench-tab-bar) { background: color-mix(in srgb, var(--theme-appPanelInset) 70%, #000); }
+:global(.dark .workbench-tab:not(.is-active)) { color: var(--theme-textSecondary); }
+:global(.dark .workbench-tab.is-active) {
+  background: color-mix(in srgb, var(--theme-accent) 18%, var(--theme-appPanel));
+}
+:global(.dark .workbench-tab.is-active::before),
+:global(.dark .workbench-tab.is-active::after) { display: none; }
+:global(.dark .workbench-tab:not(.is-active)::after) { background: var(--theme-textMuted); }
 .workbench-tab:has(+ .is-active)::after, .workbench-tab:has(+ :hover)::after, .workbench-tab:hover:not(.is-active)::after { opacity: 0; }
 .tab-close:hover { background: var(--theme-appPanelActive); }
 .workbench-tab:focus-visible { outline: 1px solid var(--theme-focusRing); outline-offset: -2px; }
