@@ -16,7 +16,7 @@ const name = computed(() => props.label || props.providerId || 'Agent')
 </script>
 
 <template>
-  <span class="agent-provider-icon inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center" role="img" :aria-label="name" :title="name">
+  <span class="agent-provider-icon inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center" :data-provider="providerId" role="img" :aria-label="name" :title="name">
     <!-- 仅渲染随应用打包的静态 SVG，不接受用户或接口返回的 HTML。 -->
     <span v-if="icon" class="provider-symbol h-full w-full" aria-hidden="true" v-html="icon" />
     <span v-else class="text-[10px] font-semibold leading-none" aria-hidden="true">{{ name.slice(0, 1).toUpperCase() }}</span>
@@ -24,5 +24,10 @@ const name = computed(() => props.label || props.providerId || 'Agent')
 </template>
 
 <style scoped>
+.agent-provider-icon[data-provider="claude"] { color: var(--theme-providerClaude); }
+.agent-provider-icon[data-provider="codex"] { color: var(--theme-providerCodex); }
+.agent-provider-icon[data-provider="kimi"] { color: var(--theme-providerKimi); }
+.agent-provider-icon[data-provider="grok"] { color: var(--theme-providerGrok); }
+.agent-provider-icon[data-provider="pi"] { color: var(--theme-providerPi); }
 .provider-symbol :deep(svg) { display: block; width: 100%; height: 100%; }
 </style>

@@ -757,8 +757,6 @@ onBeforeUnmount(() => {
 .sidebar-secondary-action:hover, .settings-entry:hover, .workspace-heading:hover { background: var(--theme-appPanelHover); color: var(--theme-textPrimary); }
 .workspace-active { color: var(--theme-text); }
 .task-navigation:focus-visible { outline: 1px solid var(--theme-focusRing); outline-offset: -1px; }
-.agent-row .agent-provider-icon { color: var(--theme-textMuted); }
-.agent-row.row-active .agent-provider-icon { color: inherit; }
 .workspace-toggle, .workspace-action, .agent-action { color: var(--theme-textMuted); }
 .workspace-action, .agent-action { border: 0; background: transparent; opacity: 0; }
 .workspace-heading:focus-within .workspace-action, .agent-row:focus-within .agent-action { opacity: 1; }
@@ -788,8 +786,6 @@ onBeforeUnmount(() => {
 .recent-session-row { min-height: 56px; }
 .recent-session-group { --session-secondary-color: color-mix(in srgb, var(--theme-textMuted) 65%, var(--theme-appPanel)); }
 .recent-session-group .theme-muted-text,
-.recent-session-group .agent-provider-icon,
-.recent-session-group .agent-row.row-active .agent-provider-icon,
 .recent-session-group .agent-action { color: var(--session-secondary-color); }
 .error-row { border-color: var(--theme-danger); background: var(--theme-dangerSoft); color: var(--theme-dangerText); }
 .import-session-row { border-color: var(--theme-borderDefault); }

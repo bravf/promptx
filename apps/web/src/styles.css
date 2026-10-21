@@ -4,6 +4,11 @@
 
 :root {
   color-scheme: light;
+  --theme-providerClaude: color-mix(in srgb, #d97757 80%, var(--theme-textPrimary));
+  --theme-providerCodex: color-mix(in srgb, #10a37f 80%, var(--theme-textPrimary));
+  --theme-providerKimi: color-mix(in srgb, #528bff 80%, var(--theme-textPrimary));
+  --theme-providerGrok: color-mix(in srgb, #a17de0 80%, var(--theme-textPrimary));
+  --theme-providerPi: color-mix(in srgb, #d49a32 80%, var(--theme-textPrimary));
   --theme-fontSans: "MiSans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --theme-fontMono: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Monaco, monospace;
   --theme-layoutRadius: 0.5rem;
