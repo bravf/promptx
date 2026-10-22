@@ -552,7 +552,6 @@ function openEvents(taskId, epoch, seq) {
     if (!paneVisible.value || activeTaskId.value !== taskId) return
     const result = JSON.parse(event.data)
     serviceTerminals.value = result.services
-    if (result.openTerminalId && props.tabbed && props.focused) openServiceTerminal(result.openTerminalId)
   })
   eventSource.addEventListener('interactions', (event) => {
     if (!paneVisible.value || activeTaskId.value !== taskId) return

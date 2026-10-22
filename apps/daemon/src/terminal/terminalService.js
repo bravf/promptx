@@ -90,6 +90,7 @@ export class TerminalService {
       session.running = false
       session.stopping = false
       session.exitCode = exitCode
+      if (session.service && exitCode) session.service.error = this.read(session).data.slice(-600).trim() || `进程退出码：${exitCode}`
       if (session.service && this.sessions.has(session.id)) this.notify(taskId)
     })
     return session
@@ -139,6 +140,11 @@ export class TerminalService {
     return target
   }
   async startService(taskId, input) {
+    const type = input.type || (input.url ? 'web' : /\.app\/Contents\/MacOS\//.test(input.command) ? 'desktop' : 'process')
+    if (type !== 'web' && input.url) throw Object.assign(new Error('仅 Web 服务可以配置访问地址。'), { statusCode: 400 })
+    if (type === 'desktop' && /^\s*(?:\/usr\/bin\/)?open(?:\s|$)/.test(input.command)) {
+      throw Object.assign(new Error('请直接以前台方式运行 .app/Contents/MacOS/ 中的程序，不要使用 open，以便跟踪和停止实际应用进程。'), { statusCode: 400 })
+    }
     if (input.url) {
       const url = new URL(input.url)
       if (!['http:', 'https:'].includes(url.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.username || url.password) {
@@ -154,8 +160,8 @@ export class TerminalService {
       if (existing) return { terminal: this.describe(existing), reused: true }
       if (input.url && await this.portInUse(input.url)) throw Object.assign(new Error('指定的服务端口已被占用，请检查已有服务或改用其他端口。'), { statusCode: 409 })
       const session = await this.create(taskId, { cols: 100, rows: 30 }, { name: input.name, cwd, command: input.command,
-        service: { command: input.command, url: input.url || '', readiness: 'starting' } })
-      this.notify(taskId, session.id)
+        service: { type, command: input.command, url: input.url || '', readiness: 'starting' } })
+      this.notify(taskId)
       await this.checkService(session, input.waitMs)
       this.notify(taskId)
       return { terminal: this.describe(session), reused: false, ...this.read(session) }
@@ -178,10 +184,15 @@ export class TerminalService {
     const stableAfter = Date.now() + 300
     do {
       if (this.closed || !session.running || session.stopping || !this.sessions.has(session.id)) break
-      if (!session.service.url) {
+      if (session.service.type === 'desktop' || session.service.type === 'watch') {
+        if (Date.now() >= stableAfter) { session.service.readiness = 'running'; return }
+      } else if (!session.service.url) {
         const text = this.read(session).data.replace(/\x1b\[[0-9;]*m/g, '')
         const urls = text.match(/https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):\d+(?:\/[^\s\x1b]*)?/g)
-        if (urls?.length) session.service.url = urls.at(-1).replace('0.0.0.0', '127.0.0.1')
+        if (urls?.length) {
+          session.service.url = urls.at(-1).replace('0.0.0.0', '127.0.0.1')
+          session.service.type = 'web'
+        }
       }
       if (session.service.url) {
         try {
@@ -193,13 +204,13 @@ export class TerminalService {
       if (Date.now() >= deadline) break
       await new Promise(resolve => setTimeout(resolve, 150))
     } while (Date.now() < deadline)
-    session.service.readiness = !session.running ? 'failed' : 'unverified'
+    session.service.readiness = !session.running ? 'failed' : session.service.type === 'web' ? 'unverified' : 'running'
   }
   async restartService(taskId, id) {
     const session = this.get(taskId, id)
     if (!session.service) throw Object.assign(new Error('这个终端不是托管服务。'), { statusCode: 400 })
     if (session.running) throw Object.assign(new Error('请先停止服务，等待进程退出后再重启。'), { statusCode: 409 })
-    const result = await this.startService(taskId, { name: session.name, cwd: session.cwd, command: session.service.command, url: session.service.url || undefined, waitMs: 8000 })
+    const result = await this.startService(taskId, { name: session.name, type: session.service.type, cwd: session.cwd, command: session.service.command, url: session.service.url || undefined, waitMs: 8000 })
     this.remove(id)
     return result
   }

@@ -44,6 +44,40 @@ async function waitUntil(check) {
   assert.fail('等待状态超时')
 }
 
+test('运行任务区分桌面、监听和通用进程，重启保留类型且不自动打开终端', { timeout: 15000, skip: process.platform === 'win32' }, async t => {
+  const f = await fixture(t)
+  const a = await f.client('a')
+  const opened = []
+  f.service.onChange = (_taskId, terminalId) => { if (terminalId) opened.push(terminalId) }
+  fs.writeFileSync(path.join(f.root, 'app.mjs'), "console.log('http://127.0.0.1:19999/'); setInterval(() => {}, 1000)")
+  for (const type of ['desktop', 'watch', 'process']) {
+    const started = await a.call('start_service', { name: type, type, command: `${process.execPath} app.mjs`, waitMs: 0 })
+    assert.ok(!started.isError, JSON.stringify(started))
+    const session = f.service.get('a', started.value.terminal.id)
+    assert.equal(session.service.type, type)
+    assert.equal(session.service.readiness, 'running')
+    assert.equal(session.service.url, '')
+    f.service.stop(session)
+    await waitUntil(() => !session.running)
+    if (type === 'desktop') {
+      const restarted = await f.service.restartService('a', session.id)
+      assert.equal(restarted.terminal.service.type, 'desktop')
+      assert.equal(restarted.terminal.service.url, '')
+      assert.equal(restarted.terminal.service.readiness, 'running')
+      f.service.stop(f.service.get('a', restarted.terminal.id))
+    }
+  }
+  assert.deepEqual(opened, [])
+  const legacyApp = await a.call('start_service', { name: '旧版桌面启动', command: './Missing.app/Contents/MacOS/Missing', waitMs: 500 })
+  assert.equal(legacyApp.value.terminal.service.type, 'desktop')
+  assert.equal(legacyApp.value.terminal.running, false)
+  assert.equal((await a.call('start_service', { type: 'desktop', name: '错误启动', command: 'open -a TextEdit' })).isError, true)
+  assert.equal((await a.call('start_service', { type: 'watch', name: '错误地址', command: 'exit 0', url: 'http://localhost:19999' })).isError, true)
+  const failed = await a.call('start_service', { type: 'desktop', name: '失败应用', command: 'echo APP_FAILED; exit 7', waitMs: 500 })
+  assert.equal(failed.value.terminal.running, false)
+  assert.match(failed.value.terminal.service.error, /APP_FAILED/)
+})
+
 test('真实 MCP/PTY：服务独立于客户端退出，重复启动复用、跨会话隔离、日志、停止和重启', { timeout: 30000, skip: process.platform === 'win32' }, async t => {
   const f = await fixture(t)
   const listenPort = await port()
