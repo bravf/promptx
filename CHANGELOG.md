@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.20
+
+- 接入 Pi，支持新建会话和本机历史导入，完善工作区恢复。
+- 运行任务区分 Web 服务、桌面应用、监听任务和通用进程，按需查看日志。
+- 更新 P 图标和主题配色，优化 Agent 图标、标签页、字号与滚动体验。
+- 简化 README，保留安装、主要功能和开发入口。
 
 - 抽出通用 ACP Runtime：`createAcpProvider()` 用命令、参数和历史适配器注册 Agent，Kimi 改为配置接入。
 - 接入 Grok：本机 `grok agent stdio` 作为第四个 Provider，支持新建会话、取消、Timeline，以及从 `~/.grok/sessions` 导入已有会话。

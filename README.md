@@ -2,35 +2,11 @@
 
 [English README](README.en.md)
 
-PromptX 是一个本地优先的 AI 编程工作台。它把工作目录、Agent 会话、执行过程、最终回复、文件浏览和 Git Diff 放在同一个界面中，并通过 Relay 支持手机远程访问。
+本地优先的 AI 编程工作台，支持 Codex、Claude Code、Kimi Code、Grok 和 Pi。统一管理工作区与会话，查看执行过程、文件和 Git Diff，并支持手机远程访问。
 
-当前 V2 的核心模型是：
+## 安装使用
 
-```text
-工作区 -> Agent 会话 -> Turn -> Timeline
-```
-
-每个工作区对应一个真实目录；同一目录中可以建立多条 Codex、Claude 或 Kimi 会话。PromptX 负责恢复 Provider 原生会话，并把不同 Provider 的历史统一对账到本地 Timeline。
-
-## 核心能力
-
-- 支持 Codex、Claude Code、Kimi Code 和 Grok。
-- 从本机扫描并导入这些 Provider 的已有会话。
-- 实时展示用户消息、思考过程、工具调用和最终回复。
-- 将 Codex 交互图表显示为预览卡片，支持桌面与手机 Relay 查看。
-- 按会话保留内存草稿，切换会话后可立即恢复；刷新页面后不保留。
-- 浏览工作区文件并查看 staged、unstaged 和 untracked Diff。
-- 桌面与 H5 共用同一套界面；移动端页面和全屏弹层支持浏览器返回手势。
-- 手机和 Daemon 之间使用端到端加密，公网 Relay 只转发密文。
-
-## 快速开始
-
-运行要求：
-
-- 推荐 Node 22 LTS；兼容 Node 20.19+、22.13+ 和 24.x。
-- 本机至少安装一个受支持的 Provider CLI：`codex`、`claude`、`kimi` 或 `grok`。
-
-安装并启动：
+需要 Node.js 20.19+（20.x）、22.13+（22.x）或 24.x，以及至少一个已安装并配置好的 Agent CLI。
 
 ```bash
 npm install -g @muyichengshayu/promptx
@@ -38,7 +14,7 @@ promptx doctor
 promptx start
 ```
 
-默认地址为 `http://127.0.0.1:3001`。
+浏览器打开 http://127.0.0.1:3001，选择工作区即可新建或导入会话。
 
 ```bash
 promptx status
@@ -46,7 +22,17 @@ promptx restart
 promptx stop
 ```
 
-运行数据默认保存在 `~/.promptx/`。PromptX 当前面向本机单用户场景，不包含账号和团队权限系统。
+运行数据保存在 `~/.promptx/`，面向本机单用户使用，无需注册账号。
+
+## 主要功能
+
+- 多 Agent 会话与历史导入，实时展示消息、思考和工具调用。
+- 多标签与分屏、文件浏览、Git Diff、图片附件和交互图表预览。
+- 托管 Web 服务、桌面应用和监听任务，按需查看日志、停止与重启。
+- 多种主题，适配桌面与手机。
+- 手机远程访问采用端到端加密，Relay 仅转发密文。
+
+手机连接：进入“设置 → 远程访问”扫码打开。配对链接等同访问凭证，请勿公开分享。详见 [Relay 使用说明](docs/relay-quickstart.md)。
 
 ## 源码开发
 
@@ -55,54 +41,16 @@ pnpm install
 pnpm dev
 ```
 
-开发环境默认使用：
-
-- Web：`http://127.0.0.1:5174`
-- Daemon：`http://127.0.0.1:3001`
-
-常用检查：
+前端默认 http://127.0.0.1:5174，本地服务默认 http://127.0.0.1:3001。
 
 ```bash
-pnpm test
 pnpm build
-pnpm test:e2e
+pnpm test
 pnpm release:check
 ```
 
-工作区结构：
+更多说明见 [架构文档](docs/v2-architecture-baseline.md)，版本变化见 [更新记录](CHANGELOG.md)。
 
-- `apps/web`：Vue 3 + Vite 前端。
-- `apps/daemon`：Fastify 本地 Daemon，负责 Provider、Timeline、SQLite 和文件访问。
-- `apps/android`：远程 H5 的 Android WebView 壳。
-- `packages/protocol`：前后端共享协议与 Timeline 投影。
-- `packages/relay`：E2EE、配对协议和公网 Relay Server。
-- `packages/shared`：跨模块共享工具。
+## 协议
 
-V2 不读取或迁移 V1 数据，也不保留旧 Server/Runner 双进程架构。详细设计见 [V2 架构基线](docs/v2-architecture-baseline.md)。
-
-## 远程访问
-
-启动 PromptX 后进入“设置 -> 远程访问”，扫描二维码即可在手机打开。完整配对链接等同远程访问凭证，请勿公开分享。
-
-Relay 的协议、部署和运维说明见：
-
-- [Relay 快速上手](docs/relay-quickstart.md)
-- [E2EE Relay 架构](docs/relay-e2ee-architecture.md)
-
-项目内置阿里云发布脚本：
-
-```bash
-pnpm deploy:relay:aliyun
-```
-
-## 交互图表预览
-
-Codex 回复中的 `visualize` 引用会显示为图表卡片。点击“打开预览”可操作图表，点击“查看源码”可阅读 HTML。桌面在工作台标签页中打开，同一会话的同一路径复用标签，支持拖动和分屏；切换标签或查看源码后保留已加载图表的交互状态，关闭标签才释放。手机使用全屏弹层，采用与文件、Diff 一致的滑入滑出动效，并适配减少动态效果设置；返回手势关闭后保留 Timeline 阅读位置。代码块中的示例和未完成的流式引用不会触发预览。
-
-HTML 由本机 Daemon 按需读取，经直连或现有端到端加密 Relay 传送，不额外上传托管。支持工作区内的 `.html`、`.htm` 文件，以及当前 Codex 会话助手消息明确引用的 `$CODEX_HOME/visualizations` 文件（默认 `~/.codex/visualizations`）。服务端校验真实路径，单个文件上限为 1 MiB。
-
-预览支持内嵌 CSS、JavaScript、数据图片和基础主题变量；外部脚本仅允许固定版本的 D3 7.9.0、Chart.js 4.4.8 和 ECharts 5.6.0 的 jsDelivr 入口。依赖文件、联网数据请求、嵌套网页及 Codex 专属会话操作暂不支持。图表无法访问父页面或本机 API；缺失文件、加载错误可在预览中重试。
-
-## 开源协议
-
-本项目采用 Apache-2.0 协议，详见 [LICENSE](LICENSE)。
+[Apache-2.0](LICENSE)
