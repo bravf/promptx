@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { vTouchTap } from '../lib/touchTap.js'
-import { PhArchive, PhFolder, PhFolderOpen, PhCircleNotch, PhPencilSimple, PhPushPin, PhPushPinSlash, PhPlus, PhGear, PhTerminalWindow, PhX } from '@phosphor-icons/vue'
+import { PhArchive, PhFolder, PhFolderOpen, PhCircleNotch, PhPencilSimple, PhPushPin, PhPushPinSlash, PhPlus, PhGear, PhX } from '@phosphor-icons/vue'
 import { sessionActivity } from '../lib/backgroundTaskPresentation.js'
 import { v2Api, globalEventsUrl } from '../lib/v2Api.js'
 import { warmVideoWorker } from '../lib/videoSource.js'
@@ -584,7 +584,7 @@ onBeforeUnmount(() => {
 
     <aside class="workspace-sidebar panel flex min-h-0 flex-col overflow-hidden" :class="mobileView === 'sidebar' ? 'mobile-panel-active' : 'mobile-panel-hidden'" :inert="isMobile && mobileView !== 'sidebar'" :aria-hidden="isMobile ? mobileView !== 'sidebar' : undefined">
       <header class="flex h-14 shrink-0 items-center border-b px-3">
-        <div class="flex min-w-0 items-center gap-2"><div class="brand-mark flex h-7 w-7 items-center justify-center rounded-sm"><PhTerminalWindow class="h-4 w-4" /></div><span class="text-sm font-semibold">PromptX</span><span class="theme-muted-text text-[10px]">V2</span></div>
+        <div class="flex min-w-0 items-center gap-2"><svg viewBox="0 0 64 64" aria-hidden="true" class="h-7 w-7 shrink-0"><rect width="64" height="64" rx="15" fill="var(--theme-textPrimary)" /><path fill="var(--theme-appPanel)" fill-rule="evenodd" d="M22 48V16H34C42 16 47 21 47 28S42 40 34 40H28V48H22ZM28 22V34H34C38 34 41 32 41 28S38 22 34 22H28Z" /></svg><span class="text-sm font-semibold">PromptX</span><span class="theme-muted-text text-[10px]">V2</span></div>
       </header>
       <div class="shrink-0 px-2 pb-2 pt-2">
         <PxButton variant="primary" size="sm" class="sidebar-primary-action h-9 w-full justify-start px-2 text-left text-xs" @click="openConversationDialog()"><PhPlus class="h-4 w-4 shrink-0" /><span>新会话</span></PxButton>
@@ -750,7 +750,6 @@ onBeforeUnmount(() => {
 .v2-loading-skeleton > div, .workspace-sidebar, .workspace-sidebar header, .workspace-sidebar footer { border-color: var(--theme-borderDefault); }
 .skeleton-line { border-radius: 2px; background: var(--theme-appPanelInset); opacity: 0.72; animation: skeleton-pulse 1.2s ease-in-out infinite; }
 @keyframes skeleton-pulse { 0%, 100% { opacity: 0.48; } 50% { opacity: 0.88; } }
-.brand-mark { background: var(--theme-primaryBg); color: var(--theme-primaryText); }
 .sidebar-primary-action { justify-content: flex-start; background: var(--theme-primaryBg); color: var(--theme-primaryText); }
 .sidebar-primary-action:hover { filter: brightness(0.96); }
 .sidebar-secondary-action, .settings-entry { justify-content: flex-start; color: var(--theme-textMuted); }
