@@ -16,6 +16,8 @@ import {
 } from '../../../../packages/protocol/src/index.js'
 import { DATABASE_VERSION } from '../db/database.js'
 import fs from 'node:fs'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { searchDirectories } from '../workspaces/directorySearch.js'
@@ -26,6 +28,7 @@ import {
   listWorkspaceDirectory,
   openWorkspaceFileStream,
   readWorkspaceFile,
+  resolveWorkspaceTarget,
 } from '../workspaces/workspaceInspection.js'
 import { publicAsset, storeAsset } from '../assets/assetStorage.js'
 import { DEFAULT_AGENT_TITLE } from '../agent/sessionTitle.js'
@@ -392,6 +395,17 @@ export function registerRoutes(app, context) {
     const current = taskContext(repository, request.params.taskId)
     return current ? { directory: await listWorkspaceDirectory(current.environment.cwd, request.query.path || '') }
       : reply.code(404).send({ error: 'task_not_found' })
+  })
+  app.post('/api/v2/tasks/:taskId/file/reveal', async (request, reply) => {
+    if (request.headers['x-promptx-relay-request'] === '1') return reply.code(403).send({ message: '远程访问不能打开主机文件夹。' })
+    const current = taskContext(repository, request.params.taskId)
+    if (!current) return reply.code(404).send({ error: 'task_not_found' })
+    if (typeof request.body?.path !== 'string' || !request.body.path) throw badRequest('请选择文件。')
+    const { target } = resolveWorkspaceTarget(current.environment.cwd, request.body.path)
+    const directory = path.dirname(target)
+    const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer.exe' : 'xdg-open'
+    await promisify(execFile)(command, [directory], { timeout: 10000, windowsHide: true })
+    return { ok: true }
   })
   app.get('/api/v2/tasks/:taskId/file', async (request, reply) => {
     const current = taskContext(repository, request.params.taskId)

@@ -3,6 +3,8 @@ import { createTaskEventSource } from '../lib/taskEventSource.js'
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { PhCaretRight, PhFile, PhFiles, PhFileX, PhFolder, PhFolderOpen, PhGitBranch, PhEye, PhEyeSlash, PhImage as ImageIcon, PhLink, PhCircleNotch, PhArrowsClockwise, PhVideoCamera, PhMusicNotes, PhPlay, PhX } from '@phosphor-icons/vue'
 import { v2Api } from '../lib/v2Api.js'
+import { request } from '../lib/request.js'
+import { isRemoteTransport } from '../lib/transport.js'
 import PxIconButton from './PxIconButton.vue'
 import InspectorSplitPane from './InspectorSplitPane.vue'
 import { workspaceMediaKind } from '../lib/timelineWorkspaceLinks.js'
@@ -32,6 +34,15 @@ const filePreviewHtml = ref('')
 const filePreviewObjectUrl = ref('')
 const previewPane = ref(null)
 const fileLoading = ref(false)
+const revealingFile = ref(false)
+async function revealFile(filePath) {
+  if (!filePath || revealingFile.value) return
+  revealingFile.value = true
+  try {
+    await request(`/api/v2/tasks/${encodeURIComponent(props.taskId)}/file/reveal`, { method: 'POST', body: JSON.stringify({ path: filePath }) })
+  } catch (cause) { error.value = cause.message }
+  finally { revealingFile.value = false }
+}
 const requestedLine = ref(null)
 const gitStatus = ref(null)
 const gitLoading = ref(false)
@@ -357,16 +368,15 @@ defineExpose({ openPath, refreshGit })
             <div v-for="index in 8" :key="index" class="inspector-skeleton-line" :class="index % 3 === 0 ? 'is-short' : ''" />
           </div>
           <template v-else>
-            <button
+            <div
               v-for="entry in visibleFiles"
               :key="entry.path"
-              type="button"
-              class="tree-row flex h-7 min-h-0 w-full min-w-0 items-center justify-start gap-1.5 border-0 pr-2 text-left text-xs"
+              class="tree-row group flex h-7 min-h-0 w-full min-w-0 items-center border-0 pr-2 text-left text-xs"
               :class="selectedPath === entry.path ? 'is-selected' : ''"
               :style="{ paddingLeft: `${8 + entry.depth * 14}px` }"
               :title="entry.path"
-              @click="selectTreeEntry(entry)"
             >
+              <button type="button" class="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left" @click="selectTreeEntry(entry)">
               <PhCaretRight v-if="entry.type === 'directory'" class="h-3 w-3 shrink-0 transition-transform" :class="expandedPaths.has(entry.path) ? 'rotate-90' : ''" />
               <span v-else class="w-3 shrink-0" />
               <PhFolderOpen v-if="entry.type === 'directory' && expandedPaths.has(entry.path)" class="folder-icon h-3.5 w-3.5 shrink-0" />
@@ -375,7 +385,9 @@ defineExpose({ openPath, refreshGit })
               <PhFile v-else class="theme-muted-text h-3.5 w-3.5 shrink-0" />
               <span class="truncate">{{ entry.name }}</span>
               <PhCircleNotch v-if="directoryLoading.has(entry.path)" class="theme-muted-text ml-auto h-3 w-3 shrink-0 animate-spin" />
-            </button>
+              </button>
+              <PxIconButton v-if="!isRemoteTransport()" class="ml-auto h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" label="打开所在文件夹" :disabled="revealingFile" @click.stop="revealFile(entry.path)"><PhFolderOpen class="h-3.5 w-3.5" /></PxIconButton>
+            </div>
           </template>
           <div v-if="directoryCache[''] && !visibleFiles.length" class="theme-muted-text px-3 py-8 text-center text-xs">工作区为空</div>
         </div>
