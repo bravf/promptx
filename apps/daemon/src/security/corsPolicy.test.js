@@ -24,6 +24,6 @@ test('CORS 不因为端口匹配而信任外部来源或畸形 Origin', () => {
     'http://127.0.0.1:31871/path', 'http://127.0.0.1:31871?query=1',
   ]) assert.equal(policy.allows(origin), false, origin)
   assert.equal(policy.allows(''), true)
-  assert.equal(policy.allows('http://127.0.0.1:5174'), true)
+  assert.equal(policy.allows('http://127.0.0.1:4002'), true)
   assert.equal(createCorsPolicy(['https://configured.example'], () => 31871).allows('https://configured.example'), true)
 })

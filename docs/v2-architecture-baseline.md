@@ -195,7 +195,7 @@ SSE 每 15 秒发送 heartbeat。断开 SSE 不会取消正在执行的 Turn。
 
 ## 10. 安全基线
 
-- Daemon 默认监听 `127.0.0.1:3001`。
+- Daemon 默认监听 `127.0.0.1:4001`。
 - API 拒绝未授权浏览器 Origin；默认允许正式本机地址和 Vite 5173/5174，可通过 `PROMPTX_ALLOWED_ORIGINS` 增加明确 Origin。
 - Relay 内部转发剥离浏览器 Origin、Cookie 和 Authorization，再添加内部标识头。
 - Relay 使用 Curve25519 + NaCl 建立每连接共享密钥，并使用固定容量 nonce 窗口拒绝重放。

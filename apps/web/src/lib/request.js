@@ -4,20 +4,13 @@ const importMetaEnv = typeof import.meta !== 'undefined' && import.meta.env ? im
 
 function resolveDefaultApiBase() {
   if (typeof window === 'undefined') {
-    return 'http://localhost:3001'
+    return 'http://localhost:4001'
   }
 
   const url = new URL(window.location.origin)
   const explicitApiPort = String(importMetaEnv.VITE_API_PORT || '').trim()
   if (explicitApiPort) {
     url.port = explicitApiPort
-    return url.toString().replace(/\/$/, '')
-  }
-
-  const currentPort = String(url.port || '')
-  const viteDevPorts = new Set(['4173', '5173', '5174', '5175'])
-  if (importMetaEnv.DEV === true || viteDevPorts.has(currentPort)) {
-    url.port = '3001'
     return url.toString().replace(/\/$/, '')
   }
 

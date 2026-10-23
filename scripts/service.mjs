@@ -11,7 +11,7 @@ const runtimeDir = path.join(path.resolve(process.env.PROMPTX_HOME || path.join(
 const stateFile = path.join(runtimeDir, 'service-v2.json')
 const logFile = path.join(runtimeDir, 'promptx-v2.log')
 const host = String(process.env.PROMPTX_DAEMON_HOST || '127.0.0.1').trim() || '127.0.0.1'
-const port = Math.max(1, Number(process.env.PROMPTX_DAEMON_PORT) || 3001)
+const port = Math.max(1, Number(process.env.PROMPTX_DAEMON_PORT) || 4001)
 const baseUrl = `http://${host}:${port}`
 
 function readState() {

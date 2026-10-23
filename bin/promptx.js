@@ -47,7 +47,7 @@ PromptX CLI
   promptx relay status
 
 说明：
-  - start: 后台启动 PromptX V2，本机默认地址 http://127.0.0.1:3001
+  - start: 后台启动 PromptX V2，本机默认地址 http://127.0.0.1:4001
   - stop: 停止后台服务
   - restart: 重启后台服务
   - status: 查看当前运行状态

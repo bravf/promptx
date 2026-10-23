@@ -99,7 +99,7 @@ export async function createApp(options = {}) {
     gitDelivery,
   })
   const relay = new RelayService({
-    localBaseUrl: options.localBaseUrl || `http://127.0.0.1:${process.env.PROMPTX_DAEMON_PORT || 3001}`,
+    localBaseUrl: options.localBaseUrl || `http://127.0.0.1:${process.env.PROMPTX_DAEMON_PORT || 4001}`,
     logger: app.log,
     ...(options.relayOptions || {}),
   })

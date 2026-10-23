@@ -16,7 +16,7 @@ promptx start
 打开本机工作台：
 
 ```text
-http://127.0.0.1:3001
+http://127.0.0.1:4001
 ```
 
 进入“设置 -> 远程访问”，手动启用 Relay。新安装默认关闭；默认服务地址为：
@@ -152,7 +152,7 @@ PROMPTX_RELAY_CONNECTIONS_PER_MINUTE=120
 依次检查：
 
 ```bash
-curl http://127.0.0.1:3001/api/v2/relay/status
+curl http://127.0.0.1:4001/api/v2/relay/status
 curl https://px.mushayu.com/health
 ```
 

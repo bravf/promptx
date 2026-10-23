@@ -35,7 +35,7 @@ promptx doctor
 promptx start
 ```
 
-Open `http://127.0.0.1:3001`.
+Open `http://127.0.0.1:4001`.
 
 ```bash
 promptx status
@@ -54,8 +54,8 @@ pnpm dev
 
 Development defaults:
 
-- Web: `http://127.0.0.1:5174`
-- Daemon: `http://127.0.0.1:3001`
+- Development UI and API: `http://127.0.0.1:4002` (hot reload).
+- Development and production use the same data configuration, defaulting to `~/.promptx/`.
 
 ```bash
 pnpm test

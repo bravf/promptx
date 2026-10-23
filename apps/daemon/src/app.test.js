@@ -128,7 +128,7 @@ test('CORS 预检允许 v2 的 PATCH 和 DELETE 请求', async () => {
       method: 'OPTIONS',
       url: '/api/v2/tasks/example',
       headers: {
-        origin: 'http://127.0.0.1:5174',
+        origin: 'http://127.0.0.1:4002',
         'access-control-request-method': method,
       },
     })
@@ -172,10 +172,10 @@ test('Daemon 允许正式版同源网页访问 API', async () => {
     const response = await app.inject({
       method: 'GET',
       url: '/api/v2/providers',
-      headers: { origin: 'http://127.0.0.1:3001' },
+      headers: { origin: 'http://127.0.0.1:4001' },
     })
     assert.equal(response.statusCode, 200)
-    assert.equal(response.headers['access-control-allow-origin'], 'http://127.0.0.1:3001')
+    assert.equal(response.headers['access-control-allow-origin'], 'http://127.0.0.1:4001')
   } finally {
     await app.close()
   }

@@ -3,13 +3,13 @@ import { resolveDaemonPaths } from './db/database.js'
 import { acquireInstanceLock } from './runtime/instanceLock.js'
 
 const host = String(process.env.PROMPTX_DAEMON_HOST || '127.0.0.1')
-const port = Number(process.env.PROMPTX_DAEMON_PORT || 3001)
+const port = Number(process.env.PROMPTX_DAEMON_PORT || 4001)
 let app
 let releaseLock
 try {
   releaseLock = acquireInstanceLock(resolveDaemonPaths().databasePath)
   process.once('exit', releaseLock)
-  app = await createApp()
+  app = await createApp(process.env.PROMPTX_DEV_MODE === '1' ? { webRoot: false } : {})
   await app.listen({ host, port })
 } catch (error) {
   console.error(error)

@@ -2,8 +2,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import net from 'node:net'
 import path from 'node:path'
 
-const DEFAULT_DAEMON_PORT = 3001
-const DEFAULT_WEB_PORT = 5174
+const DEFAULT_WEB_PORT = 4002
 const DEFAULT_HOST = '127.0.0.1'
 
 function resolvePnpmCommand() {
@@ -36,14 +35,19 @@ async function canListen(host, port) {
 }
 
 async function findAvailablePort(host, preferredPort) {
-  for (let port = preferredPort; port < preferredPort + 100; port += 1) {
-    if (await canListen(host, port)) return port
-  }
-  throw new Error(`找不到可用的 Web 端口（${preferredPort}-${preferredPort + 99}）。`)
+  if (await canListen(host, preferredPort)) return preferredPort
+  throw new Error(`开发入口端口 ${preferredPort} 已被占用，请停止占用实例后重试。`)
+}
+async function internalPort(host) {
+  const server = net.createServer()
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, host, resolve) })
+  const port = server.address().port
+  await new Promise(resolve => server.close(resolve))
+  return port
 }
 
 const host = String(process.env.PROMPTX_DEV_HOST || DEFAULT_HOST).trim() || DEFAULT_HOST
-const daemonPort = Math.max(1, Number(process.env.PROMPTX_DAEMON_PORT) || DEFAULT_DAEMON_PORT)
+const daemonPort = Number(process.env.PROMPTX_DEV_DAEMON_PORT) || await internalPort(host)
 const preferredWebPort = Math.max(1, Number(process.env.WEB_PORT || process.env.PROMPTX_WEB_PORT) || DEFAULT_WEB_PORT)
 const webPort = await findAvailablePort(host, preferredWebPort)
 const pnpm = resolvePnpmCommand()
@@ -58,9 +62,12 @@ const daemon = spawnChild(pnpm, ['--filter', '@promptx/daemon', 'dev'], {
   PROMPTX_DAEMON_HOST: host,
   PROMPTX_DAEMON_PORT: String(daemonPort),
   PROMPTX_ALLOWED_ORIGINS: allowedOrigins,
+  PROMPTX_DEV_MODE: '1',
 })
 const web = spawnChild(pnpm, ['--filter', '@promptx/web', 'exec', 'vite', '--host', host, '--port', String(webPort), '--strictPort'], {
-  VITE_API_PORT: String(daemonPort),
+  PROMPTX_DEV_API_TARGET: `http://${host}:${daemonPort}`,
+  VITE_API_PORT: '',
+  VITE_API_BASE_URL: '',
   PROMPTX_WEB_PORT: String(webPort),
 })
 const children = [daemon, web]

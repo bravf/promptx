@@ -43,11 +43,11 @@ test('共享事件流按订阅隔离、补齐分页历史，并支持独立恢�
   const base = `http://127.0.0.1:${app.server.address().port}`
   async function readSnapshots(subscriptions) {
     const response = await fetch(`${base}/api/v2/task-events`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:5174' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:4002' },
       body: JSON.stringify({ subscriptions }), signal: AbortSignal.timeout(5000),
     })
     assert.equal(response.status, 200)
-    assert.equal(response.headers.get('access-control-allow-origin'), 'http://127.0.0.1:5174')
+    assert.equal(response.headers.get('access-control-allow-origin'), 'http://127.0.0.1:4002')
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     const messages = []

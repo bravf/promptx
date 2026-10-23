@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { resolvePromptxPaths } from './lib/promptxPaths.mjs'
 
 const DEFAULT_HOST = '127.0.0.1'
-const DEFAULT_PORT = 3001
+const DEFAULT_PORT = 4001
 const SUPPORTED_NODE_RANGES = [
   { min: [20, 19, 0], maxExclusiveMajor: 21, label: '20.19+' },
   { min: [22, 13, 0], maxExclusiveMajor: 23, label: '22.13+' },
