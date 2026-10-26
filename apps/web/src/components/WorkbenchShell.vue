@@ -737,10 +737,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.v2-shell { --workspace-gap: 0.5rem; grid-template-columns: var(--sidebar-width, 240px) 8px minmax(0, 1fr); border: 0; }
+.v2-shell { --workspace-gap: 0; grid-template-columns: var(--sidebar-width, 240px) 1px minmax(0, 1fr); border: 0; }
 .v2-shell.is-resizing-sidebar { user-select: none; cursor: col-resize; }
-.workspace-sidebar-divider { position: relative; cursor: col-resize; }
-.workspace-sidebar.panel { border: 0; box-shadow: inset 0 1px 0 var(--theme-panelHighlight); }
+.workspace-sidebar-divider { position: relative; cursor: col-resize; width: 7px; margin-left: -3px; z-index: 25; }
+.workspace-sidebar-divider::before { content: ''; position: absolute; inset: 0 3px; background: var(--theme-borderDefault); pointer-events: none; }
+.workspace-sidebar.panel { border: 0; border-radius: 0; box-shadow: none; }
 .timeline-workspace { grid-template-columns: minmax(0, 1fr); }
 .timeline-workspace.is-split {
   grid-template-columns: repeat(2, minmax(0, 1fr));

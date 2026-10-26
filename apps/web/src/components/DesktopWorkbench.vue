@@ -128,7 +128,7 @@ function menuAction(action, group, tab) {
 }
 function rectStyle(rect, content = false) {
   if (!rect) return { display: 'none' }
-  return { left: `calc(${rect.x}% + 2px)`, top: `calc(${rect.y}% + ${content ? 38 : 2}px)`, width: `calc(${rect.w}% - 4px)`, height: `calc(${rect.h}% - ${content ? 40 : 4}px)` }
+  return { left: `${rect.x}%`, top: `calc(${rect.y}% + ${content ? 36 : 0}px)`, width: `${rect.w}%`, height: `calc(${rect.h}% - ${content ? 36 : 0}px)` }
 }
 function panelStyle(panel) { return rectStyle(geometry.value.leaves.find(rect => rect.group.id === panel.groupId), true) }
 function dividerStyle(rect) {
@@ -264,8 +264,11 @@ defineExpose({ openSession, openSettings })
 <style scoped>
 .desktop-workbench { background: var(--theme-appBg); }
 .workbench-group, .workbench-content { background: var(--theme-appPanel); }
-.workbench-group { border: 0; border-radius: var(--theme-layoutRadius); }
-.workbench-content { border-radius: 0 0 var(--theme-layoutRadius) var(--theme-layoutRadius); }
+.workbench-group { border: 0; border-radius: 0; }
+.workbench-content { border-radius: 0; }
+.workbench-divider::before { content: ''; position: absolute; background: var(--theme-borderDefault); pointer-events: none; }
+.workbench-divider[aria-orientation='vertical']::before { inset: 0; left: 3px; width: 1px; }
+.workbench-divider[aria-orientation='horizontal']::before { inset: 0; top: 3px; height: 1px; }
 .workbench-content > :deep(.panel) { border-radius: 0; }
 .workbench-tab-bar { background: var(--theme-appPanelInset); }
 .workbench-tab-list { align-items: flex-end; padding: 4px 8px 0; scrollbar-width: none; }
