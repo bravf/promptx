@@ -44,13 +44,32 @@ async function waitUntil(check) {
   assert.fail('等待状态超时')
 }
 
+test('健康地址不作为页面入口，重复启动替换已结束记录', { timeout: 15000 }, async t => {
+  const f = await fixture(t)
+  const listenPort = await port()
+  fs.writeFileSync(path.join(f.root, 'health.mjs'), `import http from 'node:http';http.createServer((q,r)=>r.end('OK')).listen(${listenPort},'127.0.0.1')`)
+  const url = `http://127.0.0.1:${listenPort}/api/health`
+  const input = { name: '健康检查', type: 'web', command: `${process.execPath} health.mjs`, url, waitMs: 2000 }
+  const first = await f.service.startService('a', input)
+  assert.equal(first.terminal.service.url, '')
+  assert.equal(first.terminal.service.healthUrl, url)
+  assert.equal(first.terminal.service.readiness, 'ready')
+  const session = f.service.get('a', first.terminal.id)
+  f.service.stop(session)
+  await waitUntil(() => !session.running)
+  assert.equal(session.service.stoppedByUser, true)
+  const next = await f.service.startService('a', { ...input, url: `http://127.0.0.1:${listenPort}/app/`, healthUrl: url })
+  assert.equal(next.terminal.service.url, `http://127.0.0.1:${listenPort}/app/`)
+  assert.equal(f.service.listServices('a').length, 1)
+})
+
 test('运行任务区分桌面、监听和通用进程，重启保留类型且不自动打开终端', { timeout: 15000, skip: process.platform === 'win32' }, async t => {
   const f = await fixture(t)
   const a = await f.client('a')
   const opened = []
   f.service.onChange = (_taskId, terminalId) => { if (terminalId) opened.push(terminalId) }
   fs.writeFileSync(path.join(f.root, 'app.mjs'), "console.log('http://127.0.0.1:19999/'); setInterval(() => {}, 1000)")
-  for (const type of ['desktop', 'watch', 'process']) {
+  for (const type of ['desktop', 'watch', 'process', 'remote']) {
     const started = await a.call('start_service', { name: type, type, command: `${process.execPath} app.mjs`, waitMs: 0 })
     assert.ok(!started.isError, JSON.stringify(started))
     const session = f.service.get('a', started.value.terminal.id)
@@ -59,9 +78,9 @@ test('运行任务区分桌面、监听和通用进程，重启保留类型且�
     assert.equal(session.service.url, '')
     f.service.stop(session)
     await waitUntil(() => !session.running)
-    if (type === 'desktop') {
+    if (type === 'desktop' || type === 'remote') {
       const restarted = await f.service.restartService('a', session.id)
-      assert.equal(restarted.terminal.service.type, 'desktop')
+      assert.equal(restarted.terminal.service.type, type)
       assert.equal(restarted.terminal.service.url, '')
       assert.equal(restarted.terminal.service.readiness, 'running')
       f.service.stop(f.service.get('a', restarted.terminal.id))

@@ -88,6 +88,7 @@ export class TerminalService {
     })
     pty.onExit(({ exitCode }) => {
       session.running = false
+      if (session.service) session.service.stoppedByUser = Boolean(session.stopping)
       session.stopping = false
       session.exitCode = exitCode
       if (session.service && exitCode) session.service.error = this.read(session).data.slice(-600).trim() || `进程退出码：${exitCode}`
@@ -140,16 +141,19 @@ export class TerminalService {
     return target
   }
   async startService(taskId, input) {
-    const type = input.type || (input.url ? 'web' : /\.app\/Contents\/MacOS\//.test(input.command) ? 'desktop' : 'process')
-    if (type !== 'web' && input.url) throw Object.assign(new Error('仅 Web 服务可以配置访问地址。'), { statusCode: 400 })
+    const type = input.type || ((input.url || input.healthUrl) ? 'web' : /\.app\/Contents\/MacOS\//.test(input.command) ? 'desktop' : 'process')
+    if (type !== 'web' && (input.url || input.healthUrl)) throw Object.assign(new Error('仅 Web 服务可以配置访问地址。'), { statusCode: 400 })
     if (type === 'desktop' && /^\s*(?:\/usr\/bin\/)?open(?:\s|$)/.test(input.command)) {
       throw Object.assign(new Error('请直接以前台方式运行 .app/Contents/MacOS/ 中的程序，不要使用 open，以便跟踪和停止实际应用进程。'), { statusCode: 400 })
     }
-    if (input.url) {
-      const url = new URL(input.url)
+    for (const address of [input.url, input.healthUrl].filter(Boolean)) {
+      const url = new URL(address)
       if (!['http:', 'https:'].includes(url.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.username || url.password) {
         throw Object.assign(new Error('就绪检查地址必须是本机 HTTP 地址。'), { statusCode: 400 })
       }
+    }
+    if (input.url && /^\/(?:api|healthz?|metrics|readyz?)(?:\/|$)/i.test(new URL(input.url).pathname)) {
+      input = { ...input, healthUrl: input.healthUrl || input.url, url: undefined }
     }
     const cwd = await this.serviceCwd(taskId, input.cwd)
     const key = JSON.stringify([taskId, cwd, input.command])
@@ -160,7 +164,10 @@ export class TerminalService {
       if (existing) return { terminal: this.describe(existing), reused: true }
       if (input.url && await this.portInUse(input.url)) throw Object.assign(new Error('指定的服务端口已被占用，请检查已有服务或改用其他端口。'), { statusCode: 409 })
       const session = await this.create(taskId, { cols: 100, rows: 30 }, { name: input.name, cwd, command: input.command,
-        service: { type, command: input.command, url: input.url || '', readiness: 'starting' } })
+        service: { type, command: input.command, url: input.url || '', healthUrl: input.healthUrl || '', readiness: 'starting' } })
+      for (const previous of [...this.sessions.values()]) {
+        if (previous.id !== session.id && previous.taskId === taskId && previous.service && !previous.running && previous.cwd === cwd && previous.service.command === input.command) this.remove(previous.id)
+      }
       this.notify(taskId)
       await this.checkService(session, input.waitMs)
       this.notify(taskId)
@@ -184,19 +191,22 @@ export class TerminalService {
     const stableAfter = Date.now() + 300
     do {
       if (this.closed || !session.running || session.stopping || !this.sessions.has(session.id)) break
-      if (session.service.type === 'desktop' || session.service.type === 'watch') {
+      if (['desktop', 'watch', 'remote'].includes(session.service.type)) {
         if (Date.now() >= stableAfter) { session.service.readiness = 'running'; return }
       } else if (!session.service.url) {
         const text = this.read(session).data.replace(/\x1b\[[0-9;]*m/g, '')
         const urls = text.match(/https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):\d+(?:\/[^\s\x1b]*)?/g)
         if (urls?.length) {
-          session.service.url = urls.at(-1).replace('0.0.0.0', '127.0.0.1')
+          const candidates = urls.map(value => value.replace('0.0.0.0', '127.0.0.1'))
+          const page = candidates.find(value => !/^\/(?:api|healthz?|metrics|readyz?)(?:\/|$)/i.test(new URL(value).pathname))
+          if (page) session.service.url = page
+          else if (!session.service.healthUrl) session.service.healthUrl = candidates[0]
           session.service.type = 'web'
         }
       }
-      if (session.service.url) {
+      if (session.service.healthUrl || session.service.url) {
         try {
-          const response = await fetch(session.service.url, { signal: AbortSignal.timeout(500), redirect: 'manual' })
+          const response = await fetch(session.service.healthUrl || session.service.url, { signal: AbortSignal.timeout(500), redirect: 'manual' })
           await response.body?.cancel()
           if (response.status >= 200 && response.status < 400 && Date.now() >= stableAfter && session.running && !session.stopping && !this.closed && this.sessions.has(session.id)) { session.service.readiness = 'ready'; return }
         } catch {} // 启动中可能还没有监听端口。
@@ -210,7 +220,7 @@ export class TerminalService {
     const session = this.get(taskId, id)
     if (!session.service) throw Object.assign(new Error('这个终端不是托管服务。'), { statusCode: 400 })
     if (session.running) throw Object.assign(new Error('请先停止服务，等待进程退出后再重启。'), { statusCode: 409 })
-    const result = await this.startService(taskId, { name: session.name, type: session.service.type, cwd: session.cwd, command: session.service.command, url: session.service.url || undefined, waitMs: 8000 })
+    const result = await this.startService(taskId, { name: session.name, type: session.service.type, cwd: session.cwd, command: session.service.command, url: session.service.url || undefined, healthUrl: session.service.healthUrl || undefined, waitMs: 8000 })
     this.remove(id)
     return result
   }
@@ -284,6 +294,19 @@ export function registerTerminalRoutes(app, repository, service = new TerminalSe
     const next = await service.create(request.params.taskId, size, { requestId: session.id, name: session.name })
     service.remove(session.id)
     return { terminal: service.describe(next) }
+  })
+  app.post('/api/v2/tasks/:taskId/services/clear-ended', async request => {
+    for (const item of service.listServices(request.params.taskId)) {
+      if (!item.running && (!item.exitCode || item.service.stoppedByUser || item.service.dismissed)) service.remove(item.id)
+    }
+    return { ok: true }
+  })
+  app.post(`${terminalPath}/dismiss`, async request => {
+    const session = get(request)
+    if (!session.service || session.running) throw Object.assign(new Error('只能忽略已结束的运行任务。'), { statusCode: 400 })
+    session.service.dismissed = true
+    service.notify(session.taskId)
+    return { ok: true }
   })
   app.get('/api/v2/tasks/:taskId/services', async request => ({ services: service.listServices(request.params.taskId) }))
   app.post(`${terminalPath}/stop`, async request => { service.stop(get(request)); return { ok: true } })

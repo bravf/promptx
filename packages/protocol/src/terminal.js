@@ -13,11 +13,12 @@ export const TerminalInputSchema = z.object({ id: z.string().uuid(), data: z.str
 export const TerminalCursorSchema = z.object({ cursor: z.coerce.number().int().nonnegative().default(0) })
 
 export const StartServiceSchema = z.object({
-  type: z.enum(['web', 'desktop', 'watch', 'process']).optional(),
+  type: z.enum(['web', 'desktop', 'watch', 'process', 'remote']).optional(),
   name: z.string().trim().min(1).max(40),
   command: z.string().trim().min(1).max(8000),
   cwd: z.string().max(4096).default('.'),
   url: z.string().url().optional(),
+  healthUrl: z.string().url().optional(),
   waitMs: z.number().int().min(0).max(15000).default(8000),
 }).strict()
 export const ServiceIdSchema = z.object({ terminalId: z.string().uuid() }).strict()
