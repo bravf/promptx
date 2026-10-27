@@ -1,0 +1,23 @@
+@font-face {
+  font-family: 'Anthropic Sans Web Text';
+  src: url('./AnthropicSans-Roman.woff2') format('woff2');
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anthropic Serif Web Text';
+  src: url('./AnthropicSerif-Roman.woff2') format('woff2');
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anthropic Mono Variable';
+  src: url('./AnthropicMono-Roman.woff2') format('woff2');
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}

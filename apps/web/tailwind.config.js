@@ -29,23 +29,9 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: [
-          'Geist',
-          '-apple-system',
-          'BlinkMacSystemFont',
-          'Segoe UI',
-          'PingFang SC',
-          'Hiragino Sans GB',
-          'Microsoft YaHei',
-          'Noto Sans CJK SC',
-          'Source Han Sans SC',
-          'Roboto',
-          'Helvetica Neue',
-          'Arial',
-          'system-ui',
-          'sans-serif',
-        ],
-        mono: ['Geist Mono', 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', 'Monaco', 'monospace'],
+        sans: ["var(--theme-fontSans)"],
+        serif: ["var(--theme-fontSerif)"],
+        mono: ["var(--theme-fontMono)"],
       },
       boxShadow: {
         panel: '0 1px 0 rgba(28, 25, 23, 0.12)',

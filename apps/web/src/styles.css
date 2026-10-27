@@ -9,8 +9,9 @@
   --theme-providerKimi: color-mix(in srgb, #528bff 80%, var(--theme-textPrimary));
   --theme-providerGrok: color-mix(in srgb, #a17de0 80%, var(--theme-textPrimary));
   --theme-providerPi: color-mix(in srgb, #d49a32 80%, var(--theme-textPrimary));
-  --theme-fontSans: "MiSans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  --theme-fontMono: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Monaco, monospace;
+  --theme-fontSans: "Anthropic Sans Web Text", "Anthropic Sans", "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --theme-fontSerif: "Anthropic Serif Web Text", "Anthropic Serif", "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, Georgia, serif;
+  --theme-fontMono: "Anthropic Mono Variable", "Anthropic Mono", "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Monaco, monospace;
   --theme-layoutRadius: 0.5rem;
   --theme-controlRadius: 0.25rem;
   --theme-buttonRadius: 0.25rem;
@@ -1069,7 +1070,6 @@ body {
   }
 
   :root[data-theme='promptx-aqua-classic'] {
-    --theme-fontMono: Menlo, Monaco, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
     --theme-processDetailRadius: 0.4rem;
     --theme-processDetailBadgeRadius: 0.35rem;
   }
@@ -1530,3 +1530,8 @@ body {
 
 /* 浮层的外框圆角统一，内部菜单项保留各自的圆角。 */
 .theme-popover { border-radius: var(--theme-layoutRadius); }
+
+/* 对话正文使用衬线字体，操作控件和代码保持各自字体。 */
+.timeline-markdown .prose-like { font-family: var(--theme-fontSerif); }
+.timeline-markdown button, .timeline-markdown select { font-family: var(--theme-fontSans); }
+.font-mono, code, pre { font-family: var(--theme-fontMono); }
