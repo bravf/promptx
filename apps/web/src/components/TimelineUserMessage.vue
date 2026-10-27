@@ -165,7 +165,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="user-message max-w-[85%] rounded-sm px-3 py-2 text-sm">
+  <div class="user-message max-w-full rounded-sm px-3 py-2 text-sm">
     <div v-if="images.length" class="flex flex-wrap gap-2">
       <PxButton
         v-for="block in images"
@@ -249,7 +249,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .user-message {
   min-width: 0;
-  max-width: 85%;
+  max-width: 100%;
   overflow-wrap: anywhere;
   word-break: break-word;
   background: var(--theme-promptBg);

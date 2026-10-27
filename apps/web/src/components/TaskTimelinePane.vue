@@ -7,6 +7,7 @@ import { createTaskEventSource } from '../lib/taskEventSource.js'
 import { isTimelineAtBottom } from '../lib/timelineViewport.js'
 import { createTurnTimingMap, groupedTurnTiming, groupTimelineTurns, isTimelineTurnRunning } from '../lib/timelinePresentation.js'
 import { useTheme } from '../composables/useTheme.js'
+import { useLayoutPreferences } from '../composables/useLayoutPreferences.js'
 import AgentComposer from './AgentComposer.vue'
 const TaskTerminal = defineAsyncComponent(() => import('./TaskTerminal.vue'))
 import PxButton from './PxButton.vue'
@@ -42,6 +43,7 @@ const toolExpansion = reactive(new Map())
 provide('toolExpansion', toolExpansion)
 
 const { isDark } = useTheme()
+const { contentWidthClass } = useLayoutPreferences()
 const rows = ref([])
 const turns = ref([])
 const turnsRevision = ref('')
@@ -825,7 +827,7 @@ onBeforeUnmount(() => {
         <div ref="timelineElement" class="timeline min-h-0 flex-1 overflow-y-auto" tabindex="0" @pointerdown.passive="handleTimelinePointerDown" @scroll.passive="handleTimelineScroll" @wheel.passive="handleTimelineWheel" @touchstart.passive="handleTimelineTouchStart" @touchmove.passive="handleTimelineTouchMove" @keydown="handleTimelineKeydown">
           <div v-if="timelineSyncError && !timelineHasContent" class="flex h-full items-center justify-center p-8 text-center"><div class="max-w-sm"><p class="error-row rounded-sm border px-3 py-2 text-left text-xs">Timeline 同步失败：{{ timelineSyncError }}</p><PxButton variant="secondary" size="sm" class="mt-3" @click="selectTask(activeTaskId)">重试</PxButton></div></div>
           <div v-else-if="!entries.length" class="flex h-full items-center justify-center p-8 text-center"><div><PhRobot class="theme-muted-text mx-auto h-8 w-8" /><p class="mt-3 text-sm font-medium">开始一段新的协作</p><p class="theme-muted-text mt-1 text-xs">消息会在当前工作区内执行</p></div></div>
-          <div v-else ref="timelineContent" class="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
+          <div v-else ref="timelineContent" class="mx-auto w-full px-4 py-6 sm:px-6" :class="contentWidthClass">
             <template v-for="entry in entries" :key="entry.key || `${entry.seqStart}-${entry.item?.type || ''}`">
               <TimelineTurn v-if="entry.presentationType === 'turn'" :turn="entry" :timing="groupedTurnTiming(entry, turnTimings)" :running="processIsRunning(entry)" :waiting="pendingInteractions.length > 0 && entry.turnIds.includes(latestTurnId)" :active-turn-id="latestTurnId" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" @rendered="scheduleTimelineFollow" @open-workspace-path="openProjectPath">
                 <template #subagents><TimelineSubagents :tasks="entry.turnIds.flatMap(id => backgroundGroups.get(id) || [])" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" :stopping="stoppingTasks" @stop-all="stopAllTasks" @rendered="scheduleTimelineFollow" @open-workspace-path="openProjectPath" /></template>
@@ -853,8 +855,8 @@ onBeforeUnmount(() => {
       </div>
 
       <footer class="composer-wrap shrink-0 p-3 sm:p-4">
-        <div v-if="error" class="error-row mx-auto mb-2 max-w-3xl rounded-sm border px-3 py-2 text-xs">{{ error }}</div>
-        <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex max-w-3xl items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs"><span>{{ sendBlockedReason }}</span><PxButton variant="ghost" size="sm" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</PxButton></div>
+        <div v-if="error" class="error-row mx-auto mb-2 rounded-sm border px-3 py-2 text-xs" :class="contentWidthClass">{{ error }}</div>
+        <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs" :class="contentWidthClass"><span>{{ sendBlockedReason }}</span><PxButton variant="ghost" size="sm" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</PxButton></div>
         <AgentComposer :mobile="mobile" :key="activeTaskId" :task-id="task.id" :running="activity.foreground || activity.count > 0" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :control-loading="controlLoading" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="stopAllTasks" @draft-change="saveTaskDraft" />
       </footer>
       <TaskTerminal v-if="terminalOpen && !drawerMode" :key="task.id" :task-id="task.id" :terminal-id="selectedTerminalId" @close="terminalOpen = false" />

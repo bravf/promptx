@@ -11,6 +11,7 @@ import PxIconButton from './PxIconButton.vue'
 import { v2Api } from '../lib/v2Api.js'
 import { writeClipboardText } from '../lib/clipboard.js'
 import { useToolPreferences } from '../composables/useToolPreferences.js'
+import { useLayoutPreferences } from '../composables/useLayoutPreferences.js'
 import { isRemoteTransport } from '../lib/transport.js'
 import ArchivedTasksSettings from './ArchivedTasksSettings.vue'
 
@@ -24,6 +25,11 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'changed'])
 const activeSection = ref('appearance')
+const { contentWidth, setContentWidth } = useLayoutPreferences()
+const layoutOptions = [
+  { value: 'fixed', label: '固定宽度', description: '正文居中，保持当前阅读宽度。' },
+  { value: 'full', label: '铺满', description: '使用当前分栏的可用宽度，保留必要的左右留白。' },
+]
 const { autoExpand, setAutoExpand } = useToolPreferences()
 const remoteTransport = isRemoteTransport()
 const relayLoading = ref(false)
@@ -37,6 +43,7 @@ const confirmReset = ref(false)
 
 const sections = [
   { id: 'appearance', label: '外观', icon: PhPalette },
+  { id: 'layout', label: '布局', icon: PhSlidersHorizontal },
   ...(!remoteTransport ? [{ id: 'timeline', label: '执行过程', icon: PhSlidersHorizontal }] : []),
   { id: 'archive', label: '归档', icon: PhArchive },
   { id: 'remote', label: '远程访问', icon: PhBroadcast },
@@ -188,6 +195,18 @@ watch(
           <p class="theme-muted-text mt-1 text-xs">选择 PromptX 的界面皮肤。</p>
         </div>
         <ThemeToggle />
+      </section>
+
+      <section v-else-if="activeSection === 'layout'" class="mx-auto w-full max-w-2xl">
+        <h2 class="theme-heading text-lg font-semibold">布局</h2>
+        <p class="theme-muted-text mt-1 text-xs leading-5">调整 Timeline 和输入框的宽度。立即生效并保存在当前浏览器。</p>
+        <fieldset class="mt-6 space-y-2">
+          <legend class="theme-heading mb-3 text-sm font-medium">内容宽度</legend>
+          <label v-for="option in layoutOptions" :key="option.value" class="theme-option flex cursor-pointer items-start gap-3 rounded-sm border px-3 py-3" :class="contentWidth === option.value ? 'theme-option-active' : 'theme-option-idle'">
+            <input type="radio" name="content-width" :value="option.value" :checked="contentWidth === option.value" class="mt-0.5 h-4 w-4 shrink-0" @change="setContentWidth(option.value)" />
+            <span><span class="theme-heading block text-sm font-medium">{{ option.label }}</span><span class="theme-muted-text mt-1 block text-xs leading-5">{{ option.description }}</span></span>
+          </label>
+        </fieldset>
       </section>
 
       <section v-else-if="activeSection === 'timeline' && !remoteTransport" class="mx-auto w-full max-w-2xl">

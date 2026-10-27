@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
-import { PhRobot, PhCheck, PhCaretRight, PhCircle, PhRecord, PhCircleNotch } from '@phosphor-icons/vue'
+import { PhRobot, PhSmiley, PhCheck, PhCaretRight, PhCircle, PhRecord, PhCircleNotch } from '@phosphor-icons/vue'
 import { formatElapsedTime, getTurnActivityState, userMessageCopyText } from '../lib/timelinePresentation.js'
 import { isToolExpanded, toolExpansionKey } from '../lib/toolExpansion.js'
 import { useToolPreferences } from '../composables/useToolPreferences.js'
@@ -86,8 +86,13 @@ onBeforeUnmount(() => clearInterval(clockTimer))
 <template>
   <section class="timeline-turn min-w-0">
     <article v-for="entry in turn.userEntries" :key="entry.seqStart" class="timeline-message mb-5 flex min-w-0 max-w-full flex-col items-end" :data-timeline-seq="entry.seqEnd">
-      <TimelineUserMessage :content="entry.item.content" :is-dark="isDark" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
-      <TimelineMessageMeta :text="userMessageCopyText(entry.item.content)" :timestamp="entry.timestamp" align="right" />
+      <div class="flex min-w-0 max-w-[85%] items-start gap-3">
+        <div class="min-w-0">
+          <TimelineUserMessage :content="entry.item.content" :is-dark="isDark" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
+          <TimelineMessageMeta :text="userMessageCopyText(entry.item.content)" :timestamp="entry.timestamp" align="right" />
+        </div>
+        <PhSmiley class="user-avatar mt-1 h-[18px] w-[18px] shrink-0" role="img" aria-label="用户头像" />
+      </div>
     </article>
 
     <section v-if="showProcess" class="process-group mb-5 ml-7">

@@ -5,6 +5,9 @@ import { v2Api } from '../lib/v2Api.js'
 import PxSelect from './PxSelect.vue'
 import PxButton from './PxButton.vue'
 import PxIconButton from './PxIconButton.vue'
+import { useLayoutPreferences } from '../composables/useLayoutPreferences.js'
+
+const { contentWidthClass } = useLayoutPreferences()
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024
 const MAX_ATTACHMENTS = 10
@@ -260,8 +263,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="composer mx-auto max-w-3xl rounded-lg"
-    :class="dragging ? 'composer-dragging' : ''"
+    class="composer mx-auto w-full rounded-lg"
+    :class="[contentWidthClass, { 'composer-dragging': dragging }]"
     @dragenter.prevent="dragging = true"
     @dragover.prevent="dragging = true"
     @dragleave.self="dragging = false"
