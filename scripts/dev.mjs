@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import net from 'node:net'
 import path from 'node:path'
+import { waitForDaemon } from './lib/devReadiness.mjs'
 
 const DEFAULT_WEB_PORT = 4002
 const DEFAULT_HOST = '127.0.0.1'
@@ -54,8 +55,8 @@ const pnpm = resolvePnpmCommand()
 const webOrigin = `http://${host}:${webPort}`
 const allowedOrigins = [process.env.PROMPTX_ALLOWED_ORIGINS, webOrigin].filter(Boolean).join(',')
 
-console.log(`[promptx-dev] Web:   http://${host}:${webPort}`)
 console.log(`[promptx-dev] Daemon: http://${host}:${daemonPort}`)
+console.log('[promptx-dev] 正在等待 Daemon 就绪…')
 console.log('[promptx-dev] 按 Ctrl+C 可同时停止服务。')
 
 const daemon = spawnChild(pnpm, ['--filter', '@promptx/daemon', 'dev'], {
@@ -64,28 +65,50 @@ const daemon = spawnChild(pnpm, ['--filter', '@promptx/daemon', 'dev'], {
   PROMPTX_ALLOWED_ORIGINS: allowedOrigins,
   PROMPTX_DEV_MODE: '1',
 })
-const web = spawnChild(pnpm, ['--filter', '@promptx/web', 'exec', 'vite', '--host', host, '--port', String(webPort), '--strictPort'], {
-  PROMPTX_DEV_API_TARGET: `http://${host}:${daemonPort}`,
-  VITE_API_PORT: '',
-  VITE_API_BASE_URL: '',
-  PROMPTX_WEB_PORT: String(webPort),
-})
-const children = [daemon, web]
+const children = [daemon]
+const startup = new AbortController()
 let stopping = false
 
 function shutdown(code = 0) {
   if (stopping) return
   stopping = true
+  startup.abort(new Error('开发服务已停止。'))
   for (const child of children) if (!child.killed) child.kill('SIGTERM')
   setTimeout(() => process.exit(code), 100).unref()
 }
 
 process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
-for (const [label, child] of [['Daemon', daemon], ['Web', web]]) {
+function observeChild(label, child) {
+  child.on('error', (error) => {
+    if (stopping) return
+    console.error(`[promptx-dev] ${label} 启动失败：`, error)
+    shutdown(1)
+  })
   child.on('exit', (code, signal) => {
     if (stopping) return
     console.error(`[promptx-dev] ${label} 已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`)
     shutdown(Number(code) || 1)
   })
+}
+observeChild('Daemon', daemon)
+
+try {
+  await waitForDaemon(`http://${host}:${daemonPort}`, { signal: startup.signal })
+  if (!stopping) {
+    console.log(`[promptx-dev] Daemon 已就绪，Web: http://${host}:${webPort}`)
+    const web = spawnChild(pnpm, ['--filter', '@promptx/web', 'exec', 'vite', '--host', host, '--port', String(webPort), '--strictPort'], {
+      PROMPTX_DEV_API_TARGET: `http://${host}:${daemonPort}`,
+      VITE_API_PORT: '',
+      VITE_API_BASE_URL: '',
+      PROMPTX_WEB_PORT: String(webPort),
+    })
+    children.push(web)
+    observeChild('Web', web)
+  }
+} catch (error) {
+  if (!stopping) {
+    console.error(`[promptx-dev] ${error.message}`)
+    shutdown(1)
+  }
 }
