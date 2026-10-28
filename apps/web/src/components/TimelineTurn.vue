@@ -4,6 +4,7 @@ import { PhRobot, PhSmiley, PhCheck, PhCaretRight, PhCircle, PhRecord, PhCircleN
 import { formatElapsedTime, getTurnActivityState, userMessageCopyText } from '../lib/timelinePresentation.js'
 import { isToolExpanded, toolExpansionKey } from '../lib/toolExpansion.js'
 import { useToolPreferences } from '../composables/useToolPreferences.js'
+import { useLayoutPreferences } from '../composables/useLayoutPreferences.js'
 import { isRemoteTransport } from '../lib/transport.js'
 import TimelineToolCall from './TimelineToolCall.vue'
 import TimelineMarkdown from './TimelineMarkdown.vue'
@@ -22,6 +23,7 @@ const props = defineProps({
   waiting: { type: Boolean, default: false },
 })
 const emit = defineEmits(['rendered', 'open-workspace-path'])
+const { userMessagePosition } = useLayoutPreferences()
 
 const expanded = ref(props.running)
 const manualProcess = ref(false)
@@ -85,11 +87,11 @@ onBeforeUnmount(() => clearInterval(clockTimer))
 
 <template>
   <section class="timeline-turn min-w-0">
-    <article v-for="entry in turn.userEntries" :key="entry.seqStart" class="timeline-message mb-5 flex min-w-0 max-w-full flex-col items-end" :data-timeline-seq="entry.seqEnd">
-      <div class="flex min-w-0 max-w-[85%] items-start gap-3">
+    <article v-for="entry in turn.userEntries" :key="entry.seqStart" class="timeline-message mb-5 flex min-w-0 max-w-full flex-col" :class="userMessagePosition === 'left' ? 'items-start' : 'items-end'" :data-timeline-seq="entry.seqEnd">
+      <div class="flex min-w-0 max-w-[85%] items-start gap-3" :class="userMessagePosition === 'left' ? 'flex-row-reverse' : ''">
         <div class="min-w-0">
           <TimelineUserMessage :content="entry.item.content" :is-dark="isDark" :workspace-cwd="workspaceCwd" :task-id="taskId" @rendered="emit('rendered')" @open-workspace-path="emit('open-workspace-path', $event)" />
-          <TimelineMessageMeta :text="userMessageCopyText(entry.item.content)" :timestamp="entry.timestamp" align="right" />
+          <TimelineMessageMeta :text="userMessageCopyText(entry.item.content)" :timestamp="entry.timestamp" :align="userMessagePosition" />
         </div>
         <PhSmiley class="user-avatar mt-1 h-[18px] w-[18px] shrink-0" role="img" aria-label="用户头像" />
       </div>

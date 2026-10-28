@@ -25,7 +25,11 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'changed'])
 const activeSection = ref('appearance')
-const { contentWidth, setContentWidth } = useLayoutPreferences()
+const { contentWidth, setContentWidth, userMessagePosition, setUserMessagePosition } = useLayoutPreferences()
+const messagePositionOptions = [
+  { value: 'right', label: '右侧', description: '用户消息靠右，保持聊天布局。' },
+  { value: 'left', label: '左侧', description: '用户消息和回复靠左，头像与正文沿同一方向排列。' },
+]
 const layoutOptions = [
   { value: 'fixed', label: '固定宽度', description: '正文居中，保持当前阅读宽度。' },
   { value: 'full', label: '铺满', description: '使用当前分栏的可用宽度，保留必要的左右留白。' },
@@ -199,11 +203,18 @@ watch(
 
       <section v-else-if="activeSection === 'layout'" class="mx-auto w-full max-w-2xl">
         <h2 class="theme-heading text-lg font-semibold">布局</h2>
-        <p class="theme-muted-text mt-1 text-xs leading-5">调整 Timeline 和输入框的宽度。立即生效并保存在当前浏览器。</p>
+        <p class="theme-muted-text mt-1 text-xs leading-5">调整内容宽度和用户消息位置。立即生效并保存在当前浏览器。</p>
         <fieldset class="mt-6 space-y-2">
           <legend class="theme-heading mb-3 text-sm font-medium">内容宽度</legend>
           <label v-for="option in layoutOptions" :key="option.value" class="theme-option flex cursor-pointer items-start gap-3 rounded-sm border px-3 py-3" :class="contentWidth === option.value ? 'theme-option-active' : 'theme-option-idle'">
             <input type="radio" name="content-width" :value="option.value" :checked="contentWidth === option.value" class="mt-0.5 h-4 w-4 shrink-0" @change="setContentWidth(option.value)" />
+            <span><span class="theme-heading block text-sm font-medium">{{ option.label }}</span><span class="theme-muted-text mt-1 block text-xs leading-5">{{ option.description }}</span></span>
+          </label>
+        </fieldset>
+        <fieldset class="mt-6 space-y-2">
+          <legend class="theme-heading mb-3 text-sm font-medium">用户消息位置</legend>
+          <label v-for="option in messagePositionOptions" :key="option.value" class="theme-option flex cursor-pointer items-start gap-3 rounded-sm border px-3 py-3" :class="userMessagePosition === option.value ? 'theme-option-active' : 'theme-option-idle'">
+            <input type="radio" name="user-message-position" :value="option.value" :checked="userMessagePosition === option.value" class="mt-0.5 h-4 w-4 shrink-0" @change="setUserMessagePosition(option.value)" />
             <span><span class="theme-heading block text-sm font-medium">{{ option.label }}</span><span class="theme-muted-text mt-1 block text-xs leading-5">{{ option.description }}</span></span>
           </label>
         </fieldset>
