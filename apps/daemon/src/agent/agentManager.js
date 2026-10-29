@@ -23,6 +23,7 @@ export class AgentManager {
     this.runtimes = new Map()
     this.activeTurns = new Map()
     this.preparingTurns = new Set()
+    this.stoppingAgents = new Set()
     this.exclusiveOperations = new Set()
     this.controlStates = new Map()
     this.toolOwners = new Map()
@@ -133,8 +134,10 @@ export class AgentManager {
     })
     runtime.on('backgroundTask', (task) => {
       if (this.runtimes.get(agent.id) !== runtime) return
-      const previous = this.repository.getAgent(agent.id)?.backgroundTasks?.find(item => item.id === task.id)
-      this.repository.upsertProviderTask(agent.id, { ...task, originTurnId: previous?.originTurnId || (agent.providerId !== 'claude' || task.parentCallId === null ? this.activeTurns.get(agent.id)?.id : null) || null })
+      const tasks = this.repository.getAgent(agent.id)?.backgroundTasks || []
+      const previous = tasks.find(item => item.id === task.id)
+      const workflowOwner = task.workflowId && tasks.find(item => item.workflowId === task.workflowId && item.originTurnId)
+      this.repository.upsertProviderTask(agent.id, { ...task, originTurnId: previous?.originTurnId || workflowOwner?.originTurnId || (agent.providerId !== 'claude' || task.parentCallId === null ? this.activeTurns.get(agent.id)?.id : null) || null })
       this.reconcileBackgroundTaskOwnership(agent)
       const updated = this.repository.getAgent(agent.id)
       if (updated.backgroundTasks.some(item => ['running', 'pending'].includes(item.status) && !item.ambient) && !runtime.interactions?.requests.length) {
@@ -283,7 +286,7 @@ export class AgentManager {
     }
     const existing = this.repository.getTurnByClientMessage(agent.taskId, input.clientMessageId)
     if (existing) return existing
-    if (this.isBusy(agentId, { includeBackground: false })) {
+    if (this.isBusy(agentId)) {
       const error = new Error('Agent 正在运行，请等待当前任务完成后再发送。')
       error.statusCode = 409
       throw error
@@ -318,8 +321,8 @@ export class AgentManager {
         error.statusCode = 409
         throw error
       }
-      if (this.activeTurns.has(agentId)) {
-        const error = new Error('Agent 已开始自动续跑，请稍后重试。')
+      if (this.activeTurns.has(agentId) || this.hasBackgroundTasks(agentId) || this.stoppingAgents.has(agentId)) {
+        const error = new Error('Agent 仍有任务执行中，请等待当前任务完成后再发送。')
         error.statusCode = 409
         throw error
       }
@@ -516,6 +519,13 @@ export class AgentManager {
   }
 
   async cancel(agentId, { all = false } = {}) {
+    if (this.stoppingAgents.has(agentId)) throw Object.assign(new Error('正在停止当前任务，请稍后重试。'), { statusCode: 409 })
+    this.stoppingAgents.add(agentId)
+    try { return await this.cancelTasks(agentId, { all }) }
+    finally { this.stoppingAgents.delete(agentId) }
+  }
+
+  async cancelTasks(agentId, { all = false } = {}) {
     const agent = this.repository.getAgent(agentId)
     for (const request of this.getPendingInteractions(agentId).filter(item => item.delivery === 'async')) {
       const owner = this.repository.listInteractionRows(agent.taskId).find(row => row.item.id === request.id)?.turnId
@@ -537,8 +547,13 @@ export class AgentManager {
   }
 
   isBusy(agentId, { includeBackground = true } = {}) {
-    const background = includeBackground && this.repository.getAgent?.(agentId)?.backgroundTasks?.some(task => !task.ambient && ['pending', 'running'].includes(task.status))
-    return Boolean(background) || this.activeTurns.has(agentId) || this.preparingTurns.has(agentId) || this.exclusiveOperations.has(agentId)
+    const background = includeBackground && this.hasBackgroundTasks(agentId)
+    return Boolean(background) || this.activeTurns.has(agentId) || this.preparingTurns.has(agentId) || this.stoppingAgents.has(agentId) || this.exclusiveOperations.has(agentId)
+  }
+
+  hasBackgroundTasks(agentId) {
+    return Boolean(this.repository.getAgent?.(agentId)?.backgroundTasks?.some(task => !task.ambient && ['pending', 'running'].includes(task.status))
+      || this.runtimes.get(agentId)?.backgroundTasks?.running.length)
   }
 
   async runExclusive(agentId, callback) {

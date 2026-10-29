@@ -3,11 +3,14 @@ export function isBackgroundTaskRunning(task) {
 }
 
 export function sessionActivity(task) {
-  const count = task?.backgroundTasks?.filter(isBackgroundTaskRunning).length || 0
+  const tasks = task?.backgroundTasks?.filter(isBackgroundTaskRunning) || []
+  const count = tasks.filter(item => item.kind !== 'workflow').length
+  const workflowCount = tasks.length - count
   const foreground = ['running', 'stopping'].includes(task?.lifecycle)
   const waiting = task?.attentionReason === 'permission'
-  const running = !waiting && (foreground || count > 0)
-  return { running, foreground, count, waiting, label: waiting ? '等待你回答' : foreground ? '执行中' : count ? `等待子任务 · ${count}` : task?.lastError || task?.attentionReason === 'error' ? '执行异常' : task?.backgroundTasks?.some(item => !item.ambient) ? '已结束' : '已连接' }
+  const busy = foreground || tasks.length > 0
+  const running = !waiting && busy
+  return { running, busy, foreground, count, workflowCount, waiting, label: waiting ? '等待你回答' : foreground ? '执行中' : count ? `等待子任务 · ${count}` : workflowCount ? '等待工作流收尾' : task?.lastError || task?.attentionReason === 'error' ? '执行异常' : task?.backgroundTasks?.some(item => !item.ambient) ? '已结束' : '已连接' }
 }
 
 export function groupBackgroundTasks(tasks = []) {

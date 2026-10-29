@@ -155,10 +155,11 @@ export class TimelineSyncCoordinator {
         || row.item.detail?.receiverThreadIds?.includes(task.id)
       ))
       const source = turns.find(turn => task.originSourceTurnId && [turn.providerPromptId, turn.nativeTurnId].includes(task.originSourceTurnId))
-      const originTurnId = call?.turnId || source?.id || saved?.originTurnId || null
+      const workflowOwner = task.workflowId && savedTasks.find(item => item.workflowId === task.workflowId && item.originTurnId)
+      const originTurnId = call?.turnId || workflowOwner?.originTurnId || source?.id || saved?.originTurnId || null
       const parent = { ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}), ...(task.parentCallId ? { parentCallId: task.parentCallId } : {}) }
       if (live) {
-        if (originTurnId !== saved?.originTurnId || Object.keys(parent).length) this.repository.upsertProviderTask?.(agent.id, { id: task.id, originTurnId, ...parent })
+        if (originTurnId !== saved?.originTurnId || task.workflowId !== saved?.workflowId || Object.keys(parent).length) this.repository.upsertProviderTask?.(agent.id, { id: task.id, originTurnId, ...(task.workflowId ? { workflowId: task.workflowId } : {}), ...parent })
         continue
       }
       const patch = { ...task, originTurnId }

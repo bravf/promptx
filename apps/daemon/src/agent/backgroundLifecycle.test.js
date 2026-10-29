@@ -29,3 +29,25 @@ test('停止全部：一个子任务失败仍停止其他子任务及主任务�
   assert.equal(runtime.backgroundTasks.tasks.get('failed').status, 'running')
   assert.equal(runtime.backgroundTasks.tasks.get('other').status, 'canceled')
 })
+
+test('停止操作未返回时保持忙碌，失败后仍由未结束子任务阻塞', async () => {
+  const tasks = [{ id: 'child', status: 'running' }]
+  const manager = new AgentManager({ repository: { getAgent: () => ({ backgroundTasks: tasks }) } })
+  let release
+  const stopped = new Promise(resolve => { release = resolve })
+  const runtime = { stopBackgroundTasks: async () => { tasks[0].status = 'canceled'; await stopped } }
+  manager.getPendingInteractions = () => []
+  manager.publishInteractions = () => {}
+  manager.runtimes.set('a', runtime)
+  const cancel = manager.cancel('a', { all: true })
+  assert.equal(manager.isBusy('a'), true)
+  await assert.rejects(manager.cancel('a', { all: true }), error => error.statusCode === 409)
+  release()
+  await cancel
+  assert.equal(manager.isBusy('a'), false)
+  tasks[0].status = 'running'
+  runtime.stopBackgroundTasks = async () => { throw new Error('停止失败') }
+  await assert.rejects(manager.cancel('a', { all: true }), /停止失败/)
+  assert.equal(manager.stoppingAgents.has('a'), false)
+  assert.equal(manager.isBusy('a'), true)
+})

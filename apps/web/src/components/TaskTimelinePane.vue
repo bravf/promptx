@@ -660,7 +660,8 @@ function toggleDrawer(mode) {
 }
 
 async function submitPrompt(content) {
-  if (!content.length || !activeTaskId.value || isRunning.value) return
+  if (!content.length || !activeTaskId.value) return
+  if (activity.value.busy || stoppingTasks.value) throw new Error('请等待当前任务完成后再发送。')
   // 发送新 prompt 后回到底部，并重新跟随本轮生成内容。
   followingTimeline.value = true
   hasNewTimelineItems.value = false
@@ -838,7 +839,7 @@ onBeforeUnmount(() => {
             </template>
             <TimelineSubagents :tasks="backgroundGroups.get('') || []" :is-dark="isDark" :workspace-cwd="task.environment?.cwd" :task-id="activeTaskId" :stopping="stoppingTasks" @stop-all="stopAllTasks" @rendered="scheduleTimelineFollow" @open-workspace-path="openProjectPath" />
             <TimelineInteraction v-for="request in pendingInteractions" :key="request.id" :request="request" :task-id="activeTaskId" :is-dark="isDark" pending :ready="interactionsReady" @refresh="refreshInteractions" />
-            <div v-if="!isRunning && activity.count" class="theme-muted-text mb-3 ml-7 flex items-center gap-2 text-xs" role="status"><PhCircleNotch class="h-3.5 w-3.5 animate-spin" />等待 {{ activity.count }} 个子任务结束</div>
+            <div v-if="!isRunning && (activity.count || activity.workflowCount)" class="theme-muted-text mb-3 ml-7 flex items-center gap-2 text-xs" role="status"><PhCircleNotch class="h-3.5 w-3.5 animate-spin" /><span v-if="activity.count">等待 {{ activity.count }} 个子任务结束</span><span v-else>等待工作流收尾</span></div>
             <div v-if="!pendingInteractions.length" class="timeline-generating-slot ml-7 flex h-8 items-start">
               <div class="timeline-generating-indicator flex items-center gap-1" :class="isRunning || sending ? 'is-visible' : ''" role="status" :aria-hidden="!(isRunning || sending)" :aria-label="isRunning || sending ? '正在生成' : undefined">
                 <span class="timeline-generating-dot" aria-hidden="true">.</span><span class="timeline-generating-dot" aria-hidden="true">.</span><span class="timeline-generating-dot" aria-hidden="true">.</span>
@@ -857,7 +858,7 @@ onBeforeUnmount(() => {
       <footer class="composer-wrap shrink-0 p-3 sm:p-4">
         <div v-if="error" class="error-row mx-auto mb-2 rounded-sm border px-3 py-2 text-xs" :class="contentWidthClass">{{ error }}</div>
         <div v-if="sendBlockedReason" class="writer-blocked-row mx-auto mb-2 flex items-center justify-between gap-3 rounded-sm border px-3 py-2 text-xs" :class="contentWidthClass"><span>{{ sendBlockedReason }}</span><PxButton variant="ghost" size="sm" class="shrink-0 font-medium" @click="sendBlockedReason = ''">重新尝试</PxButton></div>
-        <AgentComposer :mobile="mobile" :key="activeTaskId" :task-id="task.id" :running="activity.foreground || activity.count > 0" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :control-loading="controlLoading" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="stopAllTasks" @draft-change="saveTaskDraft" />
+        <AgentComposer :mobile="mobile" :key="activeTaskId" :task-id="task.id" :running="activity.busy || stoppingTasks" :sending="sending" :blocked-reason="sendBlockedReason" :control="agentControl" :control-loading="controlLoading" :settings-loading="settingsLoading" :draft-content="draftContent" :on-submit="submitPrompt" :on-settings-change="updateAgentSettings" @cancel="stopAllTasks" @draft-change="saveTaskDraft" />
       </footer>
       <TaskTerminal v-if="terminalOpen && !drawerMode" :key="task.id" :task-id="task.id" :terminal-id="selectedTerminalId" @close="terminalOpen = false" />
     </template>

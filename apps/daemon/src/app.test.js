@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process'
 import { test } from 'node:test'
 import { createApp } from './app.js'
 
-function createControlTestRegistry({ contextUsage = { usedTokens: 25, maxTokens: 100, percentage: 25, updatedAt: new Date().toISOString() } } = {}) {
+function createControlTestRegistry({ providerId = 'codex', contextUsage = { usedTokens: 25, maxTokens: 100, percentage: 25, updatedAt: new Date().toISOString() } } = {}) {
   const runtimes = []
   const models = [
     {
@@ -24,7 +24,7 @@ function createControlTestRegistry({ contextUsage = { usedTokens: 25, maxTokens:
     },
   ]
   const provider = {
-    id: 'codex',
+    id: providerId,
     label: 'Codex Test',
     capabilities: { models: true, reasoningEffort: true, contextUsage: true },
     createRuntime(options) {
@@ -746,6 +746,60 @@ test('运行中的 Agent 拒绝新的 Turn，重复请求保持幂等', async ()
   }
 })
 
+test('所有 Provider 在子任务等待或执行时拒绝下一轮，终态解锁且其他会话不受影响', async t => {
+  for (const providerId of ['codex', 'claude', 'grok', 'kimi']) await t.test(providerId, async () => {
+    const { registry, runtimes } = createControlTestRegistry({ providerId })
+    const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
+    try {
+      const { task, agent } = (await createLocalTask(app, { cwd: process.cwd(), providerId })).json()
+      const send = id => app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/turns`, payload: { clientMessageId: id, input: { content: [{ type: 'text', text: id }] } } })
+      const first = await send('first')
+      const runtime = runtimes.at(-1)
+      runtime.emit('backgroundTask', { id: 'child', kind: 'local_agent', status: 'pending', parentCallId: null })
+      runtime.emit('turnCompleted', { nativeTurnId: 'first' })
+      const rowsBefore = app.sqliteRepository.listTimelineRows(task.id).length
+      assert.equal((await send('blocked')).statusCode, 409)
+      assert.equal(app.sqliteRepository.getTurnByClientMessage(task.id, 'blocked'), null)
+      assert.equal(app.sqliteRepository.listTimelineRows(task.id).length, rowsBefore)
+      const duplicate = await send('first')
+      assert.equal(duplicate.statusCode, 202)
+      assert.equal(duplicate.json().turn.id, first.json().turn.id)
+      runtime.emit('backgroundTask', { id: 'child', status: 'running' })
+      assert.equal((await send('blocked')).statusCode, 409)
+      const other = (await createLocalTask(app, { cwd: process.cwd(), providerId })).json().task
+      assert.equal((await app.inject({ method: 'POST', url: `/api/v2/tasks/${other.id}/turns`, payload: { clientMessageId: 'other', input: { content: [{ type: 'text', text: '另一个会话' }] } } })).statusCode, 202)
+      for (const status of ['completed', 'failed', 'canceled', 'interrupted']) {
+        runtime.emit('backgroundTask', { id: 'child', status })
+        runtime.emit('backgroundTask', { id: 'server', status: 'running', ambient: true })
+        const id = `after-${status}`
+        assert.equal((await send(id)).statusCode, 202)
+        runtime.emit('turnCompleted', { nativeTurnId: id })
+        runtime.emit('backgroundTask', { id: 'child', status: 'running' })
+      }
+      assert.equal(app.sqliteRepository.getAgent(agent.id).backgroundTasks.find(item => item.id === 'child').originTurnId, first.json().turn.id)
+    } finally { await app.close() }
+  })
+})
+
+test('初始化期间出现后台任务时二次预检拒绝提交，不创建用户消息', async () => {
+  const { registry } = createControlTestRegistry()
+  const provider = registry.get('codex')
+  const createRuntime = provider.createRuntime
+  provider.createRuntime = options => {
+    const runtime = createRuntime(options)
+    runtime.prepareTurn = async () => { runtime.emit('backgroundTask', { id: 'late-child', status: 'running' }) }
+    return runtime
+  }
+  const app = await createApp({ databasePath: ':memory:', logger: false, webRoot: false, relay: false, providerRegistry: registry })
+  try {
+    const { task } = (await createLocalTask(app, { cwd: process.cwd(), providerId: 'codex' })).json()
+    const response = await app.inject({ method: 'POST', url: `/api/v2/tasks/${task.id}/turns`, payload: { clientMessageId: 'race', input: { content: [{ type: 'text', text: '不应提交' }] } } })
+    assert.equal(response.statusCode, 409)
+    assert.equal(app.sqliteRepository.listTurns(task.id).length, 0)
+    assert.equal(app.sqliteRepository.listTimelineRows(task.id).length, 0)
+  } finally { await app.close() }
+})
+
 test('运行中的 Agent 拒绝 Git 合并操作', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-running-merge-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
@@ -854,7 +908,9 @@ test('后台任务跨 Turn 持久化，自动续跑无用户气泡，旧结束�
     const rows = app.sqliteRepository.listTimelineRows(task.id).filter(row => row.turnId === automatic.id)
     assert.equal(rows.some(row => row.item.type === 'user_message'), false)
     assert.equal(rows.some(row => row.item.text === '汇总'), true)
-    await send('second')
+    assert.equal((await send('second')).statusCode, 409)
+    runtime.emit('backgroundTask', { id: 'child', status: 'completed', summary: '完成' })
+    assert.equal((await send('second')).statusCode, 202)
     runtime.emit('turnCompleted', { nativeTurnId: 'first' })
     assert.equal(app.sqliteRepository.getTurnByClientMessage(task.id, 'second').status, 'running')
     runtime.emit('backgroundTask', { id: 'child', status: 'completed', summary: '完成' })

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { taskStatus } from './backgroundTasks.js'
 import { createAcpProvider } from './acp.js'
+import { grokWorkflowForPrompt, grokWorkflowTask } from './grokWorkflow.js'
 import { normalizeInteractionQuestions } from '../../../../../packages/protocol/src/interaction.js'
 import { listGrokHistorySessions, readGrokHistorySnapshot } from '../history/providers/grokHistory.js'
 
@@ -30,22 +31,37 @@ export function grokExtensionNotification(method, params) {
 // Grok 的子任务是厂商扩展，不能让通用 ACP 层猜测普通工具名称。
 export function grokRuntimeExtension(runtime, method, params) {
   if (method === 'stopBackgroundTasks') return (async () => {
-    const results = await Promise.allSettled(runtime.backgroundTasks.running.map(async task => {
+    const tasks = runtime.backgroundTasks.running
+    const operations = tasks.filter(task => task.kind !== 'workflow').map(async task => {
       if (!task.childSessionId) throw new Error('后台任务缺少可停止的子会话标识。')
       await runtime.connection.extMethod('_x.ai/session/close', { sessionId: task.childSessionId })
       runtime.backgroundTasks.update({ id: task.id, status: 'canceled', summary: '子会话已关闭' })
-    }))
+    })
+    // 工作流在阶段间可能没有子会话，仍须取消父会话；等待原生终态确认后才解锁。
+    if (tasks.some(task => task.kind === 'workflow')) operations.push(runtime.cancel())
+    const results = await Promise.allSettled(operations)
     const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
     if (errors.length) throw new AggregateError(errors, errors.map(error => error.message).join('；'))
   })()
   const update = params.update || {}
+  if (['_x.ai/session_notification', '_x.ai/session/update'].includes(method)) {
+    if (update.sessionUpdate === 'workflow_updated') {
+      const task = grokWorkflowTask(update, runtime.backgroundTasks.tasks.get(`grok-workflow:${update.run_id}`))
+      if (task) runtime.backgroundTasks.update(task)
+      return
+    }
+    if (update.sessionUpdate === 'turn_completed') {
+      const workflow = grokWorkflowForPrompt(runtime.backgroundTasks.tasks.values(), update.prompt_id || update.promptId)
+      if (workflow) runtime.backgroundTasks.update({ id: workflow.id, status: ['cancelled', 'canceled'].includes(update.stop_reason) ? 'canceled' : update.stop_reason === 'error' ? 'failed' : 'completed', awaitingSummary: false })
+    }
+  }
   if (method === 'session/update' && !runtime.activeRunId && ['agent_message_chunk', 'agent_thought_chunk', 'tool_call'].includes(update.sessionUpdate)) {
     runtime.activeRunId = `grok:auto:${params._meta?.eventId || update._meta?.eventId || randomUUID()}`
     runtime.autonomousRun = true
     runtime.emit('turnStarted', { nativeTurnId: runtime.activeRunId, autonomous: true })
     return
   }
-  if (method !== '_x.ai/session_notification') return
+  if (!['_x.ai/session_notification', '_x.ai/session/update'].includes(method)) return
   if (update.sessionUpdate === 'turn_completed' && runtime.autonomousRun) {
     const nativeTurnId = runtime.activeRunId
     runtime.activeRunId = null
@@ -57,7 +73,7 @@ export function grokRuntimeExtension(runtime, method, params) {
   }
   const id = update.subagent_id
   if (update.sessionUpdate === 'subagent_spawned') {
-    runtime.backgroundTasks.update({ id, title: update.description || 'Grok 子 Agent', kind: 'local_agent', status: 'running', background: true, attemptId: update.attempt_id, childSessionId: update.child_session_id })
+    runtime.backgroundTasks.update({ id, title: update.description || 'Grok 子 Agent', kind: 'local_agent', status: 'running', background: true, workflowId: update.workflow_run_id, attemptId: update.attempt_id, childSessionId: update.child_session_id })
   } else if (id && runtime.backgroundTasks.tasks.has(id)) {
     const task = runtime.backgroundTasks.tasks.get(id)
     if (update.attempt_id && task.attemptId !== update.attempt_id) return

@@ -103,6 +103,46 @@ test('Grok 自动续跑使用稳定事件标识且可独立结束', () => {
   assert.equal(runtime.activeRunId, null)
 })
 
+test('Grok 工作流跨阶段及完成通知后仍阻塞，最终汇总结束才释放且忽略重复旧通知', () => {
+  const runtime = grokProvider.createRuntime({ cwd: '/tmp', nativeHandle: { sessionId: 'root' } })
+  const send = update => runtime.onExtNotification('_x.ai/session_notification', { sessionId: 'root', update })
+  const workflow = (status, revision) => ({ sessionUpdate: 'workflow_updated', run_id: 'workflow', status, revision })
+  send(workflow('active', 1))
+  assert.equal(runtime.backgroundTasks.running.length, 1)
+  send({ sessionUpdate: 'subagent_spawned', subagent_id: 'child', workflow_run_id: 'workflow' })
+  send({ sessionUpdate: 'subagent_finished', subagent_id: 'child', status: 'completed' })
+  assert.equal(runtime.backgroundTasks.running.length, 1, '两个阶段之间仍有工作流阻塞')
+  send(workflow('complete', 2))
+  assert.equal(runtime.backgroundTasks.running[0].awaitingSummary, true)
+  runtime.onSessionNotification({ sessionId: 'root', _meta: { eventId: 'summary' }, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '最终汇总' } } })
+  send({ sessionUpdate: 'turn_completed', prompt_id: 'other', stop_reason: 'end_turn' })
+  assert.equal(runtime.backgroundTasks.running.length, 1, '其他轮次不能释放工作流')
+  send({ sessionUpdate: 'turn_completed', prompt_id: 'workflow-completed-workflow-2', stop_reason: 'end_turn' })
+  assert.equal(runtime.backgroundTasks.running.length, 0)
+  send(workflow('complete', 2))
+  send(workflow('active', 1))
+  assert.equal(runtime.backgroundTasks.running.length, 0)
+})
+
+test('Grok 停止工作流阶段间空档会取消父会话，等待确认且不伪造成功', async () => {
+  const runtime = grokProvider.createRuntime({ cwd: '/tmp', nativeHandle: { sessionId: 'root' } })
+  const send = update => runtime.onExtNotification('_x.ai/session_notification', { sessionId: 'root', update })
+  send({ sessionUpdate: 'workflow_updated', run_id: 'workflow', status: 'active', revision: 1 })
+  let canceled = 0
+  runtime.connection = { cancel: async ({ sessionId }) => { assert.equal(sessionId, 'root'); canceled += 1 } }
+  await runtime.stopBackgroundTasks()
+  assert.equal(canceled, 1)
+  assert.equal(runtime.backgroundTasks.running.length, 1, '仅发送取消请求不能解锁')
+  send({ sessionUpdate: 'workflow_updated', run_id: 'workflow', status: 'cancelled', revision: 2 })
+  assert.equal(runtime.backgroundTasks.running.length, 0)
+  send({ sessionUpdate: 'workflow_updated', run_id: 'next', status: 'active', revision: 1 })
+  runtime.connection.cancel = async () => { throw new Error('取消失败') }
+  await assert.rejects(runtime.stopBackgroundTasks(), /取消失败/)
+  assert.equal(runtime.backgroundTasks.running.length, 1)
+  runtime.close()
+  assert.equal(runtime.backgroundTasks.running.length, 0)
+})
+
 test('ACP 被替换的请求结束不会结算新请求', async () => {
   const runtime = new AcpRuntime()
   const ends = []

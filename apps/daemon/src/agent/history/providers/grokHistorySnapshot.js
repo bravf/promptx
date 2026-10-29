@@ -4,6 +4,7 @@ import {
   toIsoTimestamp,
 } from '../historySnapshot.js'
 import { taskStatus } from '../../providers/backgroundTasks.js'
+import { grokWorkflowForPrompt, grokWorkflowTask } from '../../providers/grokWorkflow.js'
 import { acpContentText, mergeAcpToolCall } from '../../providers/acpEvents.js'
 
 export function extractAcpUpdate(record) {
@@ -53,6 +54,7 @@ function nativeTurnId(meta = {}) {
 export function mapGrokHistorySnapshot(sessionId, content, revision = '', { baseOffset = 0 } = {}) {
   const turns = []
   const backgroundTasks = new Map()
+  const workflowTurns = new Map()
   let turn = null
   let tools = new Map()
   const itemOrdinal = { value: 0 }
@@ -79,8 +81,17 @@ export function mapGrokHistorySnapshot(sessionId, content, revision = '', { base
     const timestamp = toIsoTimestamp(meta.agentTimestampMs || rawTimestamp)
     const kind = update.sessionUpdate
     if (extracted.sessionId && extracted.sessionId !== sessionId) continue
+    if (kind === 'workflow_updated') {
+      if (turn && !workflowTurns.has(update.run_id)) workflowTurns.set(update.run_id, turn)
+      const task = grokWorkflowTask(update, backgroundTasks.get(`grok-workflow:${update.run_id}`))
+      if (task) backgroundTasks.set(task.id, { ...task, originSourceTurnId: workflowTurns.get(update.run_id)?.sourceTurnId, historyOnly: true })
+    }
     const taskId = update.subagent_id
-    if (kind === 'subagent_spawned' && taskId) backgroundTasks.set(taskId, { id: taskId, originSourceTurnId: turn?.sourceTurnId || update.parent_prompt_id, title: update.description || 'Grok 子 Agent', childSessionId: update.child_session_id, kind: 'local_agent', status: 'interrupted', background: true, historyOnly: true })
+    if (kind === 'subagent_spawned' && taskId) {
+      const workflowId = update.workflow_run_id
+      if (workflowId && turn && !workflowTurns.has(workflowId)) workflowTurns.set(workflowId, turn)
+      backgroundTasks.set(taskId, { id: taskId, workflowId, originSourceTurnId: update.parent_prompt_id || workflowTurns.get(workflowId)?.sourceTurnId || turn?.sourceTurnId, title: update.description || 'Grok 子 Agent', childSessionId: update.child_session_id, kind: 'local_agent', status: 'interrupted', background: true, historyOnly: true })
+    }
     if (kind === 'subagent_finished' && backgroundTasks.has(taskId)) backgroundTasks.set(taskId, { ...backgroundTasks.get(taskId), status: taskStatus(update.status), summary: update.output || '' })
     if (!turn && ['agent_message_chunk', 'agent_thought_chunk', 'tool_call'].includes(kind)) {
       const id = `grok:auto:${meta.eventId || offset}`
@@ -129,6 +140,8 @@ export function mapGrokHistorySnapshot(sessionId, content, revision = '', { base
 
     if (kind === 'turn_completed') {
       const promptId = update.prompt_id || update.promptId
+      const workflow = grokWorkflowForPrompt(backgroundTasks.values(), promptId)
+      if (workflow) Object.assign(workflow, { status: turnStatusFromStopReason(update.stop_reason), awaitingSummary: false })
       if (promptId && turn) turn.providerPromptId = promptId
       closeTurn(turnStatusFromStopReason(update.stop_reason), timestamp, update.stop_reason === 'error' ? (update.agent_result || update.message || 'ACP Turn 失败') : '')
       continue
@@ -181,12 +194,23 @@ export function mapGrokHistorySnapshot(sessionId, content, revision = '', { base
   }
   if (turn) turns.push(turn)
   const runningTurnStartOffset = turns.at(-1)?.status === 'running' ? turns.at(-1).startOffset : undefined
+  const workflowOffsets = [...backgroundTasks.values()]
+    .filter(task => task.kind === 'workflow' && task.status === 'running')
+    .map(task => workflowTurns.get(task.workflowId)?.startOffset)
+    .filter(Number.isSafeInteger)
+  const runningWorkflowStartOffset = workflowOffsets.length ? Math.min(...workflowOffsets) : undefined
   return {
     sourceId: sessionId,
     revision,
     turns: turns.map(({ startOffset, ...item }) => item),
-    backgroundTasks: [...backgroundTasks.values()],
+    // 完成事件才给出最终 prompt ID；同一 workflow 后续阶段仍属于最初请求。
+    backgroundTasks: [...backgroundTasks.values()].map(task => ({
+      ...task,
+      status: task.kind === 'workflow' && task.status === 'running' ? 'interrupted' : task.status,
+      originSourceTurnId: workflowTurns.get(task.workflowId)?.providerPromptId || turns.find(item => item.sourceTurnId === task.originSourceTurnId)?.providerPromptId || task.originSourceTurnId,
+    })),
     runningTurnStartOffset,
+    runningWorkflowStartOffset,
   }
 }
 
@@ -199,10 +223,11 @@ export function readGrokHistoryFile(sessionId, file, { knownRevision = '', curso
   let safeCursor = result.content.endsWith('\n')
     ? result.endOffset
     : result.baseOffset + Buffer.byteLength(result.content.slice(0, Math.max(0, result.content.lastIndexOf('\n') + 1)))
-  if (snapshot.turns.at(-1)?.status === 'running' && Number.isSafeInteger(snapshot.runningTurnStartOffset)) {
-    safeCursor = snapshot.runningTurnStartOffset
+  // 工作流跨多个前台 Turn；最终汇总结束前保留最初请求及工作流状态。
+  for (const offset of [snapshot.runningTurnStartOffset, snapshot.runningWorkflowStartOffset]) {
+    if (Number.isSafeInteger(offset)) safeCursor = Math.min(safeCursor, offset)
   }
-  const { runningTurnStartOffset, ...history } = snapshot
+  const { runningTurnStartOffset, runningWorkflowStartOffset, ...history } = snapshot
   return {
     ...history,
     completeness: result.baseOffset > 0 && !result.reset ? 'incremental' : 'full',

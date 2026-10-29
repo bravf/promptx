@@ -1820,7 +1820,7 @@ test('手机 Enter 换行并通过按钮发送，桌面保留 Enter 发送和 Sh
   for (const mobile of [true, false]) {
     const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1440, height: 900 }, isMobile: mobile, hasTouch: mobile })
     await page.goto(fixture.baseUrl)
-    if (mobile) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    if (mobile) await page.getByRole('button', { name: '主回归会话', exact: true }).click()
     await page.getByText('回归基线已经准备完成。').waitFor()
     const input = page.getByPlaceholder('向 Agent 发送消息')
     const before = fixture.runtimeRecords.turns.length
@@ -1850,7 +1850,7 @@ test('子任务在发起轮次内展示结果，主回复结束仍等待子任�
     const page = await fixture.browser.newPage({ viewport })
     const failures = collectPageFailures(page)
     await page.goto(fixture.baseUrl, { waitUntil: 'domcontentloaded' })
-    if (viewport.width < 600) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    if (viewport.width < 600) await page.getByRole('button', { name: '主回归会话', exact: true }).click()
     const group = page.locator('.timeline-turn .timeline-subagents')
     await group.getByText('检查数据库访问', { exact: true }).waitFor()
     assert.equal(await page.locator('.composer-wrap .timeline-subagents').count(), 0)
@@ -1870,6 +1870,67 @@ test('子任务在发起轮次内展示结果，主回复结束仍等待子任�
 })
 
 
+test('同一会话串行等待子任务及工作流汇总，桌面手机保留草稿并在收尾后恢复发送', async t => {
+  for (const mobile of [false, true]) {
+    const fixture = await createFixture(t)
+    let runtime
+    fixture.runtimeRecords.onTurn = (_text, value) => {
+      runtime = value
+      runtime.threadId = 'serial-session'
+      runtime.readHistorySnapshot = async () => {
+        const repository = fixture.app.sqliteRepository
+        const rows = repository.listTimelineRows(fixture.task.id)
+        const turns = repository.listTurns(fixture.task.id, 1000).map(turn => ({
+          sourceTurnId: turn.nativeTurnId || turn.id,
+          runtimeTurnId: turn.nativeTurnId || turn.id,
+          status: turn.status, startedAt: turn.startedAt, finishedAt: turn.finishedAt,
+          items: rows.filter(row => row.turnId === turn.id).map(row => ({ providerMessageId: `serial:${row.seq}`, timestamp: row.timestamp, item: row.item })),
+        }))
+        return { sourceId: runtime.threadId, revision: JSON.stringify(turns), turns }
+      }
+    }
+    const headers = { host: new URL(fixture.baseUrl).host }
+    const first = await fixture.app.inject({ method: 'POST', url: `/api/v2/tasks/${fixture.task.id}/turns`, headers, payload: { clientMessageId: 'serial-first', input: { content: [{ type: 'text', text: '保持运行，等待研究' }] } } })
+    assert.equal(first.statusCode, 202)
+    runtime.emit('backgroundTask', { id: 'workflow', kind: 'workflow', title: '研究工作流', status: 'running' })
+    runtime.emit('backgroundTask', { id: 'child', kind: 'local_agent', title: '研究子任务', status: 'running' })
+    runtime.emit('turnCompleted')
+    const page = await fixture.browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 900 }, isMobile: mobile, hasTouch: mobile })
+    const failures = collectPageFailures(page)
+    await page.goto(fixture.baseUrl)
+    if (mobile) await page.getByRole('button', { name: '主回归会话', exact: true }).click()
+    await page.getByLabel('等待子任务 · 1', { exact: true }).waitFor()
+    assert.equal(await page.locator('.timeline-sync-error').count(), 0)
+    const input = page.getByPlaceholder('向 Agent 发送消息')
+    await input.fill('下一轮草稿')
+    await input.press('Enter')
+    assert.equal(fixture.runtimeRecords.turns.length, 1)
+    assert.ok((await input.inputValue()).includes('下一轮草稿'))
+    assert.equal(await page.getByRole('button', { name: '发送', exact: true }).count(), 0)
+    runtime.emit('backgroundTask', { id: 'child', status: 'completed' })
+    await page.getByLabel('等待工作流收尾', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('button', { name: '停止', exact: true }).count(), 1)
+    runtime.emit('turnStarted', { nativeTurnId: 'summary', autonomous: true })
+    runtime.emit('timeline', { type: 'assistant_message', messageId: 'summary', phase: 'final_answer', text: '最终汇总已经完成。' })
+    runtime.emit('backgroundTask', { id: 'workflow', status: 'completed' })
+    assert.equal((await fixture.app.inject({ method: 'POST', url: `/api/v2/tasks/${fixture.task.id}/turns`, headers, payload: { clientMessageId: 'during-summary', input: { content: [{ type: 'text', text: '不应提交' }] } } })).statusCode, 409)
+    runtime.emit('turnCompleted', { nativeTurnId: 'summary' })
+    await page.getByRole('button', { name: '发送', exact: true }).waitFor()
+    await input.fill('下一轮草稿')
+    if (mobile) await page.getByRole('button', { name: '发送', exact: true }).click()
+    else await input.press('Enter')
+    await page.getByText('已处理：下一轮草稿', { exact: true }).waitFor()
+    assert.equal(fixture.runtimeRecords.turns.length, 2)
+    const synced = await fixture.app.inject({ method: 'POST', url: `/api/v2/tasks/${fixture.task.id}/timeline/sync`, headers })
+    assert.equal(synced.statusCode, 200)
+    assert.equal(await page.locator('.timeline-sync-error').count(), 0)
+    await assertNoHorizontalOverflow(page)
+    await saveScreenshot(page, `serial-workflow-${mobile ? 'mobile' : 'desktop'}.png`)
+    assert.deepEqual(failures, [])
+    await page.close()
+  }
+})
+
 test('后台自动续跑与原请求合并显示，子任务保留归属，新用户请求独立显示', async t => {
   for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
     const fixture = await createFixture(t)
@@ -1884,7 +1945,7 @@ test('后台自动续跑与原请求合并显示，子任务保留归属，新�
     const page = await fixture.browser.newPage({ viewport })
     const failures = collectPageFailures(page)
     await page.goto(fixture.baseUrl, { waitUntil: 'domcontentloaded' })
-    if (viewport.width < 600) await page.getByRole('link', { name: '主回归会话', exact: true }).click()
+    if (viewport.width < 600) await page.getByRole('button', { name: '主回归会话', exact: true }).click()
     await page.getByText('后台续跑结果已完成。', { exact: true }).waitFor()
     const turns = page.locator('.timeline-turn')
     assert.equal(await turns.count(), 1)

@@ -14,13 +14,15 @@ const props = defineProps({
 })
 const emit = defineEmits(['stop-all', 'rendered', 'open-workspace-path'])
 const running = computed(() => props.tasks.filter(isBackgroundTaskRunning).length)
-const completed = computed(() => props.tasks.filter(task => task.status === 'completed').length)
+const subtasks = computed(() => props.tasks.filter(task => task.kind !== 'workflow'))
+const completed = computed(() => subtasks.value.filter(task => task.status === 'completed').length)
+const workflows = computed(() => props.tasks.filter(task => task.kind === 'workflow'))
 const errors = computed(() => props.tasks.filter(task => ['failed', 'interrupted'].includes(task.status)).length)
 const expanded = ref(running.value > 0)
 const taskTree = computed(() => buildBackgroundTaskTree(props.tasks))
 const pauseTimelineFollow = inject('pauseTimelineFollow', () => {})
 function isCommand(task) { return ['local_bash', 'bash', 'command', 'shell'].includes(task.kind) }
-const title = computed(() => props.tasks.every(isCommand) ? '后台命令' : props.tasks.some(isCommand) ? '子 Agent 与后台命令' : '子 Agent')
+const title = computed(() => workflows.value.length ? (subtasks.value.length ? '工作流与子任务' : '工作流') : props.tasks.every(isCommand) ? '后台命令' : props.tasks.some(isCommand) ? '子 Agent 与后台命令' : '子 Agent')
 watch(running, (count, previous) => { if (count > 0 && !previous) expanded.value = true })
 </script>
 
@@ -29,7 +31,8 @@ watch(running, (count, previous) => { if (count > 0 && !previous) expanded.value
     <button type="button" class="flex w-full min-w-0 items-center gap-2 text-left" :aria-expanded="expanded" @click="pauseTimelineFollow(); expanded = !expanded; emit('rendered')">
       <PhCaretRight class="theme-muted-text h-3.5 w-3.5 shrink-0" :class="{ 'rotate-90': expanded }" />
       <span class="font-medium">{{ title }}</span>
-      <span class="theme-muted-text">{{ completed }}/{{ tasks.length }} 已完成</span>
+      <span v-if="subtasks.length" class="theme-muted-text">{{ completed }}/{{ subtasks.length }} 已完成</span>
+      <span v-if="workflows.some(item => isBackgroundTaskRunning(item))" class="theme-muted-text">等待工作流收尾</span>
       <span v-if="taskTree.length < tasks.length" class="theme-muted-text">含子 Agent 内部任务</span>
       <span v-if="running" class="theme-muted-text ml-auto">{{ running }} 个执行中</span>
       <span v-else-if="errors" class="theme-danger-text ml-auto">{{ errors }} 个异常</span>

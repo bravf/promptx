@@ -336,6 +336,20 @@ test('错误来源的后台历史不能写入当前会话，残缺历史不能�
   await coordinator.shutdown()
 })
 
+test('Grok 增量历史的后续 workflow 任务继承已保存的发起轮次', () => {
+  const saved = [{ id: 'planner', workflowId: 'workflow', originTurnId: 'original' }, { id: 'report', status: 'completed' }]
+  const coordinator = new TimelineSyncCoordinator({
+    repository: {
+      getAgent: () => ({ backgroundTasks: saved }),
+      listTurns: () => [], listTimelineRows: () => [],
+      upsertProviderTask: (_id, task) => Object.assign(saved.find(item => item.id === task.id), task),
+    },
+    eventHub: { publish() {} },
+  })
+  coordinator.mergeBackgroundTasks({ id: 'agent', taskId: 'task' }, {}, [{ id: 'report', workflowId: 'workflow', status: 'completed' }])
+  assert.equal(saved[1].originTurnId, 'original')
+})
+
 test('历史补齐子任务轮次归属，空结果不覆盖已有摘要，实时任务同样补齐归属', () => {
   const saved = [{ id: 'claude', status: 'completed', summary: '完整结果' }, { id: 'grok', status: 'running' }]
   const coordinator = new TimelineSyncCoordinator({

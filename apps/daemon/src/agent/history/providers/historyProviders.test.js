@@ -322,6 +322,23 @@ test('Grok JSONL 映射用户、思考、工具、计划和失败 Turn', () => {
   assert.equal(snapshot.turns[1].errorMessage, '模型不可用')
 })
 
+test('Grok workflow 在前台结束后和后续用户轮次中仍归属原始请求', () => {
+  const updates = [
+    { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '研究' }, _meta: { promptIndex: 0 } },
+    { sessionUpdate: 'subagent_spawned', subagent_id: 'planner', workflow_run_id: 'workflow' },
+    { sessionUpdate: 'turn_completed', prompt_id: 'original', stop_reason: 'end_turn' },
+    { sessionUpdate: 'subagent_spawned', subagent_id: 'verifier', workflow_run_id: 'workflow' },
+    { sessionUpdate: 'subagent_finished', subagent_id: 'verifier', status: 'completed' },
+    { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '继续问' }, _meta: { promptIndex: 1 } },
+    { sessionUpdate: 'subagent_spawned', subagent_id: 'report', workflow_run_id: 'workflow' },
+    { sessionUpdate: 'turn_completed', prompt_id: 'next', stop_reason: 'end_turn' },
+  ]
+  const snapshot = mapGrokHistorySnapshot('session', updates.map(update => ({ params: { update } })))
+  assert.deepEqual(snapshot.backgroundTasks.map(task => task.originSourceTurnId), ['original', 'original', 'original'])
+  assert.equal(snapshot.backgroundTasks[1].status, 'completed')
+  assert.equal(snapshot.turns.length, 2)
+})
+
 test('Grok 用户消息分片会合并到同一 Turn', () => {
   const lines = [
     { params: { update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '你' } } } },
@@ -332,6 +349,63 @@ test('Grok 用户消息分片会合并到同一 Turn', () => {
   const snapshot = mapGrokHistorySnapshot('session-1', lines.map(JSON.stringify).join('\n'))
   assert.equal(snapshot.turns.length, 1)
   assert.equal(snapshot.turns[0].items[0].item.content[0].text, '你好')
+})
+
+test('Grok 工作流历史覆盖阶段空档、最终汇总、重复通知及重启中断', () => {
+  const updates = [
+    { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '研究' }, _meta: { promptIndex: 0 } },
+    { sessionUpdate: 'workflow_updated', run_id: 'wf', revision: 1, status: 'active', foreground: false },
+    { sessionUpdate: 'turn_completed', prompt_id: 'request', stop_reason: 'end_turn' },
+    { sessionUpdate: 'workflow_updated', run_id: 'wf', revision: 2, status: 'complete', foreground: false },
+    { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '汇总' } },
+    { sessionUpdate: 'turn_completed', prompt_id: 'workflow-completed-wf-2', stop_reason: 'end_turn' },
+    { sessionUpdate: 'workflow_updated', run_id: 'wf', revision: 2, status: 'complete', foreground: false },
+  ]
+  const snapshot = mapGrokHistorySnapshot('session', updates.map(update => ({ params: { update } })))
+  assert.equal(snapshot.backgroundTasks[0].originSourceTurnId, 'request')
+  assert.equal(snapshot.backgroundTasks[0].status, 'completed')
+  const interrupted = mapGrokHistorySnapshot('session', updates.slice(0, 4).map(update => ({ params: { update } })))
+  assert.equal(interrupted.backgroundTasks[0].status, 'interrupted')
+})
+
+test('Grok 增量游标在工作流最终汇总前保留原始归属，完成后向前推进', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-grok-workflow-cursor-'))
+  const file = path.join(root, 'updates.jsonl')
+  const append = updates => fs.appendFileSync(file, updates.map(update => JSON.stringify({ params: { update } }) + '\n').join(''))
+  try {
+    append([
+      { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '前一轮' }, _meta: { promptIndex: 0 } },
+      { sessionUpdate: 'turn_completed', prompt_id: 'previous', stop_reason: 'end_turn' },
+    ])
+    const originOffset = fs.statSync(file).size
+    append([
+      { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: '研究' }, _meta: { promptIndex: 1 } },
+      { sessionUpdate: 'workflow_updated', run_id: 'wf', revision: 1, status: 'active', foreground: false },
+      { sessionUpdate: 'turn_completed', prompt_id: 'request', stop_reason: 'end_turn' },
+    ])
+    const initial = readGrokHistoryFile('session', file)
+    assert.equal(initial.cursor, originOffset)
+    append([
+      { sessionUpdate: 'subagent_spawned', subagent_id: 'report', workflow_run_id: 'wf' },
+      { sessionUpdate: 'subagent_finished', subagent_id: 'report', status: 'completed' },
+      { sessionUpdate: 'workflow_updated', run_id: 'wf', revision: 2, status: 'complete', foreground: false },
+    ])
+    const waiting = readGrokHistoryFile('session', file, { cursor: initial.cursor, knownRevision: initial.revision })
+    assert.equal(waiting.completeness, 'incremental')
+    assert.equal(waiting.cursor, originOffset)
+    assert.ok(waiting.backgroundTasks.every(task => task.originSourceTurnId === 'request'))
+    append([
+      { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '最终汇总' } },
+      { sessionUpdate: 'turn_completed', prompt_id: 'workflow-completed-wf-2', stop_reason: 'end_turn' },
+      { sessionUpdate: 'workflow_updated', run_id: 'wf', revision: 2, status: 'complete', foreground: false },
+    ])
+    const completed = readGrokHistoryFile('session', file, { cursor: waiting.cursor, knownRevision: waiting.revision })
+    assert.equal(completed.backgroundTasks.find(task => task.kind === 'workflow').status, 'completed')
+    assert.ok(completed.backgroundTasks.every(task => task.originSourceTurnId === 'request'))
+    assert.equal(completed.cursor, fs.statSync(file).size)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('Grok 增量同步从运行中 Turn 的第一条用户分片重读', () => {
