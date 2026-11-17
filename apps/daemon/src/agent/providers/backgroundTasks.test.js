@@ -5,6 +5,26 @@ import { CodexRuntime } from './codex.js'
 import { grokProvider } from './grok.js'
 import { AcpRuntime } from './acp.js'
 import { mapClaudeHistorySnapshot } from '../history/providers/claudeHistory.js'
+import { mapGrokHistorySnapshot } from '../history/providers/grokHistorySnapshot.js'
+
+test('Grok 子任务取消终态在实时通知和历史回放中都解除忙碌', () => {
+  for (const status of ['cancelled', 'canceled']) {
+    const runtime = grokProvider.createRuntime({ cwd: '/tmp', nativeHandle: { sessionId: 'root' } })
+    const updates = [
+      { sessionUpdate: 'subagent_spawned', subagent_id: 'child', child_session_id: 'child', attempt_id: 'attempt' },
+      { sessionUpdate: 'subagent_finished', subagent_id: 'child', attempt_id: 'attempt', status, error: 'Subagent was cancelled' },
+    ]
+    runtime.onExtNotification('_x.ai/session_notification', { sessionId: 'root', update: updates[0] })
+    assert.equal(runtime.backgroundTasks.running.length, 1)
+    runtime.onExtNotification('_x.ai/session_notification', { sessionId: 'root', update: updates[1] })
+    assert.equal(runtime.backgroundTasks.tasks.get('child').status, 'canceled')
+    assert.equal(runtime.backgroundTasks.running.length, 0)
+
+    const snapshot = mapGrokHistorySnapshot('root', updates.map(update => JSON.stringify({ sessionId: 'root', update })).join('\n'))
+    assert.equal(snapshot.backgroundTasks.find(task => task.id === 'child').status, 'canceled')
+    runtime.close()
+  }
+})
 
 test('Claude 命令在 task_started 前后都能通过子消息关联父 Agent', () => {
   const runtime = new ClaudeRuntime({ cwd: '/tmp' })

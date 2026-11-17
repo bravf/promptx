@@ -24,5 +24,5 @@ export class BackgroundTasks {
 }
 
 export function taskStatus(status) {
-  return ({ pending: 'running', paused: 'running', killed: 'canceled', stopped: 'canceled', interrupted: 'canceled', errored: 'failed', shutdown: 'canceled', notFound: 'interrupted', completed: 'completed', failed: 'failed', running: 'running' })[status] || 'running'
+  return ({ pending: 'running', paused: 'running', cancelled: 'canceled', canceled: 'canceled', killed: 'canceled', stopped: 'canceled', interrupted: 'canceled', errored: 'failed', shutdown: 'canceled', notFound: 'interrupted', completed: 'completed', failed: 'failed', running: 'running' })[status] || 'running'
 }
