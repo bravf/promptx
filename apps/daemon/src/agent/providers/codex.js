@@ -5,6 +5,7 @@ import { normalizeInteractionQuestions } from '../../../../../packages/protocol/
 import { codexAsyncInteraction } from '../../../../../packages/protocol/src/codexAsyncQuestions.js'
 import { EventEmitter } from 'node:events'
 import { SERVICE_INSTRUCTIONS } from '../../terminal/serviceTools.js'
+import { IMAGE_DELIVERY_INSTRUCTIONS } from './agentInstructions.js'
 import { JsonRpcProcess } from '../jsonRpcProcess.js'
 import { filePromptText } from '../promptAttachments.js'
 import { createControlState, effortLabel, normalizeContextUsage } from '../controlState.js'
@@ -231,9 +232,8 @@ export class CodexRuntime extends EventEmitter {
       approvalPolicy: 'never',
       sandbox: 'danger-full-access',
       ...(this.modelId ? { model: this.modelId } : {}),
-      ...(this.serviceMcp ? { developerInstructions: SERVICE_INSTRUCTIONS,
-        config: { mcp_servers: { promptx_services: { command: this.serviceMcp.command, args: this.serviceMcp.args, env: this.serviceMcp.env } } },
-      } : {}),
+      developerInstructions: [IMAGE_DELIVERY_INSTRUCTIONS, ...(this.serviceMcp ? [SERVICE_INSTRUCTIONS] : [])].join('\n\n'),
+      ...(this.serviceMcp ? { config: { mcp_servers: { promptx_services: { command: this.serviceMcp.command, args: this.serviceMcp.args, env: this.serviceMcp.env } } } } : {}),
     }
     let result
     this.historyOnly = false

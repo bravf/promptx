@@ -1,11 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { SERVICE_TOOLS, SERVICE_INSTRUCTIONS } from './serviceTools.js'
+import { SERVICE_TOOLS, MCP_INSTRUCTIONS } from './serviceTools.js'
 
 const url = process.env.PROMPTX_SERVICE_TOOL_URL
 const token = process.env.PROMPTX_SERVICE_TOOL_TOKEN
 if (!url || !token) throw new Error('缺少 PromptX 服务工具连接。')
-const server = new McpServer({ name: 'promptx_services', version: '1.0.0' }, { instructions: SERVICE_INSTRUCTIONS })
+const server = new McpServer({ name: 'promptx_services', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS })
 for (const tool of SERVICE_TOOLS) {
   server.registerTool(tool.name, { description: tool.description, inputSchema: tool.schema, annotations: { readOnlyHint: ['list_services', 'read_service_logs'].includes(tool.name), openWorldHint: false } }, async args => {
     try {

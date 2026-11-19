@@ -7,6 +7,7 @@ import { mapPiHistorySnapshot, readPiHistorySnapshot } from '../history/provider
 import { listPiHistorySessions } from '../history/providers/piSessions.js'
 import { piProvider } from './pi.js'
 import { TimelineItemSchema } from '../../../../../packages/protocol/src/timeline.js'
+import { IMAGE_DELIVERY_INSTRUCTIONS } from './agentInstructions.js'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -63,7 +64,7 @@ test('Pi 使用持久化路径恢复，模型 id 保留斜杠', async () => {
   const { runtime, launches, commands } = fixture({ nativeHandle: { sessionFile: '/tmp/old.jsonl' } })
   try {
     await runtime.updateSettings({ modelId: 'deepseek/nested/model', reasoningEffort: 'off' })
-    assert.deepEqual(launches[0].args, ['--mode', 'rpc', '--session', '/tmp/old.jsonl'])
+    assert.deepEqual(launches[0].args, ['--append-system-prompt', IMAGE_DELIVERY_INSTRUCTIONS, '--mode', 'rpc', '--session', '/tmp/old.jsonl'])
     assert.ok(commands.some(item => item.type === 'set_model' && item.modelId === 'nested/model'))
     assert.equal(runtime.controlState.currentReasoningEffort, 'off')
   } finally { runtime.close() }

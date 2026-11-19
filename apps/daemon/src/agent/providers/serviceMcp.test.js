@@ -5,7 +5,8 @@ import { CodexRuntime } from './codex.js'
 import { ClaudeRuntime } from './claude.js'
 import { kimiProvider } from './kimi.js'
 import { grokProvider } from './grok.js'
-import { SERVICE_INSTRUCTIONS } from '../../terminal/serviceTools.js'
+import { MCP_INSTRUCTIONS, SERVICE_INSTRUCTIONS } from '../../terminal/serviceTools.js'
+import { IMAGE_DELIVERY_INSTRUCTIONS } from './agentInstructions.js'
 
 const serviceMcp = { command: process.execPath, args: ['/tmp/promptx-test-mcp.mjs'], env: { PROMPTX_SERVICE_TOOL_URL: 'http://127.0.0.1:12345/tools', PROMPTX_SERVICE_TOOL_TOKEN: 'test-only-token' } }
 
@@ -26,7 +27,7 @@ test('Codex 新建和恢复会话均注入独立 MCP 与服务指导，保留访
       await runtime.prepareTurn()
       const params = calls.find(call => call.method === (threadId ? 'thread/resume' : 'thread/start')).params
       assert.deepEqual(params.config.mcp_servers.promptx_services, serviceMcp)
-      assert.equal(params.developerInstructions, SERVICE_INSTRUCTIONS)
+      assert.equal(params.developerInstructions, `${IMAGE_DELIVERY_INSTRUCTIONS}\n\n${SERVICE_INSTRUCTIONS}`)
       assert.equal(params.approvalPolicy, 'never')
       assert.equal(params.sandbox, 'danger-full-access')
     } finally { runtime.close() }
@@ -43,7 +44,7 @@ test('Claude MCP 配置追加系统指导，恢复和原生交互选项保持可
   try {
     await runtime.connect()
     assert.deepEqual(options.mcpServers.promptx_services, { type: 'stdio', ...serviceMcp })
-    assert.deepEqual(options.systemPrompt, { type: 'preset', preset: 'claude_code', append: SERVICE_INSTRUCTIONS })
+    assert.deepEqual(options.systemPrompt, { type: 'preset', preset: 'claude_code', append: `${IMAGE_DELIVERY_INSTRUCTIONS}\n\n${SERVICE_INSTRUCTIONS}` })
     assert.equal(options.resume, 'existing')
     assert.equal(options.permissionMode, 'bypassPermissions')
     assert.equal(typeof options.canUseTool, 'function')
@@ -51,6 +52,7 @@ test('Claude MCP 配置追加系统指导，恢复和原生交互选项保持可
 })
 
 test('Grok 和 Kimi 在 ACP 新建与恢复时传入相同 MCP 工具配置', async () => {
+  assert.match(MCP_INSTRUCTIONS, /Markdown 图片语法/)
   const expected = [{ name: 'promptx_services', ...serviceMcp, env: Object.entries(serviceMcp.env).map(([name, value]) => ({ name, value })) }]
   for (const provider of [grokProvider, kimiProvider]) for (const sessionId of ['', 'existing']) {
     const code = `require('node:readline').createInterface({input:process.stdin}).on('line',line=>{

@@ -8,6 +8,7 @@ import { filePromptText, imageBase64 } from '../promptAttachments.js'
 import { readPiHistorySnapshot } from '../history/providers/piHistory.js'
 import { listPiHistorySessions } from '../history/providers/piSessions.js'
 import { PendingInteractions } from './pendingInteractions.js'
+import { IMAGE_DELIVERY_INSTRUCTIONS } from './agentInstructions.js'
 
 const modelKey = model => model ? `${model.provider}/${model.id}` : ''
 
@@ -37,7 +38,7 @@ export class PiRuntime extends EventEmitter {
   }
 
   async connectInternal() {
-    const args = ['--mode', 'rpc']
+    const args = ['--append-system-prompt', IMAGE_DELIVERY_INSTRUCTIONS, '--mode', 'rpc']
     if (this.sessionFile) args.push('--session', this.sessionFile)
     else args.push('--session-id', this.sessionId)
     if (this.modelId) args.push('--model', this.modelId)
