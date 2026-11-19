@@ -4,8 +4,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { once } from 'node:events'
+import { spawn } from 'node:child_process'
 import { JsonRpcProcess } from '../agent/jsonRpcProcess.js'
-import { childEnvironment, withTimeout } from './processControl.js'
+import { childEnvironment, isSameLiveProcessGroup, processGroupIdentity, withTimeout } from './processControl.js'
 import { acquireInstanceLock } from './instanceLock.js'
 import { runGit } from '../environments/worktreeService.js'
 
@@ -56,4 +57,16 @@ test('同一数据库不能重复启动，正常释放与已退出进程的锁�
 test('Git 超时会终止挂起的命令，输出存在上限', async () => {
   await assert.rejects(runGit(process.cwd(), ['-c', 'alias.wait=!sleep 10', 'wait'], { timeoutMs: 40 }), /超时/)
   await assert.rejects(runGit(process.cwd(), ['--help'], { maxOutputBytes: 10 }), /输出超过限制/)
+})
+
+test('可通过进程组 ID 与启动身份识别意外退出后仍存活的服务', { skip: process.platform === 'win32' }, async t => {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' })
+  await once(child, 'spawn')
+  const identity = processGroupIdentity(child.pid)
+  assert.ok(identity)
+  assert.equal(isSameLiveProcessGroup(child.pid, identity), true)
+  t.after(() => { try { process.kill(-child.pid, 'SIGKILL') } catch {} })
+  process.kill(-child.pid, 'SIGTERM')
+  await once(child, 'exit')
+  assert.equal(isSameLiveProcessGroup(child.pid, identity), false)
 })

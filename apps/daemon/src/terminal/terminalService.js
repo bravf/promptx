@@ -1,4 +1,4 @@
-import { childEnvironment, terminateChild } from '../runtime/processControl.js'
+import { childEnvironment, isProcessGroupAlive, isSameLiveProcessGroup, processGroupIdentity, terminateChild } from '../runtime/processControl.js'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import fs from 'node:fs'
@@ -116,17 +116,49 @@ export class TerminalService {
     const session = this.sessions.get(id)
     if (!session) return
     this.sessions.delete(id)
+    if (session.service && !session.preserveService) this.repository.deleteManagedService?.(id)
     this.stop(session)
     if (session.service) this.notify(session.taskId)
   }
   stop(session) {
     if (!session.running || session.stopping) return
+    if (session.service && !session.preserveService) this.repository.setManagedServiceAutoStart?.(session.id, false)
     session.stopping = true
-    if (session.service && process.platform !== 'win32' && session.pty.pid) {
+    if (session.service && process.platform !== 'win32' && (session.pty?.pid || session.processPid)) {
       // node-pty 创建独立会话；清理整组服务子进程，不能只杀掉外层 shell。
-      terminateChild({ pid: session.pty.pid, exitCode: null, promptxProcessGroup: true, kill: signal => session.pty.kill(signal) })
+      const pid = session.pty?.pid || session.processPid
+      if (session.pty) terminateChild({ pid, exitCode: null, promptxProcessGroup: true, kill: signal => session.pty.kill(signal) })
+      else this.stopRecoveredProcess(session, pid)
     } else session.pty.kill()
     if (session.service && this.sessions.has(session.id)) this.notify(session.taskId)
+  }
+  stopRecoveredProcess(session, pid) {
+    const signalGroup = signal => { try { process.kill(-pid, signal) } catch {} }
+    signalGroup('SIGTERM')
+    const timer = setInterval(() => {
+      if (!isProcessGroupAlive(pid)) {
+        clearInterval(timer)
+        session.running = false
+        session.stopping = false
+        session.exitCode = 0
+        session.service.stoppedByUser = true
+        this.notify(session.taskId)
+      }
+    }, 100)
+    timer.unref()
+    const forceTimer = setTimeout(() => signalGroup('SIGKILL'), 2000)
+    forceTimer.unref()
+    setTimeout(() => {
+      clearInterval(timer)
+      clearTimeout(forceTimer)
+      if (session.running) {
+        session.running = false
+        session.stopping = false
+        session.exitCode = 1
+        session.service.error = '未能确认旧进程组已退出，请检查服务进程。'
+        this.notify(session.taskId)
+      }
+    }, 2500).unref()
   }
   listServices(taskId) {
     return this.list(taskId).filter(session => session.service)
@@ -165,11 +197,13 @@ export class TerminalService {
       if (input.url && await this.portInUse(input.url)) throw Object.assign(new Error('指定的服务端口已被占用，请检查已有服务或改用其他端口。'), { statusCode: 409 })
       const session = await this.create(taskId, { cols: 100, rows: 30 }, { name: input.name, cwd, command: input.command,
         service: { type, command: input.command, url: input.url || '', healthUrl: input.healthUrl || '', readiness: 'starting' } })
+      this.persistService(session, true)
       for (const previous of [...this.sessions.values()]) {
         if (previous.id !== session.id && previous.taskId === taskId && previous.service && !previous.running && previous.cwd === cwd && previous.service.command === input.command) this.remove(previous.id)
       }
       this.notify(taskId)
       await this.checkService(session, input.waitMs)
+      this.persistService(session, true)
       this.notify(taskId)
       return { terminal: this.describe(session), reused: false, ...this.read(session) }
     })()
@@ -224,6 +258,71 @@ export class TerminalService {
     this.remove(id)
     return result
   }
+  persistService(session, autoStart) {
+    this.repository.saveManagedService?.({ terminalId: session.id, taskId: session.taskId, name: session.name,
+      cwd: session.cwd, command: session.service.command, service: session.service, autoStart, createdAt: session.createdAt,
+      processPid: session.pty?.pid || session.processPid, processIdentity: session.processIdentity || processGroupIdentity(session.pty?.pid) })
+  }
+  async restoreServices() {
+    const saved = this.repository.listManagedServices?.() || []
+    for (const item of saved) {
+      if (!item.autoStart) {
+        const task = this.repository.getTask(item.taskId)
+        const environment = task && this.repository.getEnvironment(task.environmentId)
+        if (!task || task.lifecycle !== 'active' || !environment) {
+          this.repository.deleteManagedService?.(item.terminalId)
+          continue
+        }
+        this.sessions.set(item.terminalId, { id: item.terminalId, taskId: item.taskId, name: item.name,
+          cwd: item.cwd, environmentCwd: environment.cwd, environmentId: task.environmentId, createdAt: item.createdAt,
+          chunks: [], end: 0, start: 0, length: 0, exitCode: 0, running: false, inputs: new Set(),
+          service: { ...item.service, readiness: 'stopped', stoppedByUser: true, recovered: true,
+            error: '服务已停止，历史终端日志未保存。' } })
+        continue
+      }
+      if (isSameLiveProcessGroup(item.processPid, item.processIdentity)) {
+        const task = this.repository.getTask(item.taskId)
+        const environment = task && this.repository.getEnvironment(task.environmentId)
+        if (task && task.lifecycle === 'active' && environment) {
+          this.sessions.set(item.terminalId, { id: item.terminalId, taskId: item.taskId, name: item.name,
+            cwd: item.cwd, environmentCwd: environment.cwd, environmentId: task.environmentId, createdAt: item.createdAt,
+            chunks: [], end: 0, start: 0, length: 0, exitCode: null, running: true, inputs: new Set(),
+            processPid: item.processPid, processIdentity: item.processIdentity,
+            service: { ...item.service, readiness: item.service.url ? 'unverified' : 'running', recovered: true, recoveredManaged: true,
+              error: '已接回上次仍在运行的进程，终端日志不可恢复。' } })
+          continue
+        }
+      }
+      try {
+        const restored = await this.startService(item.taskId, { name: item.name, type: item.service.type, cwd: item.cwd,
+          command: item.command, url: item.service.url || undefined, healthUrl: item.service.healthUrl || undefined, waitMs: 8000 })
+        if (restored.terminal.id !== item.terminalId) this.repository.deleteManagedService?.(item.terminalId)
+      } catch (error) {
+        const task = this.repository.getTask(item.taskId)
+        const environment = task && this.repository.getEnvironment(task.environmentId)
+        if (!task || task.lifecycle !== 'active' || !environment) {
+          this.repository.deleteManagedService?.(item.terminalId)
+          continue
+        }
+        if (item.service.url && /指定的服务端口已被占用/.test(error.message)) {
+          const session = { id: item.terminalId, taskId: item.taskId, name: item.name, cwd: item.cwd,
+            environmentCwd: environment.cwd, environmentId: task.environmentId, createdAt: item.createdAt,
+            chunks: [], end: 0, start: 0, length: 0, exitCode: 1, running: false, inputs: new Set(),
+            service: { ...item.service, readiness: 'unverified', recovered: true,
+              error: '页面端口仍被占用，未重复启动。请确认是否是原服务进程。' } }
+          this.sessions.set(session.id, session)
+          this.persistService(session, true)
+          continue
+        }
+        const session = { id: item.terminalId, taskId: item.taskId, name: item.name, cwd: item.cwd,
+          environmentCwd: environment.cwd, environmentId: task.environmentId, createdAt: item.createdAt,
+          chunks: [], end: 0, start: 0, length: 0, exitCode: 1, running: false, inputs: new Set(),
+          service: { ...item.service, readiness: 'failed', error: error.message } }
+        this.sessions.set(session.id, session)
+        this.persistService(session, true)
+      }
+    }
+  }
   sweep() {
     for (const [id, session] of this.sessions) {
       try { const env = this.context(session.taskId); if (env.id !== session.environmentId || env.cwd !== session.environmentCwd) this.remove(id) }
@@ -233,7 +332,13 @@ export class TerminalService {
       if (!this.repository.getTask(taskId)) this.counters.delete(taskId)
     }
   }
-  close() { this.closed = true; for (const id of this.sessions.keys()) this.remove(id) }
+  close() {
+    this.closed = true
+    for (const session of [...this.sessions.values()]) {
+      if (session.service) session.preserveService = true
+      this.remove(session.id)
+    }
+  }
 }
 
 export function registerTerminalRoutes(app, repository, service = new TerminalService(repository)) {
@@ -260,7 +365,10 @@ export function registerTerminalRoutes(app, repository, service = new TerminalSe
     const { name } = RenameTerminalSchema.parse(request.body)
     const session = get(request)
     session.name = name
-    if (session.service) service.notify(session.taskId)
+    if (session.service) {
+      service.repository.renameManagedService?.(session.id, name)
+      service.notify(session.taskId)
+    }
     return { terminal: service.describe(session) }
   })
   app.post(`${terminalPath}/input`, async (request) => {

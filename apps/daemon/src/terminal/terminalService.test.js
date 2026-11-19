@@ -2,6 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import Fastify from 'fastify'
 import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
+import net from 'node:net'
+import { processGroupIdentity } from '../runtime/processControl.js'
 import { TerminalService, registerTerminalRoutes } from './terminalService.js'
 
 function fixture() {
@@ -142,4 +145,93 @@ test('终端 API 校验输入、隔离会话并支持命名和重启', async (t)
   assert.equal((await app.inject(base)).json().terminals.length, 1)
   await app.inject({ method: 'DELETE', url: `${base}/${restart.json().terminal.id}` })
   assert.equal((await app.inject(base)).json().terminals.length, 0)
+})
+
+test('托管服务配置在 Daemon 关闭后保留并于下次启动恢复，主动停止后不自动恢复', async () => {
+  const task = { id: 'a', environmentId: 'a', lifecycle: 'active' }
+  const records = new Map()
+  const repository = {
+    getTask: () => task,
+    getEnvironment: () => ({ id: 'a', cwd: '/tmp', status: 'ready' }),
+    saveManagedService(value) { records.set(value.terminalId, { ...value }) },
+    deleteManagedService(id) { records.delete(id) },
+    setManagedServiceAutoStart(id, autoStart) { const item = records.get(id); if (item) item.autoStart = autoStart },
+    listManagedServices(autoStartOnly) { return [...records.values()].filter(item => !autoStartOnly || item.autoStart) },
+  }
+  const spawned = []
+  const spawn = () => {
+    const pty = { onData() {}, onExit() {}, kill() { this.killed = true } }
+    spawned.push(pty)
+    return pty
+  }
+  const first = new TerminalService(repository, spawn)
+  const started = await first.startService('a', { name: '持久服务', type: 'watch', command: 'node watcher.js', waitMs: 0 })
+  const firstId = started.terminal.id
+  first.close()
+  assert.equal(records.get(firstId).autoStart, true)
+
+  const resumed = new TerminalService(repository, spawn)
+  await resumed.restoreServices()
+  assert.equal(resumed.listServices('a').length, 1)
+  assert.equal(resumed.listServices('a')[0].service.command, 'node watcher.js')
+  assert.equal(resumed.listServices('a')[0].running, true)
+  const restored = resumed.get('a', resumed.listServices('a')[0].id)
+  resumed.stop(restored)
+  assert.equal(records.get(restored.id).autoStart, false)
+  resumed.close()
+  assert.equal(records.size, 1)
+
+  const next = new TerminalService(repository, spawn)
+  await next.restoreServices()
+  assert.equal(next.listServices('a').length, 1)
+  assert.equal(next.listServices('a')[0].running, false)
+  next.close()
+  assert.equal(spawned.length, 2)
+})
+
+test('Daemon 异常退出后复用仍存活且身份匹配的服务进程组', { skip: process.platform === 'win32' }, async t => {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' })
+  await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject) })
+  const item = { terminalId: 'saved-id', taskId: 'a', name: '恢复服务', cwd: '/tmp', command: 'node app.js',
+    service: { type: 'watch', command: 'node app.js', url: '', healthUrl: '', readiness: 'running' },
+    autoStart: true, createdAt: new Date().toISOString(), processPid: child.pid, processIdentity: processGroupIdentity(child.pid) }
+  const repository = {
+    getTask: () => ({ id: 'a', environmentId: 'a', lifecycle: 'active' }),
+    getEnvironment: () => ({ id: 'a', cwd: '/tmp', status: 'ready' }),
+    listManagedServices: () => [item],
+    setManagedServiceAutoStart: (_id, enabled) => { item.autoStart = enabled },
+  }
+  const resumed = new TerminalService(repository, () => assert.fail('恢复时不应再启动一份进程'))
+  t.after(() => { resumed.close(); try { process.kill(-child.pid, 'SIGKILL') } catch {} })
+  await resumed.restoreServices()
+  const recovered = resumed.listServices('a')[0]
+  assert.equal(recovered.id, 'saved-id')
+  assert.equal(recovered.running, true)
+  assert.equal(recovered.service.recoveredManaged, true)
+  const session = resumed.get('a', recovered.id)
+  resumed.stop(session)
+  const deadline = Date.now() + 3000
+  while (session.running && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25))
+  assert.equal(session.running, false)
+})
+
+test('恢复时页面端口已占用则不启动副本并保留可打开地址的状态卡片', async t => {
+  const { service, processes, root } = fixture()
+  const server = net.createServer()
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const url = `http://127.0.0.1:${server.address().port}/`
+  const saved = { terminalId: 'saved-web', taskId: 'a', name: '已有 Web 服务', cwd: root,
+    command: 'node app.mjs', service: { type: 'web', command: 'node app.mjs', url, healthUrl: '', readiness: 'ready' },
+    autoStart: true, createdAt: new Date().toISOString(), processPid: null, processIdentity: '' }
+  service.repository.listManagedServices = () => [saved]
+  service.repository.saveManagedService = () => {}
+  service.repository.deleteManagedService = () => {}
+  service.spawn = () => { throw new Error('不应重复启动服务') }
+  await service.restoreServices()
+  const [card] = service.listServices('a')
+  assert.equal(processes.length, 0)
+  assert.equal(card.running, false)
+  assert.equal(card.service.recovered, true)
+  assert.match(card.service.error, /未重复启动/)
 })

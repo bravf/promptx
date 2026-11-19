@@ -81,12 +81,13 @@ async function action(item, type) {
         <p class="theme-muted-text mt-1 flex items-center gap-1.5 text-[10px]"><span class="service-status-dot h-1.5 w-1.5 shrink-0 rounded-full" :class="statusTone(item)" aria-hidden="true" />{{ typeLabel(item) }} · {{ status(item) }}</p>
         <div v-if="taskType(item) === 'web' && item.service.url" class="service-address mt-2 rounded px-2 py-1.5 font-mono text-[11px] leading-relaxed">{{ item.service.url }}</div>
         <p v-if="taskType(item) === 'web' && isRemoteTransport() && item.service.url" class="theme-muted-text mt-1.5 text-[10px] leading-relaxed">这是电脑上的本地地址，手机需使用可访问的局域网地址或部署地址。</p>
-        <p v-if="!item.running && item.service.error" class="theme-status-danger mt-2 whitespace-pre-wrap break-words text-[11px]" role="alert">{{ errorSummary(item) }}</p>
+        <p v-if="item.service.recovered" class="theme-muted-text mt-2 whitespace-pre-wrap break-words text-[10px]">{{ item.service.error }}</p>
+        <p v-else-if="!item.running && item.service.error" class="theme-status-danger mt-2 whitespace-pre-wrap break-words text-[11px]" role="alert">{{ errorSummary(item) }}</p>
         <p v-if="taskType(item) === 'remote'" class="theme-muted-text mt-1.5 text-[10px] leading-relaxed">这里只跟踪本机连接进程，不代表远程服务健康；停止连接不保证远程程序停止。</p>
         <div class="mt-2.5 flex flex-wrap gap-1">
-          <PxButton class="service-action" variant="ghost" size="sm" @click="showTerminal(item.id)"><PhTerminalWindow class="h-3 w-3 shrink-0" aria-hidden="true" />查看日志</PxButton>
-          <a v-if="taskType(item) === 'web' && item.running && item.service.url && item.service.readiness === 'ready' && !isRemoteTransport()" :href="item.service.url" target="_blank" rel="noopener noreferrer" class="service-action inline-flex items-center justify-center"><PhArrowSquareOut class="h-3 w-3 shrink-0" aria-hidden="true" />打开页面</a>
-          <PxButton v-if="item.running" class="service-action service-stop" variant="ghost" size="sm" :disabled="Boolean(busy) || item.stopping" @click="action(item, 'stop')"><PhSquare class="h-2.5 w-2.5 shrink-0" aria-hidden="true" />停止</PxButton>
+          <PxButton v-if="!item.service.recovered" class="service-action" variant="ghost" size="sm" @click="showTerminal(item.id)"><PhTerminalWindow class="h-3 w-3 shrink-0" aria-hidden="true" />查看日志</PxButton>
+          <a v-if="taskType(item) === 'web' && item.service.url && !isRemoteTransport()" :href="item.service.url" target="_blank" rel="noopener noreferrer" class="service-action inline-flex items-center justify-center"><PhArrowSquareOut class="h-3 w-3 shrink-0" aria-hidden="true" />打开页面</a>
+          <PxButton v-if="item.running && (!item.service.recovered || item.service.recoveredManaged)" class="service-action service-stop" variant="ghost" size="sm" :disabled="Boolean(busy) || item.stopping" @click="action(item, 'stop')"><PhSquare class="h-2.5 w-2.5 shrink-0" aria-hidden="true" />停止</PxButton>
           <PxButton v-else class="service-action" variant="ghost" size="sm" :disabled="Boolean(busy)" :loading="busy === item.id" @click="action(item, 'restart')"><PhArrowsClockwise v-if="busy !== item.id" class="h-3 w-3 shrink-0" aria-hidden="true" />重新启动</PxButton>
           <PxButton v-if="failed(item)" class="service-action" variant="ghost" size="sm" :disabled="Boolean(busy)" @click="action(item, 'dismiss')">忽略</PxButton>
         </div>

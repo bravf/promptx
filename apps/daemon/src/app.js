@@ -106,6 +106,7 @@ export async function createApp(options = {}) {
   registerRelayRoutes(app, relay)
   app.addHook('onListen', async () => {
     repository.failActiveTurnsOnStartup()
+    await terminalService.restoreServices()
     relay.localBaseUrl = `http://127.0.0.1:${app.server.address().port}`
     if (options.relay !== false) relay.start()
   })

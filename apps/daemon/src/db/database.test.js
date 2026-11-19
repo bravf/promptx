@@ -70,3 +70,37 @@ test('V8 增量升级增加用量存储并保留业务表', () => {
     } finally { upgraded.close() }
   } finally { fs.rmSync(root, { recursive: true, force: true }) }
 })
+
+test('V9 增量升级增加可恢复的托管服务表', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v9-upgrade-'))
+  const file = path.join(root, 'data.sqlite')
+  const db = openDatabase(file)
+  db.pragma('user_version = 9')
+  db.close()
+  try {
+    const upgraded = openDatabase(file)
+    try {
+      assert.equal(upgraded.pragma('user_version', { simple: true }), DATABASE_VERSION)
+      assert.ok(upgraded.pragma('table_info(managed_services)').some(column => column.name === 'auto_start'))
+      assert.ok(upgraded.pragma('table_info(managed_services)').some(column => column.name === 'process_pid'))
+    } finally { upgraded.close() }
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
+
+test('V10 增量升级增加托管服务进程身份字段', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-v10-upgrade-'))
+  const file = path.join(root, 'data.sqlite')
+  const db = openDatabase(file)
+  db.exec('ALTER TABLE managed_services DROP COLUMN process_pid; ALTER TABLE managed_services DROP COLUMN process_identity')
+  db.pragma('user_version = 10')
+  db.close()
+  try {
+    const upgraded = openDatabase(file)
+    try {
+      assert.equal(upgraded.pragma('user_version', { simple: true }), DATABASE_VERSION)
+      const columns = upgraded.pragma('table_info(managed_services)').map(column => column.name)
+      assert.ok(columns.includes('process_pid'))
+      assert.ok(columns.includes('process_identity'))
+    } finally { upgraded.close() }
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})

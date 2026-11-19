@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 
-export const DATABASE_VERSION = 9
+export const DATABASE_VERSION = 11
 
 export function resolveDaemonPaths() {
   const homeDir = path.resolve(process.env.PROMPTX_HOME || path.join(os.homedir(), '.promptx'))
@@ -36,6 +36,22 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
       db.exec("ALTER TABLE agent_sessions ADD COLUMN context_usage_json TEXT NOT NULL DEFAULT 'null'")
       db.pragma('user_version = 9')
       version = 9
+    })()
+    if (hasTables && version === 9 && db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'agent_sessions'").get()) db.transaction(() => {
+      db.exec(`CREATE TABLE IF NOT EXISTS managed_services (
+        terminal_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        name TEXT NOT NULL, cwd TEXT NOT NULL, command TEXT NOT NULL, service_json TEXT NOT NULL,
+        auto_start INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
+      ); CREATE INDEX IF NOT EXISTS idx_managed_services_task ON managed_services(task_id)`)
+      db.pragma('user_version = 10')
+      version = 10
+    })()
+    if (hasTables && version === 10 && db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'agent_sessions'").get()) db.transaction(() => {
+      const columns = new Set(db.pragma('table_info(managed_services)').map(column => column.name))
+      if (!columns.has('process_pid')) db.exec('ALTER TABLE managed_services ADD COLUMN process_pid INTEGER')
+      if (!columns.has('process_identity')) db.exec("ALTER TABLE managed_services ADD COLUMN process_identity TEXT NOT NULL DEFAULT ''")
+      db.pragma('user_version = 11')
+      version = 11
     })()
     if (hasTables && version !== DATABASE_VERSION) {
       const error = new Error('数据库模型已更新，不支持旧数据。请停止服务后运行 pnpm data:reset，再重新启动。')
@@ -95,6 +111,13 @@ export function openDatabase(databasePath = resolveDaemonPaths().databasePath) {
           file_name TEXT NOT NULL, mime_type TEXT NOT NULL, byte_size INTEGER NOT NULL,
           sha256 TEXT NOT NULL, storage_path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
         );
+        CREATE TABLE managed_services (
+          terminal_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          name TEXT NOT NULL, cwd TEXT NOT NULL, command TEXT NOT NULL, service_json TEXT NOT NULL,
+          auto_start INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
+          process_pid INTEGER, process_identity TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX idx_managed_services_task ON managed_services(task_id);
         CREATE INDEX idx_task_assets_created ON task_assets(task_id, created_at DESC);
         CREATE TABLE agent_turns (
           id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,

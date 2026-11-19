@@ -471,6 +471,28 @@ export function createRepository(db) {
       return this.getTask(id)
     },
     deleteTask(id) { return db.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0 },
+    saveManagedService(input) {
+      db.prepare(`INSERT INTO managed_services (terminal_id, task_id, name, cwd, command, service_json, auto_start, created_at, process_pid, process_identity)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(terminal_id) DO UPDATE SET
+        task_id = excluded.task_id, name = excluded.name, cwd = excluded.cwd, command = excluded.command,
+        service_json = excluded.service_json, auto_start = excluded.auto_start,
+        process_pid = excluded.process_pid, process_identity = excluded.process_identity`)
+        .run(input.terminalId, input.taskId, input.name, input.cwd, input.command, JSON.stringify(input.service), input.autoStart === false ? 0 : 1,
+          input.createdAt || nowIso(), input.processPid || null, input.processIdentity || '')
+    },
+    setManagedServiceAutoStart(terminalId, autoStart) {
+      db.prepare('UPDATE managed_services SET auto_start = ? WHERE terminal_id = ?').run(autoStart ? 1 : 0, terminalId)
+    },
+    renameManagedService(terminalId, name) {
+      db.prepare('UPDATE managed_services SET name = ? WHERE terminal_id = ?').run(name, terminalId)
+    },
+    deleteManagedService(terminalId) { db.prepare('DELETE FROM managed_services WHERE terminal_id = ?').run(terminalId) },
+    listManagedServices(autoStartOnly = false) {
+      return db.prepare(`SELECT * FROM managed_services ${autoStartOnly ? 'WHERE auto_start = 1' : ''} ORDER BY created_at`)
+        .all().map(row => ({ terminalId: row.terminal_id, taskId: row.task_id, name: row.name, cwd: row.cwd,
+          command: row.command, service: parseJson(row.service_json), autoStart: Boolean(row.auto_start), createdAt: row.created_at,
+          processPid: row.process_pid, processIdentity: row.process_identity || '' }))
+    },
     createAsset(taskId, input) {
       const id = input.id || randomUUID()
       db.prepare(`INSERT INTO task_assets (id, task_id, file_name, mime_type, byte_size, sha256, storage_path, created_at)
