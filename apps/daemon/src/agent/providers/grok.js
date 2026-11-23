@@ -4,9 +4,8 @@ import { createAcpProvider } from './acp.js'
 import { grokWorkflowForPrompt, grokWorkflowTask } from './grokWorkflow.js'
 import { normalizeInteractionQuestions } from '../../../../../packages/protocol/src/interaction.js'
 import { listGrokHistorySessions, readGrokHistorySnapshot } from '../history/providers/grokHistory.js'
-import { IMAGE_DELIVERY_INSTRUCTIONS } from './agentInstructions.js'
 
-export const GROK_ACP_ARGS = Object.freeze(['agent', '--always-approve', '--no-leader', '--rules', IMAGE_DELIVERY_INSTRUCTIONS, 'stdio'])
+export const GROK_ACP_ARGS = Object.freeze(['agent', '--always-approve', '--no-leader', 'stdio'])
 
 // Grok 的问答通过独立 ACP 扩展回调，普通权限自动批准不会回答此请求。
 export function grokExtensionRequest(runtime, method, params) {
